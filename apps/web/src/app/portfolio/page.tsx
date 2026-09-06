@@ -138,6 +138,12 @@ export default function PortfolioPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [showAdd, setShowAdd] = useState(false)
 
+  const [authMode, setAuthMode] = useState<'loading' | 'user' | 'guest'>('loading')
+  const [claimOpen, setClaimOpen] = useState(false)
+  const [claimResult, setClaimResult] = useState<string | null>(null)
+  const [claimRedeem, setClaimRedeem] = useState('')
+  const [claimError, setClaimError] = useState<string | null>(null)
+
   const abortRef = useRef<AbortController | null>(null)
   const retryTimerRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -203,8 +209,8 @@ export default function PortfolioPage() {
   }
 
   useEffect(() => {
-    fetchRecognitionQuota()
-  }, [])
+    if (authMode === 'user') fetchRecognitionQuota()
+  }, [authMode])
 
   const resizeImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -239,6 +245,10 @@ export default function PortfolioPage() {
   }
 
   const handleRecognize = async (file: File) => {
+    if (authMode !== 'user') {
+      setError(ui.guestAiLoginRequired)
+      return
+    }
     if (!file.type.startsWith('image/')) {
       setError(ui.errUploadImage)
       return
@@ -403,14 +413,59 @@ export default function PortfolioPage() {
       try {
         const res = await fetch('/api/auth/me')
         const data = await res.json()
-        if (!data?.success) {
-          router.replace('/login?redirect=/portfolio')
-          return
-        }
-        await fetchHistory()
-      } catch {}
+        setAuthMode(data?.success ? 'user' : 'guest')
+      } catch {
+        setAuthMode('guest')
+      }
+      await fetchHistory()
     })()
   }, [router])
+
+  const handleCreateClaim = async () => {
+    setClaimError(null)
+    setClaimResult(null)
+    try {
+      const res = await fetch('/api/portfolio/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create' }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setClaimError(data.error || '產生認領碼失敗')
+        return
+      }
+      setClaimResult(data.code)
+    } catch (e: any) {
+      setClaimError(e.message || '產生認領碼失敗')
+    }
+  }
+
+  const handleRedeemClaim = async () => {
+    setClaimError(null)
+    setClaimResult(null)
+    if (!claimRedeem.trim()) {
+      setClaimError(ui.guestErrCodeRequired)
+      return
+    }
+    try {
+      const res = await fetch('/api/portfolio/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'redeem', code: claimRedeem }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setClaimError(data.error || '兌換認領碼失敗')
+        return
+      }
+      setClaimRedeem('')
+      setClaimResult(ui.guestRedeemed)
+      await fetchHistory()
+    } catch (e: any) {
+      setClaimError(e.message || '兌換認領碼失敗')
+    }
+  }
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
@@ -480,6 +535,10 @@ export default function PortfolioPage() {
   }
 
   const handleAnalyze = async () => {
+    if (authMode !== 'user') {
+      setError(ui.guestAiLoginRequired)
+      return
+    }
     const payload = buildPayload()
     if (!payload) return
     setAnalyzing(true)
@@ -612,6 +671,78 @@ export default function PortfolioPage() {
       {error && <p className="text-xs text-red-400 mb-4">{error}</p>}
       {notice && <p className="text-xs text-[var(--accent)] mb-4">{notice}</p>}
 
+      {authMode === 'guest' && (
+        <div className="bg-[var(--bg-card)] border border-white/10 rounded-xl p-4 mb-6">
+          <div className="flex flex-col md:flex-row md:items-center gap-3">
+            <div className="flex-1 text-sm">
+              <p className="font-medium text-[var(--text-primary)]">{ui.guestBannerTitle}</p>
+              <p className="text-xs text-[var(--text-secondary)] mt-0.5">{ui.guestBannerDesc}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href="/login?redirect=/portfolio"
+                className="px-4 py-2 rounded-lg bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition"
+              >
+                {ui.guestLogin}
+              </a>
+              <button
+                type="button"
+                onClick={() => setClaimOpen(v => !v)}
+                className="px-4 py-2 rounded-lg bg-white/10 text-sm hover:bg-white/15 transition"
+              >
+                {ui.guestClaimBtn}
+              </button>
+            </div>
+          </div>
+
+          {claimOpen && (
+            <div className="mt-4 border-t border-white/10 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-medium text-[var(--text-primary)] mb-1">{ui.guestCreateTitle}</p>
+                <p className="text-xs text-[var(--text-secondary)] mb-2">{ui.guestCreateHint}</p>
+                <button
+                  type="button"
+                  onClick={handleCreateClaim}
+                  className="px-4 py-2 rounded-lg bg-white/10 text-sm hover:bg-white/15 transition"
+                >
+                  {ui.guestCreate}
+                </button>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-[var(--text-primary)] mb-1">{ui.guestRedeemTitle}</p>
+                <div className="flex gap-2">
+                  <input
+                    value={claimRedeem}
+                    onChange={e => setClaimRedeem(e.target.value)}
+                    placeholder={ui.guestRedeemPlaceholder}
+                    className={inputCls}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRedeemClaim}
+                    className="shrink-0 px-4 py-2 rounded-lg bg-[var(--accent-green)] text-white text-sm font-medium hover:opacity-90 transition"
+                  >
+                    {ui.guestRedeem}
+                  </button>
+                </div>
+              </div>
+              {claimResult && (
+                <div className="md:col-span-2 rounded-lg bg-[var(--bg-secondary)] border border-white/10 p-3">
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    {ui.guestCreateTitle}：
+                  </p>
+                  <p className="font-mono text-lg tracking-wider text-[var(--accent-green)] break-all select-all mt-1">{claimResult}</p>
+                  {claimResult !== ui.guestRedeemed && (
+                    <p className="text-[10px] text-amber-400 mt-1">{ui.guestCreateHint}</p>
+                  )}
+                </div>
+              )}
+              {claimError && <p className="md:col-span-2 text-xs text-red-400">{claimError}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
       {showAdd && (
         <>
         <div className="flex items-center justify-between gap-3 mb-4">
@@ -632,6 +763,7 @@ export default function PortfolioPage() {
           </button>
         </div>
 
+      {authMode === 'user' && (
       <div className="bg-[var(--bg-card)] rounded-2xl border border-white/5 p-6 mb-6">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-medium flex items-center gap-2">
@@ -916,6 +1048,19 @@ export default function PortfolioPage() {
           </div>
         )}
       </div>
+      )}
+
+      {authMode !== 'user' && (
+        <div className="bg-[var(--bg-card)] rounded-2xl border border-white/5 p-6 mb-6 text-center">
+          <p className="text-sm text-[var(--text-secondary)] mb-3">{ui.guestAiLoginRequired}</p>
+          <a
+            href="/login?redirect=/portfolio"
+            className="inline-flex px-4 py-2 rounded-lg bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition"
+          >
+            {ui.guestLogin}
+          </a>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-[var(--bg-card)] rounded-2xl border border-white/5 p-6 space-y-4">
@@ -993,7 +1138,7 @@ export default function PortfolioPage() {
             <button
               type="button"
               onClick={handleAnalyze}
-              disabled={analyzing || saving}
+              disabled={analyzing || saving || authMode !== 'user'}
               className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
             >
               <Sparkles className="w-4 h-4" />

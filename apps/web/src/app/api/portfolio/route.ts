@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUserFromCookies } from '../../../lib/auth'
+import { applyGuestCookie, getCurrentGuestFromCookies, newGuestUid } from '../../../lib/guest'
 import { computePnL, validatePortfolioInput, type PortfolioInput } from '../../../lib/portfolio'
 import { savePortfolioRecord } from '@stock/database'
 
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUserFromCookies()
-    if (!user) {
-      return NextResponse.json({ error: 'login required' }, { status: 401 })
-    }
-
     const body = await req.json().catch(() => null)
     const parsed = validatePortfolioInput(body)
     if (!parsed.ok) {
@@ -19,8 +15,21 @@ export async function POST(req: Request) {
     const { market, symbol, shares, cost, currentPrice, dividend, symbolName } = parsed.data
     const pnl = computePnL(parsed.data as PortfolioInput)
 
+    // user 有登入 → 存 user_id;否則以訪客 guest_uid 存（用戶資料與訪客資料完全隔離）。
+    const user = await getCurrentUserFromCookies()
+    let guestUid: string | null = null
+    let createdGuest = false
+    if (!user) {
+      guestUid = await getCurrentGuestFromCookies()
+      if (!guestUid) {
+        guestUid = newGuestUid()
+        createdGuest = true
+      }
+    }
+
     const id = await savePortfolioRecord({
-      user_id: user.id,
+      user_id: user?.id ?? 0,
+      guestUid,
       market,
       symbol,
       symbolName,
@@ -37,13 +46,15 @@ export async function POST(req: Request) {
       yieldOnCost: pnl.yieldOnCost,
     })
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       success: true,
       record: {
         id, market, symbol, symbolName, shares, cost, currentPrice, dividend,
         ...pnl,
       },
     })
+    if (createdGuest && guestUid) await applyGuestCookie(res, guestUid)
+    return res
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
   }

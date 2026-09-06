@@ -583,6 +583,19 @@ export interface Dict {
     detailRisks: string
     detailAction: string
     placeholderName: string
+    guestBannerTitle: string
+    guestBannerDesc: string
+    guestLogin: string
+    guestClaimBtn: string
+    guestCreateTitle: string
+    guestCreateHint: string
+    guestCreate: string
+    guestRedeemTitle: string
+    guestRedeemPlaceholder: string
+    guestRedeem: string
+    guestRedeemed: string
+    guestErrCodeRequired: string
+    guestAiLoginRequired: string
   }
 }
 

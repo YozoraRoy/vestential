@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCurrentUserFromCookies } from '../../../../lib/auth'
 import { fetchLiveQuote, type Market } from '../../../../lib/portfolio'
 
 function parseMarket(raw: string | null): Market | null {
@@ -7,11 +6,6 @@ function parseMarket(raw: string | null): Market | null {
 }
 
 export async function GET(req: NextRequest) {
-  const user = await getCurrentUserFromCookies()
-  if (!user) {
-    return NextResponse.json({ error: 'login required' }, { status: 401 })
-  }
-
   const market = parseMarket(req.nextUrl.searchParams.get('market'))
   const symbol = req.nextUrl.searchParams.get('symbol')?.trim()
   if (!market || !symbol) {

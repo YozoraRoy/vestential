@@ -25,7 +25,7 @@ export async function isAdminUser(user: UserRow): Promise<boolean> {
   )
 }
 
-function getSecret(): Uint8Array {
+export function getSecret(): Uint8Array {
   const secret = process.env.AUTH_SECRET || 'dev-only-insecure-secret-change-me'
   return new TextEncoder().encode(secret)
 }

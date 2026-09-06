@@ -178,6 +178,7 @@ function getSqliteDb(): Database.Database | null {
       CREATE TABLE IF NOT EXISTS portfolio_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
+        guest_uid TEXT,
         market TEXT NOT NULL,
         symbol TEXT NOT NULL,
         symbol_name TEXT,
@@ -199,6 +200,12 @@ function getSqliteDb(): Database.Database | null {
         created_at TEXT DEFAULT (datetime('now', 'localtime'))
       );
       CREATE INDEX IF NOT EXISTS idx_portfolio_user ON portfolio_records(user_id, id);
+      CREATE TABLE IF NOT EXISTS claim_codes (
+        code_hash TEXT PRIMARY KEY,
+        guest_uid TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now', 'localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_claim_guest ON claim_codes(guest_uid);
       CREATE TABLE IF NOT EXISTS market_focus (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
@@ -223,6 +230,14 @@ function getSqliteDb(): Database.Database | null {
       UPDATE odd_lot_trades SET price = COALESCE(NULLIF(price, 0), bid_price, ask_price, 50.0) WHERE price IS NULL OR price <= 0;
       UPDATE odd_lot_trades SET price = bid_price WHERE price > 4000 AND stock_id NOT IN ('3008', '5274', '6669', '3661') AND bid_price > 0 AND bid_price < 2000;
     `)
+
+    // 既有 portfolio_records 表補上 guest_uid（冪等；全新 DB 的 column 已存在時 ALTER 會拋錯，故獨立 try/catch）。
+    try {
+      _db.exec('ALTER TABLE portfolio_records ADD COLUMN guest_uid TEXT;')
+    } catch {}
+    try {
+      _db.exec('CREATE INDEX IF NOT EXISTS idx_portfolio_guest ON portfolio_records(guest_uid, id)')
+    } catch {}
 
     return _db
   } catch (err) {
@@ -395,6 +410,7 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
         CREATE TABLE portfolio_records (
           id                   INT IDENTITY(1,1) PRIMARY KEY,
           user_id              INT NOT NULL,
+          guest_uid            NVARCHAR(64),
           market               NVARCHAR(10) NOT NULL,
           symbol               NVARCHAR(30) NOT NULL,
           symbol_name          NVARCHAR(255),
@@ -416,6 +432,23 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           created_at           DATETIME DEFAULT GETDATE()
         );
         CREATE INDEX idx_portfolio_user ON portfolio_records(user_id, id);
+      END
+    `)
+
+    // 既有表補 guest_uid（冪等）+ guest 索引 + 認領碼表
+    await _pool.request().query(`
+      IF COL_LENGTH('portfolio_records', 'guest_uid') IS NULL
+        ALTER TABLE portfolio_records ADD guest_uid NVARCHAR(64);
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_portfolio_guest')
+        CREATE INDEX idx_portfolio_guest ON portfolio_records(guest_uid, id);
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'claim_codes')
+      BEGIN
+        CREATE TABLE claim_codes (
+          code_hash  NVARCHAR(64) PRIMARY KEY,
+          guest_uid  NVARCHAR(64) NOT NULL,
+          created_at DATETIME DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_claim_guest ON claim_codes(guest_uid);
       END
     `)
 
@@ -1089,6 +1122,7 @@ export async function getAnalysisRecords(limit: number = 20, symbol?: string): P
 export interface PortfolioRecord {
   id?: number
   user_id: number
+  guest_uid?: string | null
   market: 'tw' | 'us'
   symbol: string
   symbol_name?: string | null
@@ -1112,6 +1146,7 @@ export interface PortfolioRecord {
 
 export interface PortfolioRecordInput {
   user_id: number
+  guestUid?: string | null
   market: 'tw' | 'us'
   symbol: string
   symbolName?: string | null
@@ -1133,7 +1168,7 @@ export interface PortfolioRecordInput {
 }
 
 const PORTFOLIO_COLUMNS =
-  'id, user_id, market, symbol, symbol_name, shares, cost, current_price, dividend, cost_basis, market_value, ' +
+  'id, user_id, guest_uid, market, symbol, symbol_name, shares, cost, current_price, dividend, cost_basis, market_value, ' +
   'unrealized_pnl, unrealized_pnl_pct, total_return, total_return_pct, yield_on_cost, strategy, recommendation, summary, report_json, created_at'
 
 export async function savePortfolioRecord(record: PortfolioRecordInput): Promise<number> {
@@ -1151,6 +1186,7 @@ export async function savePortfolioRecord(record: PortfolioRecordInput): Promise
       try {
         const result = await pool.request()
           .input('userId', sql.Int, record.user_id)
+          .input('guestUid', sql.NVarChar(64), record.guestUid ?? null)
           .input('market', sql.NVarChar(10), record.market)
           .input('symbol', sql.NVarChar(30), record.symbol)
           .input('symbolName', sql.NVarChar(255), symbolName)
@@ -1171,10 +1207,10 @@ export async function savePortfolioRecord(record: PortfolioRecordInput): Promise
           .input('report', sql.NVarChar(sql.MAX), reportStr)
           .query(`
             INSERT INTO portfolio_records (
-              user_id, market, symbol, symbol_name, shares, cost, current_price, dividend, cost_basis, market_value,
+              user_id, guest_uid, market, symbol, symbol_name, shares, cost, current_price, dividend, cost_basis, market_value,
               unrealized_pnl, unrealized_pnl_pct, total_return, total_return_pct, yield_on_cost, strategy, recommendation, summary, report_json
             ) VALUES (
-              @userId, @market, @symbol, @symbolName, @shares, @cost, @currentPrice, @dividend, @costBasis, @marketValue,
+              @userId, @guestUid, @market, @symbol, @symbolName, @shares, @cost, @currentPrice, @dividend, @costBasis, @marketValue,
               @pnl, @pnlPct, @totalReturn, @totalReturnPct, @yieldOnCost, @strategy, @recommendation, @summary, @report
             );
             SELECT SCOPE_IDENTITY() AS id
@@ -1190,13 +1226,14 @@ export async function savePortfolioRecord(record: PortfolioRecordInput): Promise
       try {
         const info = db.prepare(`
           INSERT INTO portfolio_records (
-            user_id, market, symbol, symbol_name, shares, cost, current_price, dividend, cost_basis, market_value,
+            user_id, guest_uid, market, symbol, symbol_name, shares, cost, current_price, dividend, cost_basis, market_value,
             unrealized_pnl, unrealized_pnl_pct, total_return, total_return_pct, yield_on_cost, strategy, recommendation, summary, report_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
-          record.user_id, record.market, record.symbol, symbolName, record.shares, record.cost, record.currentPrice,
-          record.dividend, record.costBasis, record.marketValue, record.unrealizedPnl, record.unrealizedPnlPct,
-          record.totalReturn, record.totalReturnPct, record.yieldOnCost, strategyStr, recommendationStr, summaryStr, reportStr,
+          record.user_id, record.guestUid ?? null, record.market, record.symbol, symbolName, record.shares, record.cost,
+          record.currentPrice, record.dividend, record.costBasis, record.marketValue, record.unrealizedPnl,
+          record.unrealizedPnlPct, record.totalReturn, record.totalReturnPct, record.yieldOnCost, strategyStr,
+          recommendationStr, summaryStr, reportStr,
         )
         insertedId = Number(info.lastInsertRowid)
       } catch (e) {
@@ -1209,6 +1246,7 @@ export async function savePortfolioRecord(record: PortfolioRecordInput): Promise
   const row: PortfolioRecord = {
     id,
     user_id: record.user_id,
+    guest_uid: record.guestUid ?? null,
     market: record.market,
     symbol: record.symbol,
     symbol_name: symbolName,
@@ -1231,6 +1269,133 @@ export async function savePortfolioRecord(record: PortfolioRecordInput): Promise
   }
   portfolioMemoryStore.unshift(row)
   return id
+}
+
+/** 查訪客（匿名）損益紀錄：依 guest_uid 過濾，與登入使用者資料完全隔離。 */
+export async function getPortfolioRecordsByGuest(guestUid: string, limit: number = 20): Promise<PortfolioRecord[]> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('guestUid', sql.NVarChar(64), guestUid)
+          .input('limit', sql.Int, limit)
+          .query(`
+            SELECT TOP (@limit) ${PORTFOLIO_COLUMNS}
+            FROM portfolio_records WHERE guest_uid = @guestUid ORDER BY id DESC
+          `)
+        return result.recordset as PortfolioRecord[]
+      } catch (e) {
+        console.error('[AzureSQL] getPortfolioRecordsByGuest error:', e)
+      }
+    }
+  } else {
+    const db = getSqliteDb()
+    if (db) {
+      try {
+        return db.prepare(`
+          SELECT ${PORTFOLIO_COLUMNS}
+          FROM portfolio_records WHERE guest_uid = ? ORDER BY id DESC LIMIT ?
+        `).all(guestUid, limit) as PortfolioRecord[]
+      } catch (e) {
+        console.error('[SQLite] getPortfolioRecordsByGuest error:', e)
+      }
+    }
+  }
+
+  return portfolioMemoryStore.filter(r => r.guest_uid === guestUid).slice(0, limit)
+}
+
+// ─── Claim Codes（訪客認領碼）────────────────────────────────────
+const claimMemoryStore = new Map<string, string>()
+
+/** 存入認領碼（只存 hash，不存明文）。 */
+export async function saveClaimCode(guestUid: string, codeHash: string): Promise<void> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        await pool.request()
+          .input('codeHash', sql.NVarChar(64), codeHash)
+          .input('guestUid', sql.NVarChar(64), guestUid)
+          .query('INSERT INTO claim_codes (code_hash, guest_uid) VALUES (@codeHash, @guestUid)')
+        return
+      } catch (e) {
+        console.error('[AzureSQL] saveClaimCode error:', e)
+      }
+    }
+  } else {
+    const db = getSqliteDb()
+    if (db) {
+      try {
+        db.prepare('INSERT INTO claim_codes (code_hash, guest_uid) VALUES (?, ?)').run(codeHash, guestUid)
+        return
+      } catch (e) {
+        console.error('[SQLite] saveClaimCode error:', e)
+      }
+    }
+  }
+  claimMemoryStore.set(codeHash, guestUid)
+}
+
+/** 依認領碼 hash 找回對應的 guest_uid（無則 null）。 */
+export async function findGuestByClaimCode(codeHash: string): Promise<string | null> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('codeHash', sql.NVarChar(64), codeHash)
+          .query('SELECT TOP (1) guest_uid FROM claim_codes WHERE code_hash = @codeHash')
+        return result.recordset?.[0]?.guest_uid ?? null
+      } catch (e) {
+        console.error('[AzureSQL] findGuestByClaimCode error:', e)
+      }
+    }
+  } else {
+    const db = getSqliteDb()
+    if (db) {
+      try {
+        const row = db.prepare('SELECT guest_uid FROM claim_codes WHERE code_hash = ?').get(codeHash)
+        return (row as { guest_uid?: string } | undefined)?.guest_uid ?? null
+      } catch (e) {
+        console.error('[SQLite] findGuestByClaimCode error:', e)
+      }
+    }
+  }
+  return claimMemoryStore.get(codeHash) ?? null
+}
+
+/** 兌換認領碼時，把本機（fromGid）既有的訪客紀錄改掛到認領的 workspace（toGid）。 */
+export async function reassignGuestRecords(fromGid: string, toGid: string): Promise<void> {
+  if (fromGid === toGid) return
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        await pool.request()
+          .input('fromGid', sql.NVarChar(64), fromGid)
+          .input('toGid', sql.NVarChar(64), toGid)
+          .query('UPDATE portfolio_records SET guest_uid = @toGid WHERE guest_uid = @fromGid AND user_id = 0')
+        return
+      } catch (e) {
+        console.error('[AzureSQL] reassignGuestRecords error:', e)
+      }
+    }
+  } else {
+    const db = getSqliteDb()
+    if (db) {
+      try {
+        db.prepare('UPDATE portfolio_records SET guest_uid = ? WHERE guest_uid = ? AND user_id = 0').run(toGid, fromGid)
+        return
+      } catch (e) {
+        console.error('[SQLite] reassignGuestRecords error:', e)
+      }
+    }
+  }
+  for (const row of portfolioMemoryStore) {
+    if (row.guest_uid === fromGid && row.user_id === 0) row.guest_uid = toGid
+  }
 }
 
 export async function getPortfolioRecords(userId: number, limit: number = 20): Promise<PortfolioRecord[]> {

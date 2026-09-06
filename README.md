@@ -31,6 +31,7 @@
 * **辨識缺漏即時同步**：若圖片辨識不出股票代號或股價，該列第一欄 `#` 會出現「同步」按鈕，點擊即開啟共用候選清單（與 `/backtest` 相同邏輯：台股 local DB 中文名＋fuzzy＋Yahoo fallback），選取後自動填入代號/名稱並抓取即時現價。
 * **個人歷史紀錄**：每次分析自動存入 `portfolio_records` 資料表，可在頁面展開歷史明細（含當時價格與 AI 建議）。
 * **共用每日額度**：AI 損益分析與 `/analyze` 共用每日 3 次額度（`consumeAnalysisQuota`）；圖片辨識另有獨立 **每日 10 次** 額度（`consumeRecognitionQuota`，存於 `recognition_usage` 資料表），避免資源被濫用。
+* **🔓 免登入訪客模式（Guest Mode + 認領碼）**：`/portfolio` 不需要登入即可使用——未登入時以簽名 cookie（HttpOnly `vest_guest`）作為「訪客 workspace」，新增／存檔／抓即時報價照常運作，資料以 `portfolio_records.guest_uid` 與登入使用者**完全隔離**（登入後看不到訪客資料、反之亦然）。訪客可點「認領碼」產生一組 **120-bit 隨機碼**（DB 只存 SHA-256 hash、兌換端有每 IP 速率限制）並在**其他裝置輸入該碼取回同一份資料**（自動把本機既有紀錄併入）；認領碼等同帳密，務必妥善保存。**AI 分析與圖片辨識仍須登入**（LLM 花費），訪客可看到登入導向而非功能區塊。
 
 ### 2. 🎁 零股行情與股東會紀念品情報 (`/odd-lot`)
 * **TWSE 盤後零股官方 OpenAPI 直連**：介接證交所官方 OpenAPI (`TWT53U`)，載入全台灣上千檔零股成交價格與成交股數。
