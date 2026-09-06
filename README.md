@@ -138,6 +138,10 @@
 
 ### 🩺 13. 每日健康覆盤與自動修復 (Health Check & Auto-repair)
 * **核心思路**：既然有人在家裡觸發的排程與爬蟲會失敗，那就每天自己覆盤一遍——**只有異常才發信、只修復 refresh 層**，不重啟 App、不動任何資料。
+* **分工（誰複盤、誰修復、人在哪）**：
+  * **復盤者** = `health-report.yml`（GitHub Actions）：按排程自動對 `GET /api/health` 下診斷，**完全無需人工**。
+  * **修復者** = Azure 上的應用程式：診斷出異常時，workflow 自動呼叫 `POST /api/health/repair`，由程式重跑 `refreshMarketFocus()`（市場焦點）／零股 refresh 完成自我修復，**同樣無需人工**。
+  * **人工介入時機** = 只有修復後仍有未解的 `error` 異常時，系統才寄「健康覆盤異常」告警信給 `NOTIFY_TO`（管理者），請管理者查 GitHub Actions run 或 Azure 容器 log 進一步處理。此信 6 小時內不重複寄。
 * **`GET /api/health`（唯讀檢查）**：回 `{ ok, issues[], checks{} }`，檢查項目包含：
   * market_focus：資料筆數、最新 `published_at`、`content` 空值比例（寫死「絕不寫入 NULL」為抓取失敗的其一日志）。
   * market_focus_meta：總覽是否存在、`generated_at` 是否超過 5 小時、summary 是否為「當日市場焦點：」開頭的 fallback。
