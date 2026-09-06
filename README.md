@@ -136,6 +136,25 @@
 * **取得 Gmail 應用程式密碼**：Gmail 帳號先開啟 **兩步驟驗證** → 到 [https://myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) 建立「郵件」專用的應用程式密碼（16 字元）。若綁定 passkey 後頁面不顯示該區塊，需先移除 passkey／檢查進階保護。密碼等同信箱權限，**只放`.env.local` 與 Azure App Settings，禁止 commit**。
 * **上線設定**：`.github/workflows/deploy.yml` 將 GitHub Secrets `SMTP_USER`／`SMTP_PASS`／`NOTIFY_TO` 寫入 Azure App Settings（`SMTP_HOST`/`SMTP_PORT`/`NOTIFY_FROM` 為寫死的預設值，不需設 Secret）。
 
+### 🩺 13. 每日健康覆盤與自動修復 (Health Check & Auto-repair)
+* **核心思路**：既然有人在家裡觸發的排程與爬蟲會失敗，那就每天自己覆盤一遍——**只有異常才發信、只修復 refresh 層**，不重啟 App、不動任何資料。
+* **`GET /api/health`（唯讀檢查）**：回 `{ ok, issues[], checks{} }`，檢查項目包含：
+  * market_focus：資料筆數、最新 `published_at`、`content` 空值比例（寫死「絕不寫入 NULL」為抓取失敗的其一日志）。
+  * market_focus_meta：總覽是否存在、`generated_at` 是否超過 5 小時、summary 是否為「當日市場焦點：」開頭的 fallback。
+  * odd_lot：最新交易日（`odd_lot_trades.date`）與台股最近交易日比對——**非交易日跳過**，避免週末誤判。
+  * Azure SQL／SQLite 連線、核心套件 import、關鍵環境變數（`OPENAI_API_KEY`／`FALLBACK_QUICK_LLM_API_KEY`／`AUTH_SECRET`／`SYNC_TOKEN`／DB）。
+  * 只有 `severity: error` 才算健康異常（`warn` 如 fallback 不觸發告警），異常時 HTTP 500。
+* **`POST /api/health/repair`（SYNC_TOKEN 保護、冪等）**：檢測到異常時自動執行：
+  * market-focus 異常 → 以既有流程重跑 `refreshMarketFocus()`（含總覽寄信）。
+  * odd_lot 落後且當日為台股交易日 → 重跑零股 refresh（沿用既有 **10 分鐘節流**，重複觸發自動 `throttled`）。
+  * 修復後重新覆盤，仍有懸而未解問題（`severity: error`）→ 寄 **「健康覆盤異常」告警信**（`sendHealthAlert`，**6 小時內不重複寄**，避免洗版）；修復完成則 `ok: true` HTTP 200、不寄信。
+* **排程**：`.github/workflows/health-report.yml`
+  * 每 **4 小時輕量檢查**（UTC `2 */4`，緊隨 market-focus refresh 之後）。
+  * 每日 **TW 08:00 完整覆盤**（UTC 00:00，含 `/api/diag` 資訊）。
+  * 站台因部署重啟而暫時 502／503 時自動 **3 次退避重試**（每次 30 秒），持續失敗才計入異常。
+  * `concurrency` group 防止健康檢查與部署／其他排程同時重疊。
+  * 修復後仍失敗 → run 以 failure 結束（GitHub 失敗通知 + 異常告警信）。
+
 ### 💻 12. 首頁版面與 SEO (`/`)
 * **功能優先版面**：由上而下為 **① 精簡 Hero**（H1＋副標＋2 顆主 CTA：開始 AI 分析 / 看零股情報）→ **② 核心功能 6 卡**（依 `/about`「如何開始」STEP 1→2→3 順序：零股情報→週期進場→損益試算→AI 分析，再墊開發中卡）→ **③ 市場焦點** → **④ 投資名言收尾帶**（附投資風險免責一行）。
 * **轉換元素**：每張功能卡具「立即使用 →」CTA，附 hover 上移與 accent 光暈回饋；開發中卡以「開發中」徽章標記、不提供死連結。
@@ -155,6 +174,7 @@ flowchart TB
     subgraph Actions["GitHub Actions 排程"]
         MF_Cron["sync-market-focus<br/>每 4 小時"]
         ODD_Cron["sync-oddlot<br/>每工作日 15:10"]
+        HCFix["health-report<br/>4h 輕查 + 每日覆盤/自動修復"]
     end
 
     subgraph Az["Azure App Service (vestential.com)"]
@@ -208,7 +228,7 @@ stock-platform/
 │   └── market-data/         # Yahoo Finance 市場數據 Provider
 ├── App_Data/
 │   └── jobs/triggered/      # Azure WebJobs 自動排程配置 (14:30 每日爬蟲)
-├── .github/workflows/       # GitHub Actions 排程 (sync-oddlot 零股、sync-market-focus 新聞)
+├── .github/workflows/       # GitHub Actions 排程 (sync-oddlot 零股、sync-market-focus 新聞、health-report 健康覆盤)
 ├── .agents/skills/
 │   └── azure-deploy/        # 專屬 Azure 部署與診斷技能 (SKILL.md)
 └── package.json             # npm workspaces 根目錄

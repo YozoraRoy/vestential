@@ -1,0 +1,86 @@
+name: Health check & auto-repair
+
+on:
+  schedule:
+    # 輕量檢查:每 4 小時(UTC 02/06/10/14/18/22,緊隨 market-focus refresh 之後)
+    - cron: '2 */4 * * *'
+    # 每日完整覆盤:TW 08:00 = UTC 00:00
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: health-report
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Detect run kind
+        id: kind
+        run: |
+          HOUR=$(date -u +%H)
+          if [ "$HOUR" = "00" ]; then
+            echo "kind=daily" >> "$GITHUB_OUTPUT"
+          else
+            echo "kind=light" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: GET /api/health (3x backoff against deploy-window 502)
+        id: get
+        env:
+          KIND: ${{ steps.kind.outputs.kind }}
+        run: |
+          export LC_ALL=C.UTF-8
+          FULL=$([ "$KIND" = "daily" ] && echo 1 || echo 0)
+          CODE="000"
+          for i in 1 2 3; do
+            TMP=$(mktemp)
+            CODE=$(curl -s -o "$TMP" -w "%{http_code}" --max-time 60 \
+              "https://vestential.com/api/health?full=$FULL" || echo "000")
+            BODY=$(cat "$TMP")
+            echo "attempt $i -> HTTP $CODE"
+            echo "$BODY" | jq -c '{ok,total}' 2>/dev/null || echo "body: $BODY"
+            [ "$CODE" = "200" ] && break
+            [ "$i" -lt 3 ] && { echo "sleep 30s"; sleep 30; }
+          done
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "body=$BODY" >> "$GITHUB_OUTPUT"
+          echo "::notice::health GET final HTTP $CODE"
+          [ "$CODE" = "200" ] || echo "::error::health GET failed persistently (HTTP $CODE)"
+
+      - name: POST /api/health/repair on anomaly
+        id: repair
+        if: steps.get.outputs.code != '200'
+        env:
+          KIND: ${{ steps.kind.outputs.kind }}
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          export LC_ALL=C.UTF-8
+          CODE="000"
+          for i in 1 2 3; do
+            TMP=$(mktemp)
+            CODE=$(curl -s -o "$TMP" -w "%{http_code}" --max-time 300 \
+              -X POST \
+              -H "Authorization: Bearer $SYNC_TOKEN" \
+              "https://vestential.com/api/health/repair?kind=$KIND" || echo "000")
+            BODY=$(cat "$TMP")
+            echo "attempt $i -> HTTP $CODE"
+            echo "$BODY" | jq -c '{ok,repairs,issuesAfter}' 2>/dev/null || echo "body: $BODY"
+            [ "$CODE" = "200" ] && break
+            [ "$i" -lt 3 ] && { echo "sleep 30s"; sleep 30; }
+          done
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "body=$BODY" >> "$GITHUB_OUTPUT"
+          echo "::notice::health repair final HTTP $CODE"
+          [ "$CODE" = "200" ] || { echo "::error::health repair failed (HTTP $CODE)"; exit 1; }
+
+      - name: Daily full diag (informational)
+        if: steps.kind.outputs.kind == 'daily'
+        run: |
+          for i in 1 2 3; do
+            CODE=$(curl -s --max-time 60 "https://vestential.com/api/diag" || echo "000")
+            [ "$CODE" = "000" ] && sleep 30
+          done
+          echo "diag: $CODE"

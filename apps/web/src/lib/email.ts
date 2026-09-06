@@ -202,3 +202,60 @@ export async function sendMarketFocusAlert(topic: string, message: string): Prom
     </div>`
   return sendMailCore(`⚠️ Vestential 市場焦點異常 — ${topic}`, text, html)
 }
+
+// ─── ③ 健康覆盤告警信 ───────────────────────────────────────────
+const HEALTH_ALERT_THROTTLE_MS = 6 * 60 * 60 * 1000
+let lastHealthAlertAt = 0
+
+/** 健康覆盤發現問題(修復後仍存在)時寄信;6 小時內不重複寄,避免洗版。 */
+export async function sendHealthAlert(report: {
+  issues: { code: string; severity: string; message: string }[]
+  repairs: { action: string; done: boolean }[]
+  kind: string
+}): Promise<boolean> {
+  const now = Date.now()
+  if (now - lastHealthAlertAt < HEALTH_ALERT_THROTTLE_MS) {
+    console.warn('[Notify] health alert throttled (6h window)')
+    return false
+  }
+  lastHealthAlertAt = now
+
+  const ts = formatTwDateTime(new Date().toISOString())
+  const env = process.env.NODE_ENV ?? 'development'
+  const issueLines = report.issues.map((i) => `- [${i.severity}] ${i.code}: ${i.message}`).join('\n')
+  const repairLines = report.repairs.length ? report.repairs.map((r) => `- ${r.action}: ${r.done ? 'done' : 'failed/未執行'}`).join('\n') : '無'
+  const text = `Vestential 健康覆盤異常 (${report.kind})
+
+時間   : ${ts}
+環境   : ${env}
+問題數 : ${report.issues.length}
+
+問題:
+${issueLines}
+
+已執行修復:
+${repairLines}
+
+建議查看 GitHub Actions run「health-report」或 Azure 容器 log:
+${SITE_LINK}`
+  const html = `
+    <div style="background:#fef2f2;padding:24px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;">
+      <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #fecaca;border-radius:12px;overflow:hidden;">
+        <div style="background:#b45309;color:#ffffff;padding:16px 24px;font-weight:800;font-size:16px;">🩺 Vestential 健康覆盤異常 (${escapeHtml(report.kind)})</div>
+        <div style="padding:20px 24px;font-size:14px;color:#374151;line-height:1.9;">
+          <div><b>時間</b>: ${escapeHtml(ts)}</div>
+          <div><b>環境</b>: ${escapeHtml(env)}</div>
+          <div style="margin-top:10px;"><b>問題 (${report.issues.length})</b></div>
+          <ul style="margin-top:4px;padding-left:20px;color:#b91c1c;">
+            ${report.issues.map((i) => `<li>[${escapeHtml(i.severity)}] ${escapeHtml(i.code)} — ${escapeHtml(i.message)}</li>`).join('\n')}
+          </ul>
+          <div style="margin-top:10px;"><b>已執行修復</b></div>
+          <ul style="margin-top:4px;padding-left:20px;color:#374151;">
+            ${report.repairs.length ? report.repairs.map((r) => `<li>${escapeHtml(r.action)}: ${r.done ? 'done' : 'failed / 未執行'}</li>`).join('\n') : '<li>無</li>'}
+          </ul>
+          <div style="margin-top:14px;font-size:13px;color:#6b7280;">建議查看 GitHub Actions「health-report」或 Azure 容器 log:<br/>${escapeHtml(SITE_LINK)}</div>
+        </div>
+      </div>
+    </div>`
+  return sendMailCore(`🩺 Vestential 健康覆盤異常 — ${report.issues.length} 項`, text, html)
+}
