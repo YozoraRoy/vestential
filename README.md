@@ -473,6 +473,7 @@ openssl rand -base64 32
 LINE 不允許 localhost callback，請用 `/api/auth/dev-login` 或先在線上驗證 LINE。
 
 * **線上體驗網站**：[https://vestential.com](https://vestential.com)
+* **官方客服信箱**：`service@vestential.com`（[自訂網域免費客服信箱建置手冊](./docs/custom-domain-email-setup.md)）
 * **GitHub 倉庫**：[https://github.com/YozoraRoy/vestential](https://github.com/YozoraRoy/vestential)
 
 ---
@@ -484,6 +485,6 @@ LINE 不允許 localhost callback，請用 `/api/auth/dev-login` 或先在線上
 - ✅ **閱讀、學習、個人與非商業用途**免費。
 - ✅ 原始碼公開於 GitHub,可複製、研究、自用。
 - ❌ **禁止商業再分發或提供給他人營利收取費用**:把本專案(或衍生版本)架成商用服務／賣給第三方,需另外取得授權。
-- 🔒 商業授權請聯繫:GitHub [YozoraRoy/vestential](https://github.com/YozoraRoy/vestential) issues,或寄信 `yuzora_roy@hotmail.com`。
+- 🔒 商業授權請聯繫:GitHub [YozoraRoy/vestential](https://github.com/YozoraRoy/vestential) issues,或寄信 `service@vestential.com`。
 
 完整條文見 [`LICENSE`](./LICENSE)。第三方元件維持其原始授權(如 MIT 的開源套件不受影響)。
