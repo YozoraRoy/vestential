@@ -443,6 +443,8 @@ export const zhTW: Dict = {
     biasSourceClose: '前一期收盤',
     biasSourceLive: '即時盤中',
     biasSourceLiveBiasLabel: '（即時盤中 {bias}）',
+    liveBiasNoLiveData: '目前非交易時段或暫無即時報價，顯示的是上一期收盤基準，故切換後數值不變',
+    liveBiasSameAsClose: '目前非交易時段，即時價與上一期收盤相同（{price}），故切換後數值不變',
     chartTitle: '股價 vs 60 日均線（近 {years} 年）',
     chartBadgeCurrentBias: '目前乖離 {bias}',
     chartTooltipClose: '收盤價',

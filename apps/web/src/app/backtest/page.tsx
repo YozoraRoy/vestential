@@ -11,7 +11,7 @@ import {
   ReferenceDot,
   ResponsiveContainer,
 } from 'recharts'
-import { Search as SearchIcon, TrendingDown, Target, Repeat, Clock, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, HelpCircle, Activity, ListOrdered, X, Zap, SlidersHorizontal, CheckCircle2 } from 'lucide-react'
+import { Search as SearchIcon, TrendingDown, Target, Repeat, Clock, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, HelpCircle, Activity, ListOrdered, X, Zap, SlidersHorizontal, CheckCircle2, Info } from 'lucide-react'
 import { searchStocks, StockCandidateList, type StockCandidate } from '@/components/stock-search'
 import { useI18n } from '@/i18n/LanguageProvider'
 import type { Dict } from '@/i18n/dictionaries'
@@ -473,6 +473,14 @@ export default function BacktestPage() {
     return null
   })()
 
+  // 切換「即時盤中」後若數值不會變（無即時報價 或 即時價=上一期收盤），提醒使用者原因。
+  const liveUnchanged: 'nolive' | 'same' | null = (() => {
+    if (biasSource !== 'live' || !liveBias) return null
+    if (liveBias.livePrice == null || liveBias.livePriceBias == null) return 'nolive'
+    if (liveBias.latestClose != null && Math.abs(liveBias.livePrice - liveBias.latestClose) < 0.01) return 'same'
+    return null
+  })()
+
   const sortedRows = (result?.allThresholds ? [...result.allThresholds] : [])
     .sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1
@@ -918,6 +926,17 @@ export default function BacktestPage() {
                   </div>
                 )}
               </div>
+
+              {liveUnchanged && (
+                <div className="mt-3 flex items-start gap-2 rounded-lg bg-[var(--bg-secondary)] border border-white/10 px-3 py-2 text-xs text-[var(--text-secondary)] animate-in fade-in duration-150">
+                  <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[var(--accent)]" />
+                  <span>
+                    {liveUnchanged === 'nolive'
+                      ? ui.liveBiasNoLiveData
+                      : ui.liveBiasSameAsClose.replace('{price}', liveBias.livePrice != null ? liveBias.livePrice.toFixed(2) : liveBias.latestClose.toFixed(2))}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

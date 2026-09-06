@@ -398,6 +398,8 @@ export interface Dict {
     biasSourceClose: string
     biasSourceLive: string
     biasSourceLiveBiasLabel: string
+    liveBiasNoLiveData: string
+    liveBiasSameAsClose: string
     chartTitle: string
     chartBadgeCurrentBias: string
     chartTooltipClose: string

@@ -443,6 +443,8 @@ export const ja: Dict = {
     biasSourceClose: '前回終値',
     biasSourceLive: 'リアルタイム',
     biasSourceLiveBiasLabel: '（リアルタイム {bias}）',
+    liveBiasNoLiveData: '取引時間外またはリアルタイム相場なし — 前回終値基準を表示中のため、値は変わりません',
+    liveBiasSameAsClose: '取引時間外 — リアルタイム価格が前回終値（{price}）と同一のため、値は変わりません',
     chartTitle: '株価 vs 60 日均線（直近 {years} 年）',
     chartBadgeCurrentBias: '現在乖離 {bias}',
     chartTooltipClose: '終値',

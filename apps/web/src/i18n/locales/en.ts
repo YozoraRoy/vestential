@@ -443,6 +443,8 @@ export const en: Dict = {
     biasSourceClose: 'Prev close',
     biasSourceLive: 'Live intraday',
     biasSourceLiveBiasLabel: ' (live intraday {bias})',
+    liveBiasNoLiveData: 'Outside trading hours or no live quote available — showing the last close baseline, so the value does not change',
+    liveBiasSameAsClose: 'Outside trading hours — live price equals the last close ({price}), so the value does not change',
     chartTitle: 'Price vs 60-Day MA (Last {years} Years)',
     chartBadgeCurrentBias: 'Current Deviation {bias}',
     chartTooltipClose: 'Close',
