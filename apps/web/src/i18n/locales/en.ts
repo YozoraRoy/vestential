@@ -163,7 +163,7 @@ export const en: Dict = {
     s5Title: '5. Cookies',
     s5p1: 'The Platform uses HTTP-only cookies for sign-in state management and preference cookies to remember your language selection (Traditional Chinese, English, Japanese). We do not use third-party advertising or commercial tracking cookies.',
     s6Title: '6. Your Rights',
-    s6p1: 'You may request to view, correct, or delete your account data at any time. To exercise these rights, please contact us via GitHub Issues.',
+    s6p1: 'You may request to view, correct, or delete your account data at any time. To exercise these rights, please email service@vestential.com or contact us via GitHub Issues.',
     s7Title: '7. Policy Updates',
     s7p1: 'This Privacy Policy may be updated from time to time; changes will be posted on this page and take effect upon posting.',
     updated: 'Last updated: September 2026',
@@ -189,7 +189,7 @@ export const en: Dict = {
     s6Title: '6. Terms Revisions',
     s6p1: 'The Platform reserves the right to modify these Terms at any time; revisions will be posted on this page. Continued use of the Platform constitutes acceptance of the revised Terms.',
     s7Title: '7. Contact',
-    s7p1: 'If you have questions, please raise them on GitHub Issues.',
+    s7p1: 'If you have questions or business inquiries, please email service@vestential.com or raise them on GitHub Issues.',
     updated: 'Last updated: September 2026',
   },
   oddLot: {

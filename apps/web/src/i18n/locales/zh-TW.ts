@@ -163,7 +163,7 @@ export const zhTW: Dict = {
     s5Title: '五、Cookie',
     s5p1: '本平台使用 HTTP-only Cookie 進行登入狀態管理，並使用偏好 Cookie 記錄您的語系選擇（繁體中文、英文、日文），不會使用第三方廣告或商業追蹤類 Cookie。',
     s6Title: '六、您的權利',
-    s6p1: '您可隨時要求查閱、更正或刪除您的帳號資料。如需行使相關權利，請透過 GitHub Issues 聯絡我們。',
+    s6p1: '您可隨時要求查閱、更正或刪除您的帳號資料。如需行使相關權利，請寄信至 service@vestential.com 或透過 GitHub Issues 聯絡我們。',
     s7Title: '七、政策更新',
     s7p1: '本隱私權政策可能不時更新，更新後將於本頁發布，並自發布時起生效。',
     updated: '最後更新：2026 年 9 月',
@@ -189,7 +189,7 @@ export const zhTW: Dict = {
     s6Title: '六、條款修訂',
     s6p1: '本平台保留隨時修改本服務條款之權利，修改後將於本頁發布。繼續使用本平台即視為您同意修改後之條款。',
     s7Title: '七、聯絡方式',
-    s7p1: '如有疑問，請至 GitHub Issues 提出。',
+    s7p1: '如有疑問或商業合作需求，請寄信至 service@vestential.com 或至 GitHub Issues 提出。',
     updated: '最後更新：2026 年 9 月',
   },
   oddLot: {

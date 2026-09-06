@@ -61,7 +61,10 @@ export default async function TermsPage() {
         <section>
           <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">{d.s7Title}</h2>
           <p>
-            {d.s7p1} <a href="https://github.com/YozoraRoy/vestential/issues" target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] hover:underline">GitHub Issues</a>
+            {d.s7p1}{' '}
+            <a href="mailto:service@vestential.com" className="text-[var(--accent)] hover:underline">
+              service@vestential.com
+            </a>
           </p>
         </section>
 
