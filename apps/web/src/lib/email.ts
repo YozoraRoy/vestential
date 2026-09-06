@@ -121,7 +121,7 @@ function buildSummaryHtml(summary: string, items: MarketFocusItem[]): string {
       <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;">
         ${BRAND_HEADER}
         <div style="padding:24px;">
-          <div style="font-size:20px;font-weight:800;color:#111827;margin-bottom:12px;">✨ 今日 AI 市場總覽</div>
+          <div style="font-size:20px;font-weight:800;color:#111827;margin-bottom:12px;">✨ 今日市場總覽</div>
           <div style="font-size:15px;line-height:1.8;color:#374151;white-space:pre-wrap;">${escapeHtml(summary)}</div>
           <div style="text-align:center;margin:22px 0;">
             <a href="${escapeHtml(SITE_LINK)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 28px;border-radius:9999px;">查看完整頁面 →</a>
@@ -151,7 +151,7 @@ function buildSummaryText(summary: string, items: MarketFocusItem[]): string {
     .join('\n')
   return `今日市場焦點 (Vestential) - ${formatTwDate(new Date().toISOString())}
 
-今日 AI 市場總覽:
+今日市場總覽:
 ${summary}
 
 本日精選新聞:
