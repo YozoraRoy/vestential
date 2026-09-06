@@ -38,7 +38,7 @@ function formatDateTime(s: string): string {
 
 export default async function MarketFocusPage() {
   const locale = await getLocale()
-  const [focus, meta] = await Promise.all([getMarketFocus(6), getMarketFocusMeta()])
+  const [focus, meta] = await Promise.all([getMarketFocus(10), getMarketFocusMeta()])
 
   const graph: object[] = [
     {
@@ -130,13 +130,13 @@ export default async function MarketFocusPage() {
       <section aria-labelledby="market-method" className="mb-10">
         <SectionHeading id="market-method" title="方法說明" />
         <p className="text-sm text-[var(--text-secondary)] leading-relaxed mb-4">
-          本頁新聞由 AI 依價值投資精神（基本面、財報、股利與除息、總體經濟、市場週期）從鉅亨網近期新聞候選中篩選，
-          並於每日定時更新；新聞全文摘錄為伺服器端即時抓取，遵循各網站 robots.txt，僅保留最近一輪、不揭露個人來源資訊。
+          本頁新聞由 AI 依價值投資精神（基本面、財報、股利與除息、總體經濟、市場週期）從近期台股重點新聞中篩選，
+          並由 AI 依「說人話」規範閱讀全文後提煉重點摘要，直陳核心數據與實質影響；同時每日定時更新當日市場總覽。
         </p>
         <div className="rounded-xl border border-[var(--accent-red)]/30 bg-[var(--accent-red)]/5 px-6 py-5">
           <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
-            本頁內容（含 AI 總覽、新聞摘錄與評論）僅供資訊參考，不構成任何投資建議。AI 可能出錯或遲延，
-            投資決策請自行判斷並審慎評估風險。新聞全文與著作權均屬原始出處所有。
+            本頁內容（含 AI 總覽、新聞重點摘要與評論）僅供資訊參考，不構成任何投資建議。AI 可能出錯或遲延，
+            投資決策請自行判斷並審慎評估風險。新聞原始全文與著作權均屬原始出處媒體所有。
           </p>
           <div className="mt-3 pt-3 border-t border-[var(--accent-red)]/20">
             <Link href={localizePath(locale, '/terms')} className="text-xs text-[var(--accent)] hover:underline inline-flex items-center gap-1 font-medium">

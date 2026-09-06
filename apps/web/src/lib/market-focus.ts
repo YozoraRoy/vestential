@@ -4,17 +4,26 @@ import { loadConfig } from '@stock/core'
 import type { MarketFocusItem } from '@stock/database'
 import { saveMarketFocus, saveMarketFocusMeta } from '@stock/database'
 
-// 鉅亨網新聞(台灣)。取用 SSR 頁內嵌的 JSON-LD CollectionPage 資料(標題/連結/發布時間)墊出候選池,
-// 交給 LLM 依價值投資精神過濾。文章頁為服務端渲染,可抓全文。
+// ─── 候選新聞來源設定 (多來源聚合池) ─────────────────────────────
+// 1. 鉅亨網 (Anue Cnyes)：台股、外匯、頭條
 const CNYES_CATS = ['tw_stock', 'forex', 'headline']
-
-const USER_AGENT = 'Mozilla/5.0 (Vestential MarketFocus/1.0)'
-const MAX_CANDIDATES = 30
-const RECENT_DAYS = 2
-const MAX_CONTENT_CHARS = 4000
 const CNYES_SOURCE = '鉅亨網'
 
-// ─── 候選池抓取 (鉅亨 JSON-LD) ─────────────────────────────────
+// 2. 經濟日報 (UDN Money)：全台最大財經紙媒焦點與重大要聞
+const UDN_RSS_URLS = [
+  'https://money.udn.com/rssfeed/news/1001/5588', // 焦點頭條
+  'https://money.udn.com/rssfeed/news/1001/5589', // 產經重大
+]
+
+// 3. Yahoo 奇摩股市：全台最大財經聚合台（涵蓋中央社/非凡/時報/工商等）
+const YAHOO_STOCK_RSS = 'https://tw.stock.yahoo.com/rss?category=tw-market'
+
+const USER_AGENT = 'Mozilla/5.0 (Vestential MultiSource MarketFocus/1.0)'
+const MAX_CANDIDATES = 60
+const RECENT_DAYS = 2
+const MAX_CONTENT_CHARS = 4000
+
+// ─── 候選池解析器 (JSON-LD & RSS) ────────────────────────────────
 function parseCnyesJsonLd(html: string): NewsCandidate[] {
   const out: NewsCandidate[] = []
   const scripts = html.matchAll(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)
@@ -43,6 +52,36 @@ function parseCnyesJsonLd(html: string): NewsCandidate[] {
   return out
 }
 
+function parseRssXml(xml: string, defaultSource: string): NewsCandidate[] {
+  const out: NewsCandidate[] = []
+  try {
+    const $ = load(xml, { xmlMode: true })
+    $('item').each((_, el) => {
+      const rawTitle = $(el).find('title').text().trim()
+      const rawLink = $(el).find('link').text().trim()
+      const pubDate = $(el).find('pubDate').text().trim()
+      if (!rawTitle || !rawLink) return
+
+      // 清理標題尾端後綴（如 " - Yahoo 奇摩股市"、" | 經濟日報"）
+      const cleanTitle = rawTitle
+        .replace(/\s*[-–|]\s*(Yahoo.*|經濟日報.*|鉅亨網.*)$/i, '')
+        .trim()
+
+      const mediaSource = $(el).find('source').text().trim() || defaultSource
+
+      out.push({
+        title: cleanTitle,
+        url: rawLink,
+        source: mediaSource,
+        publishedAt: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+      })
+    })
+  } catch (err) {
+    console.warn(`[MarketFocus] parseRssXml error (${defaultSource}):`, err)
+  }
+  return out
+}
+
 async function fetchCnyesNews(): Promise<NewsCandidate[]> {
   const seen = new Set<string>()
   const out: NewsCandidate[] = []
@@ -60,13 +99,80 @@ async function fetchCnyesNews(): Promise<NewsCandidate[]> {
         if (seen.has(c.url)) continue
         seen.add(c.url)
         out.push(c)
-        if (out.length >= MAX_CANDIDATES) return out
+        if (out.length >= 25) return out
       }
     } catch (e) {
       console.warn(`[MarketFocus] cnyes cat=${cat} fetch error:`, e)
     }
   }
   return out
+}
+
+async function fetchUdnNews(): Promise<NewsCandidate[]> {
+  const out: NewsCandidate[] = []
+  for (const url of UDN_RSS_URLS) {
+    try {
+      const res = await fetch(url, {
+        headers: { 'user-agent': USER_AGENT },
+        signal: AbortSignal.timeout(6000),
+        cache: 'no-store',
+      })
+      if (!res.ok) continue
+      const candidates = parseRssXml(await res.text(), '經濟日報')
+      out.push(...candidates)
+    } catch (e) {
+      console.warn(`[MarketFocus] UDN fetch error (${url}):`, e)
+    }
+  }
+  return out
+}
+
+async function fetchYahooStockNews(): Promise<NewsCandidate[]> {
+  try {
+    const res = await fetch(YAHOO_STOCK_RSS, {
+      headers: { 'user-agent': USER_AGENT },
+      signal: AbortSignal.timeout(6000),
+      cache: 'no-store',
+    })
+    if (!res.ok) return []
+    return parseRssXml(await res.text(), 'Yahoo股市')
+  } catch (e) {
+    console.warn('[MarketFocus] Yahoo Stock RSS fetch error:', e)
+    return []
+  }
+}
+
+/** 多來源新聞聚合候選池：聚合 鉅亨網 + 經濟日報 + Yahoo 股市 (含中央社/非凡等)，並去重與清洗。 */
+export async function fetchMultiSourceCandidates(): Promise<NewsCandidate[]> {
+  const [cnyes, udn, yahoo] = await Promise.allSettled([
+    fetchCnyesNews(),
+    fetchUdnNews(),
+    fetchYahooStockNews(),
+  ])
+
+  const all: NewsCandidate[] = [
+    ...(cnyes.status === 'fulfilled' ? cnyes.value : []),
+    ...(udn.status === 'fulfilled' ? udn.value : []),
+    ...(yahoo.status === 'fulfilled' ? yahoo.value : []),
+  ]
+
+  const seenUrls = new Set<string>()
+  const seenTitles = new Set<string>()
+  const unique: NewsCandidate[] = []
+
+  for (const item of all) {
+    if (!item.url || !item.title) continue
+    const cleanUrl = item.url.split('?')[0].split('#')[0]
+    const titleKey = item.title.replace(/\s+/g, '').slice(0, 16)
+
+    if (seenUrls.has(cleanUrl) || seenTitles.has(titleKey)) continue
+    seenUrls.add(cleanUrl)
+    seenTitles.add(titleKey)
+    unique.push(item)
+    if (unique.length >= MAX_CANDIDATES) break
+  }
+
+  return unique
 }
 
 // ─── 全文抓取(robots 檢查 + cheerio 抽正文) ─────────────────────
@@ -180,7 +286,7 @@ export async function fetchArticleContent(url: string): Promise<{ content: strin
     })
     if (text.length < 200) {
       text = ''
-      $('main p, .article-content p, .story-content p, .post-content p').each((_, el) => {
+      $('main p, .article-content p, .story-content p, .post-content p, .caas-body p, .article-body__editor p').each((_, el) => {
         const t = $(el).text().trim()
         if (t.length > 10) text += t + '\n'
       })
@@ -241,11 +347,11 @@ function toIsoDate(publishedAt: string): string {
   return Number.isNaN(dt.getTime()) ? '' : dt.toISOString()
 }
 
-const SYSTEM_PROMPT = `你是 Vestential(台灣股票投資資訊平台)的總編輯。Vestential 的精神是「價值投資」:重視基本面、長期累積、投資紀律、以及用簡單指標(如季線乖離)判斷市場位置。你負責為首頁「市場焦點」挑選新聞。
+const SYSTEM_PROMPT = `你是 Vestential(台灣股票投資資訊平台)的總編輯。Vestential 的精神是「價值投資」:重視基本面、長期累積、投資紀律、以及用簡單指標(如季線乖離)判斷市場位置。你負責為市場焦點挑選新聞。
 
 規則:
-1. 從候選清單中挑選「最符合價值投資精神」的最多 6 則。
-2. 偏好:基本面/財報/股利與除息/總體經濟/市場週期(指數、季線乖離)/長期資產配置相關新聞。
+1. 從候選清單中挑選「最符合價值投資精神」的 10 則。
+2. 領域平衡偏好：盡量兼顧「半導體/科技硬體」、「傳產/金融/綠能重電」、「總體經濟/利率政策」等不同面向，避免單一族群過度集中。
 3. 排除:短線明牌、個股炒作、小道消息、未證實的利多利空、娛樂/八卦,或與台灣投資無關的新聞。
 4. 每則給一句 30 字以內的繁體中文理由，說明它為何值得看。說人話，直陳核心基本面或實質影響，嚴禁「值得注意的是」、「不可否認」等空泛廢話。
 5. 只輸出 JSON，不要任何其他文字:
@@ -255,7 +361,7 @@ function buildUserPrompt(candidates: NewsCandidate[]): string {
   const list = candidates
     .map((c, i) => `${i}. [${c.source}] ${c.title}`)
     .join('\n')
-  return `以下是候選新聞(共 ${candidates.length} 則):\n${list}\n\n請選出最多 6 則。`
+  return `以下是候選新聞(共 ${candidates.length} 則):\n${list}\n\n請選出符合原則的 10 則。`
 }
 
 interface SelectEntry {
@@ -263,7 +369,7 @@ interface SelectEntry {
   reason: string
 }
 
-/** 依「價值投資」精神用 LLM 過濾候選新聞;失敗時回傳原始前 6 則(理由為空)當兜底。 */
+/** 依「價值投資」精神用 LLM 過濾候選新聞;失敗時回傳原始前 10 則(理由為空)當兜底。 */
 export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<MarketFocusItem[]> {
   if (candidates.length === 0) return []
   try {
@@ -285,13 +391,13 @@ export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<Marke
         published_at: c.publishedAt,
         reason: typeof s.reason === 'string' ? s.reason.trim() : null,
       })
-      if (items.length >= 6) break
+      if (items.length >= 10) break
     }
     if (items.length > 0) return items
   } catch (e) {
     console.error('[MarketFocus] LLM filter failed, falling back to raw headlines:', e)
   }
-  return candidates.slice(0, 6).map((c) => ({
+  return candidates.slice(0, 10).map((c) => ({
     title: c.title,
     url: c.url,
     source: c.source,
@@ -300,9 +406,63 @@ export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<Marke
   }))
 }
 
-/** 抓取候選新聞 → 保留近 2 天且依發布時間新到舊排序 → AI 過濾 → 並行爬全文 → 生成當日總覽 → 寫入 DB。回傳儲存後的清單。 */
+// ─── 每則新聞 AI 說人話重點摘要 ──────────────────────────────────
+const ARTICLE_SUMMARIES_SYSTEM_PROMPT = `你是 Vestential 的資深台股主筆。請為以下精選新聞，逐則撰寫一份 100~180 字的繁體中文「說人話重點摘要」。
+
+核心原則（嚴格遵守 speak-human-tw 去 AI 味規範）：
+1. 開門見山：首句直接點出核心事件與關鍵數據（如營收增減幅、毛利率、簽約金額、資本支出、政策決議）。嚴禁「在...背景下」、「隨著...發展」等套話開場。
+2. 直陳實質影響：點明對該產業鏈、上下游供應商或台股投資人的實質影響（受惠題材、獲利能見度或潛在估值壓力），不說空話。
+3. 嚴禁說教與心靈雞湯：不寫「投資人應保持理性」、「面對波動要耐心」等自我感動或道德勸說。
+4. 剔除解說導引贅詞：嚴禁使用「值得注意的是」、「不可否認的是」、「顯而易見的是」、「這意味著」、「不是 A 而是 B」。直接陳述客觀事實。
+5. 自然收尾，禁罐頭總結：直接停在關鍵數字或結論，嚴禁「總結來說」、「綜上所述」。
+6. 台灣金融語境：使用繁體中文（台灣習慣詞彙），全形標點符號（，、。！？）。
+7. 只輸出純 JSON，不要任何其他文字：
+{"summaries":[{"index":0,"summary":"..."},{"index":1,"summary":"..."}]}`
+
+/** 依據每則新聞的標題與正文內容，由 LLM 生成說人話重點摘要。 */
+export async function generateArticleSummaries(
+  items: { title: string; source: string | null; content?: string | null; reason?: string | null }[],
+): Promise<string[]> {
+  if (items.length === 0) return []
+  try {
+    const config = loadConfig()
+    const { llm } = createQuickLLM(config, { maxTokens: 1800 })
+    const promptList = items
+      .map((it, idx) => {
+        const textSnippet = it.content ? it.content.slice(0, 350).replace(/\s+/g, ' ').trim() : '（無正文）'
+        return `[新聞 ${idx}] 標題：${it.title}\n來源：${it.source ?? '未知'}\n選取理由：${it.reason ?? '無'}\n正文摘錄：${textSnippet}`
+      })
+      .join('\n\n')
+
+    const raw = await llm.generate(
+      ARTICLE_SUMMARIES_SYSTEM_PROMPT,
+      `請為以下 ${items.length} 則新聞分別產出說人話重點摘要：\n\n${promptList}`,
+    )
+    const cleaned = raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()
+    const parsed = JSON.parse(cleaned) as { summaries?: { index: number; summary: string }[] }
+    const summaryMap = new Map<number, string>()
+    if (Array.isArray(parsed?.summaries)) {
+      for (const entry of parsed.summaries) {
+        if (typeof entry.index === 'number' && typeof entry.summary === 'string' && entry.summary.trim()) {
+          summaryMap.set(entry.index, entry.summary.trim())
+        }
+      }
+    }
+
+    return items.map((it, idx) => {
+      const s = summaryMap.get(idx)
+      if (s) return s
+      return it.reason ? `核心重點：${it.reason}` : ''
+    })
+  } catch (err) {
+    console.error('[MarketFocus] generateArticleSummaries failed, falling back:', err)
+    return items.map((it) => (it.reason ? `核心重點：${it.reason}` : ''))
+  }
+}
+
+/** 抓取候選新聞 (多來源聚合池) → 保留近 2 天且依發布時間新到舊排序 → AI 過濾 → 並行爬全文 → AI 逐則摘要與當日總覽 → 寫入 DB。回傳儲存後的清單。 */
 export async function refreshMarketFocus(): Promise<MarketFocusItem[]> {
-  const candidates = await fetchCnyesNews()
+  const candidates = await fetchMultiSourceCandidates()
 
   const now = Date.now()
   const cutoff = now - RECENT_DAYS * 24 * 60 * 60 * 1000
@@ -315,16 +475,22 @@ export async function refreshMarketFocus(): Promise<MarketFocusItem[]> {
   const items = (await filterNewsByAI(recent))
     .map((it) => ({ ...it, published_at: it.published_at ? toIsoDate(it.published_at) : '' }))
     .sort((a, b) => b.published_at.localeCompare(a.published_at))
-    .slice(0, 6)
+    .slice(0, 10)
 
   const crawled = await Promise.allSettled(items.map((it) => fetchArticleContent(it.url)))
-  const enriched = items.map((it, i) => ({
+  const enriched: MarketFocusItem[] = items.map((it, i) => ({
     ...it,
     content: crawled[i].status === 'fulfilled' ? crawled[i].value.content : null,
     source_url: crawled[i].status === 'fulfilled' ? crawled[i].value.sourceUrl : null,
   }))
   for (const it of enriched) {
     if (!it.content) console.warn(`[MarketFocus] no article content saved for: ${it.title} (${it.source_url ?? it.url})`)
+  }
+
+  // 為每則新聞生成說人話 AI 重點摘要
+  const articleSummaries = await generateArticleSummaries(enriched)
+  for (let i = 0; i < enriched.length; i++) {
+    enriched[i].summary = articleSummaries[i] || null
   }
 
   await saveMarketFocus(enriched)

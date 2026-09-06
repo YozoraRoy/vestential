@@ -213,6 +213,7 @@ function getSqliteDb(): Database.Database | null {
         source TEXT,
         published_at TEXT,
         reason TEXT,
+        summary TEXT,
         content TEXT,
         source_url TEXT,
         created_at TEXT DEFAULT (datetime('now', 'localtime'))
@@ -237,6 +238,9 @@ function getSqliteDb(): Database.Database | null {
     } catch {}
     try {
       _db.exec('CREATE INDEX IF NOT EXISTS idx_portfolio_guest ON portfolio_records(guest_uid, id)')
+    } catch {}
+    try {
+      _db.exec('ALTER TABLE market_focus ADD COLUMN summary TEXT;')
     } catch {}
 
     return _db
@@ -484,6 +488,8 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
         ALTER TABLE market_focus ADD source_url NVARCHAR(2000);
       IF COL_LENGTH('market_focus', 'reason') IS NULL
         ALTER TABLE market_focus ADD reason NVARCHAR(MAX);
+      IF COL_LENGTH('market_focus', 'summary') IS NULL
+        ALTER TABLE market_focus ADD summary NVARCHAR(MAX);
       IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'market_focus_meta')
       BEGIN
         CREATE TABLE market_focus_meta (
@@ -1547,6 +1553,8 @@ export interface MarketFocusItem {
   source: string | null
   published_at: string | null
   reason: string | null
+  /** AI 依據全文提煉的說人話重點摘要（約 100~180 字）。 */
+  summary?: string | null
   /** 抓取到的文章全文摘錄（節錄前 4000 字，僅短存最新一輪）。 */
   content?: string | null
   /** 解析後的原始新聞來源 URL（優先 Google 轉址後的網址）。 */
@@ -1566,13 +1574,14 @@ export async function saveMarketFocus(items: MarketFocusItem[]): Promise<void> {
   for (const it of items) {
     if (!it.title || !it.url) continue
     await dbExecute(
-      'INSERT INTO market_focus (title, url, source, published_at, reason, content, source_url) VALUES (@title, @url, @source, @published_at, @reason, @content, @source_url)',
+      'INSERT INTO market_focus (title, url, source, published_at, reason, summary, content, source_url) VALUES (@title, @url, @source, @published_at, @reason, @summary, @content, @source_url)',
       {
         title: it.title.slice(0, 500),
         url: it.url.slice(0, 2000),
         source: it.source ? it.source.slice(0, 200) : null,
         published_at: it.published_at ? it.published_at.slice(0, 100) : null,
         reason: it.reason ?? null,
+        summary: it.summary ?? null,
         content: it.content ?? null,
         source_url: it.source_url ? it.source_url.slice(0, 2000) : null,
       },
@@ -1583,7 +1592,7 @@ export async function saveMarketFocus(items: MarketFocusItem[]): Promise<void> {
 /** 讀取最新一輪市場焦點新聞（以發布時間新到舊排序）。 */
 export async function getMarketFocus(limit: number = 6): Promise<MarketFocusItem[]> {
   return dbQueryAll<MarketFocusItem>(
-    `SELECT id, title, url, source, published_at, reason, content, source_url FROM market_focus ORDER BY published_at DESC, id DESC LIMIT ${limit}`,
+    `SELECT id, title, url, source, published_at, reason, summary, content, source_url FROM market_focus ORDER BY published_at DESC, id DESC LIMIT ${limit}`,
   )
 }
 

@@ -1,14 +1,14 @@
 # Vestential 台灣股票 AI 分析與零股紀念品情報平台
 
-> **名稱由來**:**Vestential = Vest + Essential**。Vest 代表「投資」、Essential 代表「不可或缺」——期許 Vestential 能成為你在[價值投資](https://vestential.com/about)路上的必備工具。
+> **名稱由來**：**Vestential = Vest + Essential**。Vest 代表「投資」、Essential 代表「不可或缺」——期許 Vestential 成為投資人在[價值投資](https://vestential.com/about)路上的實用工具。
 
 基於 Next.js 15 與多 AI 代理人 (Multi-Agent Architecture) 打造的台灣股票與美股 AI 深度分析、零股盤後行情、股東會紀念品情報與個人損益試算平台。
 
 ---
 
-## 🌟 最新功能與核心特色 (2026 最新升級)
+## 🌟 核心功能與頁面一覽
 
-### 0. 🗺️ 功能與頁面一覽
+### 0. 🗺️ 功能與頁面清單
 
 | 頁面 | 路由 | 說明 | 需登入 |
 |------|------|------|--------|
@@ -39,15 +39,15 @@
 * **1 股單價與成交總金額雙欄位**：精準拆分為 **`💵 1股成交價`**（顯示例如 `NT$ 25.60`）與 **`💰 成交總金額`**（顯示例如 `NT$ 66.4 萬`），修復數值排序與多重複算問題。
 * **紀念品智慧自動分類與 7 大頁籤篩選 (Filter Pills)**：
   * ✨ **全部** (全市場標的)
-  * 📱 **eGift 電子禮卡** *(全新新增！自動歸類全台超商電子商品卡、咖啡兌換券與簡訊禮券)*
+  * 📱 **eGift 電子禮卡** （自動歸類全台超商電子商品卡、咖啡兌換券與簡訊禮券）
   * 💳 **超商禮券卡**（如 7-11 / 全家實體商品卡）
   * 🥣 **居家餐廚**（如 多用途矽膠隔熱餐墊、保溫杯、保鮮盒套組、快煮鍋）
-  * 🧴 **清洁護理**（如 植萃洗手乳、肥皂禮盒）
+  * 🧴 **清潔護理**（如 植萃洗手乳、肥皂禮盒）
   * 🔌 **3C與生活配件**（如 折疊傘、隨身線材、生活用品）
   * ⏳ **待公告** / ➖ **無紀念品** / 🎁 **其他商品**
 * **📜 近 5 年股東會紀念品發放歷程 (Modal 彈窗 & API 端點)**：
   * **API 路由**：新增 `GET /api/gifts/history?stock_id=2887` 高效 JSON 端點。
-  * **互動彈窗**：在紀念品名稱旁提供 **`近5年 📜`** 按鈕，點擊開啟 Glassmorphism 極致 Modal 彈窗，展示該檔股票 2022 ~ 2026 年近 5 年發放紀念品紀錄！
+  * **互動彈窗**：在紀念品名稱旁提供 **`近5年 📜`** 按鈕，點擊開啟 互動彈窗，展示該檔股票 2022 ~ 2026 年近 5 年發放紀念品紀錄！
 * **📅 台股開盤日曆與最後買進日智慧標註**：
   * **開盤上班日推算**：自動避開國定假日與週末休市，標明「最新開盤上班日」資訊。
   * **帶年份與跨年標示**：最後買進日格式化為 **`YYYY/MM/DD (週X)`**（例 `2026/04/22 (週三)`），若跨年自動加上 **`跨年`** 專屬標籤。
@@ -81,14 +81,14 @@
 
 ### 5. ⚡ 股票代號智慧自動補全與 0.3 秒熔斷門禁 (Early-Exit Guard)
 * **台股代號智慧補全**：輸入純數字台股代號（例如 `2330` 或 `0050`），系統自動辨識並補充 `.TW`（上市）或 `.TWO`（上櫃），無需使用者手動打副檔名。
-* **無效代號 0.3 秒熔斷門禁**：在 8 個 AI 代理人啟動前進行實時數據驗證。若輸入無效代碼，系統在 **0.3 秒內立即中斷阻斷**並給予親切提示，**絕不白白浪費等待時間與 LLM API 額度**。
+* **無效代號 0.3 秒熔斷門禁**：在 8 個 AI 代理人啟動前進行實時數據驗證。若輸入無效代碼，系統在 **0.3 秒內熔斷阻擋**並明確提示，避免消耗等待時間與 LLM 額度。
 
 ### 6. 🔐 Google / LINE 登入與每日額度 (OAuth)
 * **Google / LINE OAuth 登入**：`/login` 頁面提供 Google 與 LINE 登入（LINE 採用 OpenID `openid profile` scope，email 為可選欄位）。
 * **每日 3 次 AI 額度**：登入後每日可進行 3 次深度分析（`consumeAnalysisQuota`，以台灣時區為準），超過即回 `429 Too Many`，額度紀錄存於 `analysis_quota` 資料表。
 
 ### 7. ⏰ Azure 雙重定時自動排程機制 (WebJobs & Cron API)
-* **Azure WebJobs 雲端內建排程**：台灣時間每個工作日下午 **14:30** 盤後自動啟動 TWSE 零股與 `stock.gift` 雙爬蟲與 eGift 智慧正規化，無縫更新資料庫。
+* **Azure WebJobs 雲端內建排程**：台灣時間每個工作日下午 **14:30** 盤後自動啟動 TWSE 零股與 `stock.gift` 雙爬蟲與 eGift 智慧正規化，自動寫入資料庫。
 * **Cron HTTP API 端點 (`/api/cron/seed`)**：提供 API 端點支援外部 Cron 服務（如 Azure Logic Apps, GitHub Actions）隨時觸發全台爬蟲！
 * **GitHub Actions 每日盤後零股同步**（`.github/workflows/sync-oddlot.yml`）：每週一至五 **台灣時間 15:10**（TWSE 盤後零股約 15:00 公布後）自動觸發，以 Asia/Taipei 時區推算交易日期後呼叫 `POST /api/odd-lot/refresh?date=YYYYMMDD`，帶 `Authorization: Bearer SYNC_TOKEN` 更新當日盤後零股行情，確保 production 資料庫每日自動保持最新。
 
@@ -106,16 +106,19 @@
 * **多語系路由中介軟體 (Next.js 15 Middleware)**：支援 **繁體中文 (`zh-TW`)、英文 (`en`)、日文 (`ja`)** 三種語系，透過 `apps/web/src/middleware.ts` 動態處理語系重寫、Cookie 偏好與瀏覽器語言偵測。
 * **全站用詞一致性**：各語系導覽列、首頁功能卡片全面對齊（如繁體中文統一使用「AI 智能分析」、英文「AI Smart Analysis」、日文「AI スマート分析」）。
 * **動態 Sitemap 與 Robots.txt**：自動生成符合規格之 `sitemap.xml` (`apps/web/src/app/sitemap.ts`) 與 `robots.txt` (`apps/web/src/app/robots.ts`)，完整宣告多語系 alternate 網址與頻率，利於 Google 等搜尋引擎精準索引。
-* **資訊架構與視覺層次優化 (Typography Hierarchy)**：精心調校 `/about` 關於我們、`/backtest` 回測與 `/analyze` 分析頁面的字體階層、間距與對比度，提供一致且現代的金融工具視覺體驗。
+* **資訊架構與視覺層次優化 (Typography Hierarchy)**：統一 `/about`、`/backtest` 與 `/analyze` 等頁面的字級層次與間距排版，維持專業一致的視覺體驗。
 
 ### 🔖 10. 首頁 AI 市場焦點 (`/` Market Focus)
-* **鉅亨網即時新聞抓取**：以鉅亨網（`news.cnyes.com`）股市／匯率／總覽三類目 SSR 頁內嵌的 JSON-LD `CollectionPage` 資料（headline/url/datePublished）建出候選池並去重（`lib/market-focus.ts`），每則皆為可直連原文的網址。
-* **近 2 天過濾 + 最新優先**：候選新聞僅保留 **發布 2 天內** 之作，並以 ISO 8601 正規化 `published_at` 後依時間 **新到舊** 排序；DB `getMarketFocus` 另以 `ORDER BY published_at DESC, id DESC` 雙保險，杜絕過期舊聞或亂序展示。
-* **全文摘錄抓取**：針對入選新聞以伺服器端抓取原文（先檢查 `robots.txt`，再以 cheerio 抽正文、截取前 4000 字），儲存 `content`；抓取自動重試 **3 次**（指數退避，僅網路錯誤／`429`／`408`／`5xx` 才重試），失敗時仍保留鉅亨網原始網址為 `source_url`，**絕不寫入 NULL**。
-* **AI 價值投資過濾與總覽**：排程呼叫 LLM（`createQuickLLM`，Primary OpenAI → 備援 Groq `qwen/qwen3.8-27b` 自動切換），依「價值投資」精神篩選新聞並產出一句摘要（`filterNewsByAI`），再對入選清單生成「當日 AI 市場總覽」（`market_focus_meta.summary`）；雙模型皆失敗時自動 fallback 原樣前 6 則（summary 以「當日市場焦點：」開頭並觸發告警信），首頁渲染永遠不會因 AI 或來源異常而變慢或報錯。
-* **日夜自動更新**：`.github/workflows/sync-market-focus.yml` 每 **4 小時**以 `Authorization: Bearer SYNC_TOKEN` 呼叫 `POST /api/market-focus/refresh`（亦支援手動 `workflow_dispatch`），每次 refresh 以 DELETE＋重插覆寫最新一輪，符合「內容短存」隱私原則。
-* **首頁與專屬頁呈現**：首頁每則顯示標題 / 來源 / 時間 / AI 摘要（三語 chrome），並有「查看完整頁面 →」連結；`/market-focus`（繁體中文內容）加入當日總覽、全文摘錄 `<details>` 展開、「前往原文」直連原站，並附方法說明與免責。
-* **📬 Email 通知**：每次 refresh 成功後以 SMTP（Gmail App Password）寄送「今日市場焦點」總覽信（`meta.summary` + 6 則新聞 + 原文連結）給 `NOTIFY_TO`；LLM 摘要回退或 refresh 失敗時改寄「異常告警信」，寄信失敗一律只 log、**不影響 refresh 主流程**（詳見下方「Email 通知」一節）。
+* **多來源即時聚合候選池 (Multi-source News Pool)**：同時並行抓取 **鉅亨網**（台股/匯率/總覽）、**經濟日報**（焦點頭條/產經重大 RSS）與 **Yahoo 奇摩股市**（聚合中央社/工商/非凡/時報等 RSS），透過 URL 與標題特徵值即時去重，建出具備多元視野的高含金量候選池。
+* **近 2 天過濾 + 最新優先**：候選新聞僅保留 **發布 2 天內** 之標的，依時間 **由新至舊** 排序，杜絕過期新聞。
+* **全文爬取與內文抽取**：針對入選新聞以伺服器端抓取正文（遵循各網站 `robots.txt`，以 cheerio 精準抽取文章本文），儲存於 `content` 欄位並保留原始新聞連結。
+* **說人話 AI 價值投資篩選與逐則摘要**：
+  * **價值投資過濾**：排程呼叫 LLM 依「基本面、資本支出、財報與長期週期」自多來源池精選出最關鍵的 6 則。
+  * **逐則 AI 說人話摘要**：依 `speak-human-tw` 規範為每則新聞提煉 100~180 字重點摘要，首句直述核心數據與重大決策，點明產業實質影響，完全去除心靈雞湯與導引贅詞。
+  * **當日市場總覽**：整合入選新聞產出宏觀客觀之當日 AI 總覽。雙模型備援容錯，保證首頁渲染永遠不報錯。
+* **定期自動更新**：GitHub Actions 每 **4 小時**呼叫 `POST /api/market-focus/refresh`，全自動覆寫最新一輪多來源數據。
+* **首頁與專屬頁呈現**：首頁展示精選新聞與摘要卡片；`/market-focus` 專屬頁呈現今日總覽、各篇 AI 重點摘要、原文摘錄折疊面板與直連出處。
+* **📬 Email 通知**：每次更新成功後以 SMTP 寄送「今日市場焦點」總覽信給管理員；LLM 摘要回退或異常時寄送告警信。
 
 ### 💌 11. 市場焦點 Email 通知（每日總覽 + 異常告警）
 * **寄送時機**：
@@ -137,12 +140,18 @@
 * **取得 Gmail 應用程式密碼**：Gmail 帳號先開啟 **兩步驟驗證** → 到 [https://myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) 建立「郵件」專用的應用程式密碼（16 字元）。若綁定 passkey 後頁面不顯示該區塊，需先移除 passkey／檢查進階保護。密碼等同信箱權限，**只放`.env.local` 與 Azure App Settings，禁止 commit**。
 * **上線設定**：`.github/workflows/deploy.yml` 將 GitHub Secrets `SMTP_USER`／`SMTP_PASS`／`NOTIFY_TO` 寫入 Azure App Settings（`SMTP_HOST`/`SMTP_PORT`/`NOTIFY_FROM` 為寫死的預設值，不需設 Secret）。
 
-### 🩺 13. 每日健康覆盤與自動修復 (Health Check & Auto-repair)
-* **核心思路**：既然有人在家裡觸發的排程與爬蟲會失敗，那就每天自己覆盤一遍——**只有異常才發信、只修復 refresh 層**，不重啟 App、不動任何資料。
-* **分工（誰複盤、誰修復、人在哪）**：
-  * **復盤者** = `health-report.yml`（GitHub Actions）：按排程自動對 `GET /api/health` 下診斷，**完全無需人工**。
-  * **修復者** = Azure 上的應用程式：診斷出異常時，workflow 自動呼叫 `POST /api/health/repair`，由程式重跑 `refreshMarketFocus()`（市場焦點）／零股 refresh 完成自我修復，**同樣無需人工**。
-  * **人工介入時機** = 只有修復後仍有未解的 `error` 異常時，系統才寄「健康覆盤異常」告警信給 `NOTIFY_TO`（管理者），請管理者查 GitHub Actions run 或 Azure 容器 log 進一步處理。此信 6 小時內不重複寄。
+### 💻 12. 首頁版面與 SEO (`/`)
+* **功能優先版面**：由上而下為 **① 精簡 Hero**（H1＋副標＋2 顆主 CTA：開始 AI 分析 / 看零股情報）→ **② 核心功能 6 卡**（依 `/about`「如何開始」STEP 1→2→3 順序：零股情報→週期進場→損益試算→AI 分析，再墊開發中卡）→ **③ 市場焦點** → **④ 投資名言收尾帶**（附投資風險免責一行）。
+* **轉換元素**：每張功能卡具「立即使用 →」CTA，附 hover 上移與 accent 光暈回饋；開發中卡以「開發中」徽章標記、不提供死連結。
+* **結構化資料**：首頁 JSON-LD `@graph` 含 `WebSite`＋`Organization`＋`WebPage`（inLanguage/dateModified），新聞存在時附 `ItemList`（title/url/datePublished），強化「新鮮內容」訊號。
+* **社群分享圖 (OG)**：`apps/web/src/app/opengraph-image.tsx` 以 `next/og` 動態產生 1200×630 品牌漸層分享圖（零靜態素材）；metadata 帶 `openGraph`＋`twitter:card=summary_large_image`；`layout.tsx` 輸出 `theme-color=#0f1118`。
+
+### 🩺 13. 每日健康自檢與自動修復 (Health Check & Auto-repair)
+* **設計機制**：定時自動診斷各項服務與資料狀態。僅在檢測出異常時發送通知，並自動呼叫端點補抓資料，無需人工介入重啟。
+* **自動化分工**：
+  * **診斷端（GitHub Actions）**：按排程調用 `GET /api/health` 執行端點與資料庫檢查。
+  * **修復端（應用程式 API）**：若診斷發現資料落後或異常，自動呼叫 `POST /api/health/repair` 重新執行資料同步。
+  * **告警通知**：僅在自動修復後仍持續回傳錯誤時，才發送「健康覆盤異常」信件通知維護者，避免重複發信干擾（6 小時內不重複寄送）。
 * **`GET /api/health`（唯讀檢查）**：回 `{ ok, issues[], checks{} }`，檢查項目包含：
   * market_focus：資料筆數、最新 `published_at`、`content` 空值比例（寫死「絕不寫入 NULL」為抓取失敗的其一日志）。
   * market_focus_meta：總覽是否存在、`generated_at` 是否超過 5 小時、summary 是否為「當日市場焦點：」開頭的 fallback。
@@ -160,11 +169,6 @@
   * `concurrency` group 防止健康檢查與部署／其他排程同時重疊。
   * 修復後仍失敗 → run 以 failure 結束（GitHub 失敗通知 + 異常告警信）。
 
-### 💻 12. 首頁版面與 SEO (`/`)
-* **功能優先版面**：由上而下為 **① 精簡 Hero**（H1＋副標＋2 顆主 CTA：開始 AI 分析 / 看零股情報）→ **② 核心功能 6 卡**（依 `/about`「如何開始」STEP 1→2→3 順序：零股情報→週期進場→損益試算→AI 分析，再墊開發中卡）→ **③ 市場焦點** → **④ 投資名言收尾帶**（附投資風險免責一行）。
-* **轉換元素**：每張功能卡具「立即使用 →」CTA，附 hover 上移與 accent 光暈回饋；開發中卡以「開發中」徽章標記、不提供死連結。
-* **結構化資料**：首頁 JSON-LD `@graph` 含 `WebSite`＋`Organization`＋`WebPage`（inLanguage/dateModified），新聞存在時附 `ItemList`（title/url/datePublished），強化「新鮮內容」訊號。
-* **社群分享圖 (OG)**：`apps/web/src/app/opengraph-image.tsx` 以 `next/og` 動態產生 1200×630 品牌漸層分享圖（零靜態素材）；metadata 帶 `openGraph`＋`twitter:card=summary_large_image`；`layout.tsx` 輸出 `theme-color=#0f1118`。
 
 ---
 
@@ -419,7 +423,7 @@ git push origin main   # ← 自動觸發部署
    - 線上：`https://vestential.com/api/auth/callback/google`
 5. 建立後記下 **Client ID** 與 **Client Secret**。
 
-> 若 OK 畫面蘭第三方帳號，需把 OAuth consent screen 的測試狀態設為 published。
+> 若登入時畫面提示第三方未驗證應用程式，需至 OAuth consent screen 將發布狀態調整為 Testing（並加入測試用戶）或 Published。
 
 #### 2. LINE 登入（LINE Developers）
 
@@ -475,7 +479,7 @@ LINE 不允許 localhost callback，請用 `/api/auth/dev-login` 或先在線上
 
 ## 📄 License
 
-本專案採用 **Sustainable Use License 1.0 (SUL)**——fair-code / source-available 模式(同 n8n):
+本專案採用 **Sustainable Use License 1.0 (SUL)**——fair-code / source-available 模式（同 n8n）：
 
 - ✅ **閱讀、學習、個人與非商業用途**免費。
 - ✅ 原始碼公開於 GitHub,可複製、研究、自用。
