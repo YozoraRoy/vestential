@@ -77,6 +77,12 @@ jobs:
               LINE_CLIENT_ID="${{ secrets.LINE_CLIENT_ID }}" \
               LINE_CLIENT_SECRET="${{ secrets.LINE_CLIENT_SECRET }}" \
               SYNC_TOKEN="${{ secrets.SYNC_TOKEN }}" \
+              SMTP_HOST=smtp.gmail.com \
+              SMTP_PORT=587 \
+              SMTP_USER="${{ secrets.SMTP_USER }}" \
+              SMTP_PASS="${{ secrets.SMTP_PASS }}" \
+              NOTIFY_FROM=vestential@gmail.com \
+              NOTIFY_TO="${{ secrets.NOTIFY_TO }}" \
               ADMIN_LINE_USER_IDS=U992bf6b74efcd58e3dc5d3f8d356e880
 
       - name: Set startup command

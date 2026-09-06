@@ -110,12 +110,33 @@
 ### 🔖 10. 首頁 AI 市場焦點 (`/` Market Focus)
 * **鉅亨網即時新聞抓取**：以鉅亨網（`news.cnyes.com`）股市／匯率／總覽三類目 SSR 頁內嵌的 JSON-LD `CollectionPage` 資料（headline/url/datePublished）建出候選池並去重（`lib/market-focus.ts`），每則皆為可直連原文的網址。
 * **近 2 天過濾 + 最新優先**：候選新聞僅保留 **發布 2 天內** 之作，並以 ISO 8601 正規化 `published_at` 後依時間 **新到舊** 排序；DB `getMarketFocus` 另以 `ORDER BY published_at DESC, id DESC` 雙保險，杜絕過期舊聞或亂序展示。
-* **全文摘錄抓取**：針對入選新聞以伺服器端抓取原文（先檢查 `robots.txt`，再以 cheerio 抽正文、截取前 4000 字），儲存 `content`；同時記錄解析後原始網址 `source_url`，頁面「前往原文」一律由原站優先。
-* **AI 價值投資過濾與總覽**：排程呼叫 LLM，依「價值投資」精神篩選新聞並產出一句摘要（`filterNewsByAI`），再對入選清單生成「當日 AI 市場總覽」（`market_focus_meta.summary`）；LLM 失敗時自動 fallback 原樣前 6 則，首頁渲染永遠不會因 AI 或來源異常而變慢或報錯。
+* **全文摘錄抓取**：針對入選新聞以伺服器端抓取原文（先檢查 `robots.txt`，再以 cheerio 抽正文、截取前 4000 字），儲存 `content`；抓取自動重試 **3 次**（指數退避，僅網路錯誤／`429`／`408`／`5xx` 才重試），失敗時仍保留鉅亨網原始網址為 `source_url`，**絕不寫入 NULL**。
+* **AI 價值投資過濾與總覽**：排程呼叫 LLM（`createQuickLLM`，Primary OpenAI → 備援 Groq `qwen/qwen3.8-27b` 自動切換），依「價值投資」精神篩選新聞並產出一句摘要（`filterNewsByAI`），再對入選清單生成「當日 AI 市場總覽」（`market_focus_meta.summary`）；雙模型皆失敗時自動 fallback 原樣前 6 則（summary 以「當日市場焦點：」開頭並觸發告警信），首頁渲染永遠不會因 AI 或來源異常而變慢或報錯。
 * **日夜自動更新**：`.github/workflows/sync-market-focus.yml` 每 **4 小時**以 `Authorization: Bearer SYNC_TOKEN` 呼叫 `POST /api/market-focus/refresh`（亦支援手動 `workflow_dispatch`），每次 refresh 以 DELETE＋重插覆寫最新一輪，符合「內容短存」隱私原則。
 * **首頁與專屬頁呈現**：首頁每則顯示標題 / 來源 / 時間 / AI 摘要（三語 chrome），並有「查看完整頁面 →」連結；`/market-focus`（繁體中文內容）加入當日總覽、全文摘錄 `<details>` 展開、「前往原文」直連原站，並附方法說明與免責。
+* **📬 Email 通知**：每次 refresh 成功後以 SMTP（Gmail App Password）寄送「今日市場焦點」總覽信（`meta.summary` + 6 則新聞 + 原文連結）給 `NOTIFY_TO`；LLM 摘要回退或 refresh 失敗時改寄「異常告警信」，寄信失敗一律只 log、**不影響 refresh 主流程**（詳見下方「Email 通知」一節）。
 
-### 💻 11. 首頁版面與 SEO (`/`)
+### 💌 11. 市場焦點 Email 通知（每日總覽 + 異常告警）
+* **寄送時機**：
+  * `POST /api/market-focus/refresh` 成功後 → 寄 **「今日市場焦點」總覽信**（含當日 AI 總覽 + 6 則精選新聞、選取理由與「前往原文」連結，時間皆以 **Asia/Taipei** 格式化）。
+  * refresh 成功但 LLM 摘要回退（summary 以「當日市場焦點：」開頭）→ 寄 **「摘要回退」告警信**。
+  * refresh 例外抛出 → 寄 **「refresh 失敗」告警信**（附錯誤訊息、環境與建議查閱 GitHub Actions／Azure log），API 仍回 500。
+* **實作**：`apps/web/src/lib/email.ts`（nodemailer SMTP）；守衛：`SMTP_USER`／`SMTP_PASS`／`NOTIFY_TO` 任一未設定即跳過，寄信一律 try/catch，絕不讓寄信失敗打斷 refresh。
+* **環境變數**：
+
+  | 變數 | 說明 | 預設 |
+  |------|------|------|
+  | `SMTP_HOST` | SMTP 伺服器 | `smtp.gmail.com` |
+  | `SMTP_PORT` | SMTP 埠（STARTTLS） | `587` |
+  | `SMTP_USER` | 寄件 Gmail（需開 2FA + 應用程式密碼） | — |
+  | `SMTP_PASS` | Gmail 應用程式密碼（16 字元，可去空格） | — |
+  | `NOTIFY_FROM` | 顯示的寄件者 Email | `SMTP_USER` |
+  | `NOTIFY_TO` | 收件人信箱（每日總覽＋告警都寄這裡）；留空＝不寄送 | — |
+
+* **取得 Gmail 應用程式密碼**：Gmail 帳號先開啟 **兩步驟驗證** → 到 [https://myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) 建立「郵件」專用的應用程式密碼（16 字元）。若綁定 passkey 後頁面不顯示該區塊，需先移除 passkey／檢查進階保護。密碼等同信箱權限，**只放`.env.local` 與 Azure App Settings，禁止 commit**。
+* **上線設定**：`.github/workflows/deploy.yml` 將 GitHub Secrets `SMTP_USER`／`SMTP_PASS`／`NOTIFY_TO` 寫入 Azure App Settings（`SMTP_HOST`/`SMTP_PORT`/`NOTIFY_FROM` 為寫死的預設值，不需設 Secret）。
+
+### 💻 12. 首頁版面與 SEO (`/`)
 * **功能優先版面**：由上而下為 **① 精簡 Hero**（H1＋副標＋2 顆主 CTA：開始 AI 分析 / 看零股情報）→ **② 核心功能 6 卡**（依 `/about`「如何開始」STEP 1→2→3 順序：零股情報→週期進場→損益試算→AI 分析，再墊開發中卡）→ **③ 市場焦點** → **④ 投資名言收尾帶**（附投資風險免責一行）。
 * **轉換元素**：每張功能卡具「立即使用 →」CTA，附 hover 上移與 accent 光暈回饋；開發中卡以「開發中」徽章標記、不提供死連結。
 * **結構化資料**：首頁 JSON-LD `@graph` 含 `WebSite`＋`Organization`＋`WebPage`（inLanguage/dateModified），新聞存在時附 `ItemList`（title/url/datePublished），強化「新鮮內容」訊號。
@@ -140,6 +161,7 @@ flowchart TB
         Next["Next.js 15 App Router<br/>Middleware i18n 語系路由"]
         MF_Lib["lib/market-focus<br/>鉅亨網抓取 + 全文爬取 + LLM 過濾/總覽"]
         MF_API["API：POST /api/market-focus/refresh"]
+        Notify["lib/email<br/>SMTP 總覽信 / 告警信"]
         Pages["頁面：/ /analyze /odd-lot /backtest /portfolio"]
         WebJob["Azure WebJobs<br/>工作日 14:30 雙爬蟲"]
     end
@@ -151,17 +173,22 @@ flowchart TB
     GNews["📰 鉅亨網新聞（股市/匯率/總覽）"]
     LLM["🤖 LLM API（openai-compatible）"]
     MarketData["📡 TWSE OpenAPI / Yahoo Finance"]
+    Gmail["📧 Gmail SMTP（vestential@gmail.com）"]
+    Recipient["📭 收件人 NOTIFY_TO"]
 
     Browser --> Next
     MF_Cron -->|Bearer SYNC_TOKEN| MF_API
     ODD_Cron -->|Bearer SYNC_TOKEN| Next
     MF_API --> MF_Lib
+    MF_API -->|成功寄總覽 / 異常寄告警| Notify
     MF_Lib -->|抓取 2 組查詢| GNews
     MF_Lib -->|AI 過濾 + 摘要| LLM
     MF_Lib -->|saveMarketFocus| DB
     Pages -->|getMarketFocus| DB
     WebJob -->|TWT53U / stock.gift| MarketData
     WebJob --> DB
+    Notify -->|SMTP| Gmail
+    Gmail --> Recipient
 ```
 
 ### 專案目錄結構
@@ -172,7 +199,7 @@ stock-platform/
 │   └── web/                 # Next.js 15 Web 應用程式 (App Router)
 │       ├── src/app/         # 頁面與 API 路由 (/analyze /odd-lot /portfolio /backtest …)
 │       │   └── src/app/api/market-focus/refresh/  # 市場焦點排程 refresh API
-│       └── src/lib/         # 共享邏輯 (auth、oauth、portfolio、market-focus …)
+│       └── src/lib/         # 共享邏輯 (auth、oauth、portfolio、market-focus、email 通知 …)
 ├── packages/
 │   ├── ai-engine/           # AI 8-Agent 分析引擎、Symbol Guard 門禁與投資法則分析
 │   ├── backtest/            # 回測引擎
@@ -209,6 +236,13 @@ OPENAI_API_KEY=your_api_key_here
 LLM_BACKEND_URL=https://opencode.ai/zen/v1
 DEEP_THINK_MODEL=big-pickle
 QUICK_THINK_MODEL=big-pickle
+
+# 選擇性：市場焦點 Email 通知（每日總覽 + 異常告警），詳見「💌 11. 市場焦點 Email 通知」
+# SMTP_HOST=smtp.gmail.com
+# SMTP_PORT=587
+# SMTP_USER=your_gmail@gmail.com
+# SMTP_PASS=your_gmail_app_password
+# NOTIFY_TO=recipient@example.com
 ```
 
 ### 2. 爬蟲種子與資料庫初始化
@@ -321,6 +355,9 @@ git push origin main   # ← 自動觸發部署
 | `GOOGLE_CLIENT_SECRET` | Google OAuth 用戶端密鑰 | `GOOGLE_CLIENT_SECRET` |
 | `LINE_CLIENT_ID` | LINE Channel ID | `LINE_CLIENT_ID` |
 | `LINE_CLIENT_SECRET` | LINE Channel Secret | `LINE_CLIENT_SECRET` |
+| `SMTP_USER` | 寄件 Gmail（`vestential@gmail.com`，需 2FA＋App Password） | `SMTP_USER` |
+| `SMTP_PASS` | Gmail 應用程式密碼（與 `.env.local` 相同，禁止進 repo） | `SMTP_PASS` |
+| `NOTIFY_TO` | 市場焦點總覽／告警信收件人 | `NOTIFY_TO` |
 
 > `AUTH_BASE_URL` 為固定值 `https://vestential.com`，直接寫死在 `deploy.yml`，不需設為 Secret。部署時 `deploy.yml` 會把上表各 Secret 寫入 Azure App Settings。
 
