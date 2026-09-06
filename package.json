@@ -10,7 +10,7 @@
     "start": "npm run start --workspace=apps/web",
     "local-build": "npm run build --workspace=packages/core && npm run build --workspace=packages/market-data && npm run build --workspaces --if-present",
     "build": "echo 'Bypassing Cloud Build'",
-    "lint": "npm run lint --workspaces",
+    "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces --if-present",
     "seed": "npm run seed --workspace=packages/database",

@@ -1,5 +1,5 @@
 import { load } from 'cheerio'
-import { LLMFactory } from '@stock/ai-engine'
+import { createQuickLLM } from '@stock/ai-engine'
 import { loadConfig } from '@stock/core'
 import type { MarketFocusItem } from '@stock/database'
 import { saveMarketFocus, saveMarketFocusMeta } from '@stock/database'
@@ -130,15 +130,40 @@ function extractLongestParagraph($: ReturnType<typeof load>): string {
   return best
 }
 
+const ARTICLE_FETCH_RETRIES = 3
+const ARTICLE_FETCH_BASE_DELAY_MS = 1200
+
+/** 對短暫性失敗(網路錯誤、429/408/5xx)做重試;4xx 其他狀態不重試直接回傳。 */
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let lastErr: unknown = null
+  for (let attempt = 1; attempt <= ARTICLE_FETCH_RETRIES; attempt++) {
+    try {
+      const res = await fetch(url, init)
+      if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429)) {
+        return res
+      }
+      lastErr = new Error(`HTTP ${res.status}`)
+    } catch (e) {
+      lastErr = e
+    }
+    if (attempt < ARTICLE_FETCH_RETRIES) {
+      const delay = ARTICLE_FETCH_BASE_DELAY_MS * attempt
+      console.warn(`[MarketFocus] article fetch attempt ${attempt} failed, retrying in ${delay}ms: ${url}`)
+      await new Promise((r) => setTimeout(r, delay))
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('article fetch failed')
+}
+
 /** 抓取文章全文並解析原始來源 URL;失敗或 robots 拒絕時各自回傳 null。 */
 export async function fetchArticleContent(url: string): Promise<{ content: string | null; sourceUrl: string | null }> {
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       headers: { 'user-agent': USER_AGENT },
       redirect: 'follow',
       signal: AbortSignal.timeout(12000),
     })
-    if (!res.ok) return { content: null, sourceUrl: null }
+    if (!res.ok) return { content: null, sourceUrl: url }
     const finalUrl = res.url || url
     if (!(await isAllowedByRobots(finalUrl))) {
       console.log(`[MarketFocus] robots.txt disallows crawling: ${finalUrl}`)
@@ -165,8 +190,9 @@ export async function fetchArticleContent(url: string): Promise<{ content: strin
     const clean = text.replace(/\n{3,}/g, '\n\n').trim().slice(0, MAX_CONTENT_CHARS)
     return { content: clean || null, sourceUrl: finalUrl }
   } catch (e) {
-    console.error('[MarketFocus] article fetch failed:', url, e)
-    return { content: null, sourceUrl: null }
+    console.error('[MarketFocus] article fetch failed after retries:', url, e)
+    // 保留原始新聞網址,讓清單仍能呈現有效直連連結,而不是存入 NULL
+    return { content: null, sourceUrl: url }
   }
 }
 
@@ -183,13 +209,8 @@ const SUMMARY_SYSTEM_PROMPT = `你是 Vestential 的「市場焦點」副總編�
 export async function generateDailySummary(items: MarketFocusItem[]): Promise<string> {
   try {
     const config = loadConfig()
-    const llm = LLMFactory.create({
-      provider: config.llmProvider,
-      model: config.quickThinkModel,
-      temperature: config.temperature,
-      baseUrl: config.llmProvider !== 'google' ? config.backendUrl : undefined,
-      maxTokens: 2048,
-    })
+    // 透過 createQuickLLM 帶上 fallback chain:primary(OpenAI)被配額 429 封鎖時自動切換備援模型
+    const { llm } = createQuickLLM(config, { maxTokens: 2048 })
     const list = items.map((it, i) => `${i + 1}. [${it.source}] ${it.title}${it.reason ? `（選取理由：${it.reason}）` : ''}`).join('\n')
     const raw = await llm.generate(SUMMARY_SYSTEM_PROMPT, `以下是今日精選新聞：\n${list}\n\n請撰寫當日市場總覽。`)
     const parsed = JSON.parse(raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()) as { summary?: string }
@@ -241,13 +262,7 @@ export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<Marke
   if (candidates.length === 0) return []
   try {
     const config = loadConfig()
-    const llm = LLMFactory.create({
-      provider: config.llmProvider,
-      model: config.quickThinkModel,
-      temperature: config.temperature,
-      baseUrl: config.llmProvider !== 'google' ? config.backendUrl : undefined,
-      maxTokens: 2048,
-    })
+    const { llm } = createQuickLLM(config, { maxTokens: 2048 })
     const raw = await llm.generate(SYSTEM_PROMPT, buildUserPrompt(candidates))
     const parsed = JSON.parse(raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()) as {
       selected: SelectEntry[]
@@ -302,6 +317,9 @@ export async function refreshMarketFocus(): Promise<MarketFocusItem[]> {
     content: crawled[i].status === 'fulfilled' ? crawled[i].value.content : null,
     source_url: crawled[i].status === 'fulfilled' ? crawled[i].value.sourceUrl : null,
   }))
+  for (const it of enriched) {
+    if (!it.content) console.warn(`[MarketFocus] no article content saved for: ${it.title} (${it.source_url ?? it.url})`)
+  }
 
   await saveMarketFocus(enriched)
   const summary = await generateDailySummary(enriched)
