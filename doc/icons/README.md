@@ -25,6 +25,14 @@
 | 網站 favicon/app icon | PNG + SVG | 512×512、64×64、180×180 |
 | 向量母版 | SVG / PDF | — |
 
+## 現有資產（已產出）
+
+| 檔案 | 說明 |
+|---|---|
+| `vestential-logo-1024.png` | **icon 母版**：單一累積弧（valley-V）、藍→綠漸變、右端綠目標點，透明底 1024×1024 |
+| `vestential-lockup-1200x628.png` | **主視覺 lockup**：icon + VESTENTIAL 字標（Bahnschrift）+ 標語，深底 1200×628（FB/OG 適用） |
+| `vestential-logo-concept.md` | 設計理念「Accumulation Arc」與設計決定（形/色/字） |
+
 ## SOP
 1. 先用設計 skill（`canvas-design`）產出母版圖 → 存這裡。
 2. 依上表切出各尺寸 → 同名但標註用途（如 `vestential-logo-1024.png`、`vestential-banner-1500x500.png`）。
