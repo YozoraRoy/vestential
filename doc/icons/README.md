@@ -29,9 +29,21 @@
 
 | 檔案 | 說明 |
 |---|---|
-| `vestential-logo-1024.png` | **icon 母版**：單一累積弧（valley-V）、藍→綠漸變、右端綠目標點，透明底 1024×1024 |
+| `vestential-logo-1024.png` | **icon 母版（現行）**：單一累積弧（valley-V）、藍→綠漸變、右端綠目標點，透明底 1024×1024 |
 | `vestential-lockup-1200x628.png` | **主視覺 lockup**：icon + VESTENTIAL 字標（Bahnschrift）+ 標語，深底 1200×628（FB/OG 適用） |
 | `vestential-logo-concept.md` | 設計理念「Accumulation Arc」與設計決定（形/色/字） |
+
+### 5 個參考核選版（v1–v5，透明底 1024×1024）
+
+| 檔案 | 方向 | 重點 |
+|---|---|---|
+| `vestential-logo-v1-monogram-1024.png` | 幾何雙色 V | 左臂藍、右臂綠、谷底收谷 + 右上方目標點；極簡 |
+| `vestential-logo-v2-candle-1024.png` | K 線 V 形 | 7 根 K 柱沿 V 形排列，谷底紅 K（進場區）、爬升轉綠、最高點帶綠色目標點 |
+| `vestential-logo-v3-channel-1024.png` | 雙軌通道弧 | 累積弧外層 + 內嵌亮色細軌 =「價值累積通道」；藍→綠漸變 |
+| `vestential-logo-v4-orbit-1024.png` | 軌道錶盤 | 環 + 刻度錶圈，弧穿入圓內貼底、綠色目標點落在環上（時間/價格雙軸） |
+| `vestential-logo-v5-fold-1024.png` | 折疊層次 V | 三層 offset（藍→深藍）營造折疊厚度，前層藍→綠漸變 + 目標點 |
+
+> 決選流程：挑一個方向（或指定混搭）→ 依 `SOP` 切尺寸 → 套用社群帳號。
 
 ## SOP
 1. 先用設計 skill（`canvas-design`）產出母版圖 → 存這裡。
