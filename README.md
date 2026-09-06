@@ -450,28 +450,11 @@ LINE 不允許 localhost callback，請用 `/api/auth/dev-login` 或先在線上
 
 ## 📄 License
 
-本專案採用 **MIT License**（詳見 [`LICENSE`](./LICENSE)）。
+本專案採用 **Sustainable Use License 1.0 (SUL)**——fair-code / source-available 模式(同 n8n):
 
-```text
-MIT License
+- ✅ **閱讀、學習、個人與非商業用途**免費。
+- ✅ 原始碼公開於 GitHub,可複製、研究、自用。
+- ❌ **禁止商業再分發或提供給他人營利收取費用**:把本專案(或衍生版本)架成商用服務／賣給第三方,需另外取得授權。
+- 🔒 商業授權請聯繫:GitHub [YozoraRoy/vestential](https://github.com/YozoraRoy/vestential) issues,或寄信 `yuzora_roy@hotmail.com`。
 
-Copyright (c) 2026 Yozora Roy
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+完整條文見 [`LICENSE`](./LICENSE)。第三方元件維持其原始授權(如 MIT 的開源套件不受影響)。
