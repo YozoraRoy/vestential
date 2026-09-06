@@ -443,6 +443,25 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
       END
     `)
 
+    // 既有 market_focus 表補齊新欄位（冪等），並建立 market_focus_meta（若尚未存在）。
+    await _pool.request().query(`
+      IF COL_LENGTH('market_focus', 'content') IS NULL
+        ALTER TABLE market_focus ADD content NVARCHAR(MAX);
+      IF COL_LENGTH('market_focus', 'source_url') IS NULL
+        ALTER TABLE market_focus ADD source_url NVARCHAR(2000);
+      IF COL_LENGTH('market_focus', 'reason') IS NULL
+        ALTER TABLE market_focus ADD reason NVARCHAR(MAX);
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'market_focus_meta')
+      BEGIN
+        CREATE TABLE market_focus_meta (
+          id           INT IDENTITY(1,1) PRIMARY KEY,
+          summary      NVARCHAR(MAX) NOT NULL,
+          generated_at NVARCHAR(100),
+          created_at   DATETIME DEFAULT GETDATE()
+        );
+      END
+    `)
+
     return _pool
   } catch (err) {
     console.error('[AzureSQL] Failed to connect (falling back to memory):', err)
