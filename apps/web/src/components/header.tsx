@@ -67,9 +67,14 @@ export function Header({ initialUser }: { initialUser: HeaderUser | null }) {
   return (
     <header className="sticky top-0 z-50 bg-[var(--bg-primary)]/80 backdrop-blur-md border-b border-white/5">
       <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-        <Link href={localizePath(locale, '/')} className="flex items-center gap-2">
-          <TrendingUp className="w-6 h-6 text-[var(--accent)]" />
-          <span className="text-lg font-bold">Vestential</span>
+        <Link href={localizePath(locale, '/')} className="flex items-center gap-2.5 group">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand-logo.png"
+            alt="Vestential Logo"
+            className="w-8 h-8 object-contain transition-transform group-hover:scale-105"
+          />
+          <span className="text-lg font-bold tracking-tight">Vestential</span>
         </Link>
         <div className="flex items-center gap-1">
           <nav className="flex items-center gap-1 mr-2">

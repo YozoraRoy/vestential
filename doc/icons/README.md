@@ -33,7 +33,7 @@
 | `vestential-lockup-1200x628.png` | **主視覺 lockup**：icon + VESTENTIAL 字標（Bahnschrift）+ 標語，深底 1200×628（FB/OG 適用） |
 | `vestential-logo-concept.md` | 設計理念「Accumulation Arc」與設計決定（形/色/字） |
 
-### 5 個參考核選版（v1–v5，透明底 1024×1024）
+### 9 個參考核選版（v1–v9，透明底 1024×1024）
 
 | 檔案 | 方向 | 重點 |
 |---|---|---|
@@ -42,6 +42,10 @@
 | `vestential-logo-v3-channel-1024.png` | 雙軌通道弧 | 累積弧外層 + 內嵌亮色細軌 =「價值累積通道」；藍→綠漸變 |
 | `vestential-logo-v4-orbit-1024.png` | 軌道錶盤 | 環 + 刻度錶圈，弧穿入圓內貼底、綠色目標點落在環上（時間/價格雙軸） |
 | `vestential-logo-v5-fold-1024.png` | 折疊層次 V | 三層 offset（藍→深藍）營造折疊厚度，前層藍→綠漸變 + 目標點 |
+| `vestential-logo-v6-sprout-1024.png` | **提案 B 複利新芽** | 現代雙葉幾何 V，左小苗藍、右舒展綠、晨露目標點；親和小資 |
+| `vestential-logo-v7-mobius-1024.png` | **提案 C 莫比烏斯環** | 立體扭轉的無限週期 V 緞帶，谷底翻面交錯、無縫循環；頂級科技感 |
+| `vestential-logo-v8-prism-1024.png` | **提案 D 智能水晶稜鏡** | 多切面 Isometric 立體水晶 V，右上放射 3 道折射分析光譜；AI 科技原生 |
+| `vestential-logo-v9-scales-1024.png` | **提案 E 葛拉漢天平** | 幾何天平 V，左承載內在價值立方體、右昂揚超越成長星芒；價值投資派 |
 
 > 決選流程：挑一個方向（或指定混搭）→ 依 `SOP` 切尺寸 → 套用社群帳號。
 

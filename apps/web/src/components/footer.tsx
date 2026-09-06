@@ -17,8 +17,10 @@ export function Footer() {
     <footer className="border-t border-white/5 mt-auto">
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="text-sm text-[var(--text-secondary)]">
-            © {new Date().getFullYear()} Vestential
+          <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand-logo.png" alt="" className="w-4 h-4 object-contain opacity-70" />
+            <span>© {new Date().getFullYear()} Vestential</span>
           </div>
           <nav className="flex items-center gap-4 text-sm text-[var(--text-secondary)]">
             {footerLinks.map((link) => (
