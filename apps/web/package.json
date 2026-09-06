@@ -17,6 +17,7 @@
     "@stock/market-data": "*",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.11.1",
+    "cheerio": "^1.2.0",
     "clsx": "^2.1.0",
     "jose": "^6.2.8",
     "lucide-react": "^0.468.0",

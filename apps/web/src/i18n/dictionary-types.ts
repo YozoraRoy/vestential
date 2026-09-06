@@ -33,6 +33,7 @@ export interface Dict {
     oddLot: string
     portfolio: string
     backtest: string
+    marketFocus: string
   }
   switcher: {
     label: string
@@ -46,6 +47,7 @@ export interface Dict {
     marketFocusTitle: string
     marketFocusSubtitle: string
     marketFocusEmpty: string
+    marketFocusViewAll: string
     aiAnalyzeTitle: string
     aiAnalyzeDesc: string
     oddLotTitle: string

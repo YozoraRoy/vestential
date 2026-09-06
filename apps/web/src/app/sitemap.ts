@@ -3,7 +3,7 @@ import { locales, defaultLocale, type Locale } from '@/i18n/config'
 
 const BASE_URL = 'https://vestential.com'
 
-const publicPaths = ['', '/about', '/privacy', '/terms', '/odd-lot', '/backtest', '/portfolio', '/analyze', '/login']
+const publicPaths = ['', '/about', '/privacy', '/terms', '/odd-lot', '/backtest', '/portfolio', '/analyze', '/market-focus', '/login']
 
 function urlFor(locale: Locale, path: string): string {
   if (locale === defaultLocale) return `${BASE_URL}${path || ''}`

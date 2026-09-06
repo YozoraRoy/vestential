@@ -206,9 +206,17 @@ function getSqliteDb(): Database.Database | null {
         source TEXT,
         published_at TEXT,
         reason TEXT,
+        content TEXT,
+        source_url TEXT,
         created_at TEXT DEFAULT (datetime('now', 'localtime'))
       );
       CREATE INDEX IF NOT EXISTS idx_market_focus_created ON market_focus(created_at);
+      CREATE TABLE IF NOT EXISTS market_focus_meta (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        summary TEXT NOT NULL,
+        generated_at TEXT,
+        created_at TEXT DEFAULT (datetime('now', 'localtime'))
+      );
 
       UPDATE odd_lot_trades SET price = 34.15, volume = 19443, bid_price = 34.15, bid_volume = 8943, ask_price = 34.20, ask_volume = 6092 WHERE stock_id = '2887';
       UPDATE shareholder_gifts SET gift_name = '多用途矽膠隔熱餐墊(二入)', last_buy_date = '08/14' WHERE stock_id = '2887';
@@ -421,9 +429,17 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           source       NVARCHAR(200),
           published_at NVARCHAR(100),
           reason       NVARCHAR(MAX),
+          content      NVARCHAR(MAX),
+          source_url   NVARCHAR(2000),
           created_at   DATETIME DEFAULT GETDATE()
         );
         CREATE INDEX idx_market_focus_created ON market_focus(created_at);
+        CREATE TABLE market_focus_meta (
+          id           INT IDENTITY(1,1) PRIMARY KEY,
+          summary      NVARCHAR(MAX) NOT NULL,
+          generated_at NVARCHAR(100),
+          created_at   DATETIME DEFAULT GETDATE()
+        );
       END
     `)
 
@@ -1347,7 +1363,17 @@ export interface MarketFocusItem {
   source: string | null
   published_at: string | null
   reason: string | null
+  /** 抓取到的文章全文摘錄（節錄前 4000 字，僅短存最新一輪）。 */
+  content?: string | null
+  /** 解析後的原始新聞來源 URL（優先 Google 轉址後的網址）。 */
+  source_url?: string | null
   created_at?: string
+}
+
+export interface MarketFocusMeta {
+  id?: number
+  summary: string | null
+  generated_at: string | null
 }
 
 /** 全量取代 market_focus 內容（每次 refresh 重新挑選一輪新聞）。 */
@@ -1356,13 +1382,15 @@ export async function saveMarketFocus(items: MarketFocusItem[]): Promise<void> {
   for (const it of items) {
     if (!it.title || !it.url) continue
     await dbExecute(
-      'INSERT INTO market_focus (title, url, source, published_at, reason) VALUES (@title, @url, @source, @published_at, @reason)',
+      'INSERT INTO market_focus (title, url, source, published_at, reason, content, source_url) VALUES (@title, @url, @source, @published_at, @reason, @content, @source_url)',
       {
         title: it.title.slice(0, 500),
         url: it.url.slice(0, 2000),
         source: it.source ? it.source.slice(0, 200) : null,
         published_at: it.published_at ? it.published_at.slice(0, 100) : null,
         reason: it.reason ?? null,
+        content: it.content ?? null,
+        source_url: it.source_url ? it.source_url.slice(0, 2000) : null,
       },
     )
   }
@@ -1371,8 +1399,25 @@ export async function saveMarketFocus(items: MarketFocusItem[]): Promise<void> {
 /** 讀取最新一輪市場焦點新聞（以發布時間新到舊排序）。 */
 export async function getMarketFocus(limit: number = 6): Promise<MarketFocusItem[]> {
   return dbQueryAll<MarketFocusItem>(
-    `SELECT id, title, url, source, published_at, reason FROM market_focus ORDER BY published_at DESC, id DESC LIMIT ${limit}`,
+    `SELECT id, title, url, source, published_at, reason, content, source_url FROM market_focus ORDER BY published_at DESC, id DESC LIMIT ${limit}`,
   )
+}
+
+/** 覆寫當日市場焦點 AI 總覽（僅保留最新一輪，維持單一列）。 */
+export async function saveMarketFocusMeta(meta: { summary: string; generatedAt: string }): Promise<void> {
+  await dbExecute('DELETE FROM market_focus_meta')
+  await dbExecute(
+    'INSERT INTO market_focus_meta (summary, generated_at) VALUES (@summary, @generated_at)',
+    { summary: meta.summary.slice(0, 20000), generated_at: meta.generatedAt.slice(0, 100) },
+  )
+}
+
+/** 讀取最新市場焦點 AI 總覽。 */
+export async function getMarketFocusMeta(): Promise<MarketFocusMeta | null> {
+  const rows = await dbQueryAll<MarketFocusMeta>(
+    'SELECT id, summary, generated_at FROM market_focus_meta ORDER BY id DESC LIMIT 1',
+  )
+  return rows[0] ?? null
 }
 
 // ─── Users / Auth / Quota ────────────────────────────────────────

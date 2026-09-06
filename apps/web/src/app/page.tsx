@@ -8,13 +8,14 @@ import {
   Newspaper,
   Sparkles,
   ArrowRight,
-  ArrowUpRight,
 } from 'lucide-react'
 import Link from 'next/link'
 import { getDict, getLocale } from '@/i18n/server'
 import { localizePath } from '@/i18n/paths'
 import { buildAlternates } from '@/i18n/metadata'
 import { getMarketFocus } from '@stock/database'
+import { SectionHeading } from '@/components/section-heading'
+import { NewsCard } from '@/components/news-card'
 
 const BASE_URL = 'https://vestential.com'
 
@@ -38,16 +39,6 @@ export async function generateMetadata() {
       card: 'summary_large_image',
     },
   }
-}
-
-function formatPubDate(s: string): string {
-  const dt = new Date(s)
-  if (Number.isNaN(dt.getTime())) return s
-  return (
-    dt.toLocaleDateString('zh-TW') +
-    ' ' +
-    dt.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })
-  )
 }
 
 export default async function Home() {
@@ -189,12 +180,7 @@ export default async function Home() {
 
       {/* ② Core features */}
       <section aria-labelledby="core-features" className="mb-14">
-        <div className="flex items-center gap-2 mb-6">
-          <Sparkles className="w-5 h-5 text-[var(--accent)]" />
-          <h2 id="core-features" className="text-xl font-bold text-[var(--text-primary)]">
-            {dict.home.coreFeaturesTitle}
-          </h2>
-        </div>
+        <SectionHeading id="core-features" icon={Sparkles} title={dict.home.coreFeaturesTitle} />
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
           {features.map((f) => {
             const Icon = f.icon
@@ -246,38 +232,26 @@ export default async function Home() {
 
       {/* ③ Market focus */}
       <section aria-label={dict.home.marketFocusTitle} className="mb-12">
-        <div className="flex items-center gap-2 mb-1">
-          <Newspaper className="w-4 h-4 text-[var(--accent)]" />
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">{dict.home.marketFocusTitle}</h2>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-[var(--text-secondary)]">AI</span>
-        </div>
+        <SectionHeading
+          id="market-focus"
+          icon={Newspaper}
+          title={dict.home.marketFocusTitle}
+          badge="AI"
+          size="md"
+        >
+          <Link
+            href={localizePath(locale, '/market-focus')}
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--accent)] hover:opacity-80 transition"
+          >
+            {dict.home.marketFocusViewAll}
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </SectionHeading>
         <p className="text-sm text-[var(--text-secondary)] mb-4">{dict.home.marketFocusSubtitle}</p>
         {focus.length > 0 ? (
           <ul className="grid grid-cols-1 gap-3">
             {focus.map((item) => (
-              <li
-                key={item.id}
-                className="bg-[var(--bg-card)] rounded-xl p-4 border border-white/5 hover:border-white/10 transition"
-              >
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group flex items-start gap-2 text-[var(--text-primary)] font-medium leading-snug hover:text-[var(--accent)] transition"
-                >
-                  <span className="flex-1">{item.title}</span>
-                  <ArrowUpRight className="w-4 h-4 mt-0.5 shrink-0 text-[var(--text-secondary)] group-hover:text-[var(--accent)] transition" />
-                </a>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)] mt-1.5">
-                  {item.source && <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">{item.source}</span>}
-                  {item.published_at && <span>{formatPubDate(item.published_at)}</span>}
-                </div>
-                {item.reason && (
-                  <p className="text-sm text-[var(--text-secondary)] leading-relaxed mt-2 pt-2 border-t border-white/5">
-                    {item.reason}
-                  </p>
-                )}
-              </li>
+              <NewsCard key={item.id} item={item} variant="compact" />
             ))}
           </ul>
         ) : (

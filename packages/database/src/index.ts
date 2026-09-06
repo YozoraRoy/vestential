@@ -9,9 +9,9 @@ export {
   getRecognitionUsage, consumeRecognitionQuota, refundRecognitionQuota,
   searchStocksByName, fuzzySearchStocksByName, damerauLevenshtein,
   deleteAnalysisRecord,
-  saveMarketFocus, getMarketFocus,
+  saveMarketFocus, getMarketFocus, saveMarketFocusMeta, getMarketFocusMeta,
 } from './db.js'
-export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem } from './db.js'
+export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta } from './db.js'
 export { exportSyncData, mergeExports, applySyncMerge, applySyncImport, SYNC_TABLES } from './sync.js'
 export type { SyncExport, SyncRow, MergedExport, SyncTableName, TaggedRow, RowSource } from './sync.js'
 export type { Database } from 'better-sqlite3'
