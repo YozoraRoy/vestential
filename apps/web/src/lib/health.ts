@@ -117,6 +117,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
   const envChecks: Record<string, boolean> = {}
   envChecks.OPENAI_API_KEY = !!process.env.OPENAI_API_KEY
   envChecks.FALLBACK_QUICK_LLM_API_KEY = !!process.env.FALLBACK_QUICK_LLM_API_KEY
+  envChecks.FALLBACK2_QUICK_LLM_API_KEY = !!process.env.FALLBACK2_QUICK_LLM_API_KEY
   envChecks.AUTH_SECRET = !!process.env.AUTH_SECRET
   envChecks.SYNC_TOKEN = !!process.env.SYNC_TOKEN
   envChecks.DATABASE_URL_OR_PATH =

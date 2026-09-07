@@ -1,21 +1,30 @@
 import type { LLMCallInfo, LLMClient, LLMUsage } from './client.js'
 
+/**
+ * Chain client: tries the primary model first, then each fallback in order
+ * (tier 1, tier 2, …). Only throws after every tier has been exhausted.
+ */
 export class FallbackClient implements LLMClient {
   private _onCall?: (info: LLMCallInfo) => void
   private _onRetry?: (retryAfterMs: number) => void
   private lastModel = ''
 
-  /** Total number of calls that fell back to the secondary model. */
+  /** Total number of calls that fell back to a secondary model. */
   fallbackCalls = 0
 
   constructor(
     private primary: LLMClient,
-    private fallback: LLMClient,
+    /** Ordered fallback tiers (tier 1 first). */
+    private fallbacks: LLMClient[] = [],
   ) {}
 
-  /** 內層 fallback client：当主要模型已確定不可用（如配額被鎖）時可直接呼叫，省去每輪重試 primary。 */
+  /** 內層 fallback 鏈（tier1 起）。當主要模型已確定不可用（如配額被鎖）時可直接呼叫，省去每輪重試 primary。 */
   get secondary(): LLMClient {
-    return this.fallback
+    return this.fallbacks[0] ?? this.primary
+  }
+
+  get fallbackChain(): LLMClient[] {
+    return this.fallbacks
   }
 
   get model(): string {
@@ -28,7 +37,7 @@ export class FallbackClient implements LLMClient {
 
   set onUsage(cb: ((usage: LLMUsage) => void) | undefined) {
     this.primary.onUsage = cb
-    this.fallback.onUsage = cb
+    for (const fb of this.fallbacks) fb.onUsage = cb
   }
 
   get onCall(): ((info: LLMCallInfo) => void) | undefined {
@@ -47,82 +56,65 @@ export class FallbackClient implements LLMClient {
   set onRetry(cb: ((retryAfterMs: number) => void) | undefined) {
     this._onRetry = cb
     this.primary.onRetry = cb
-    this.fallback.onRetry = cb
+    for (const fb of this.fallbacks) fb.onRetry = cb
+  }
+
+  private report(model: string, usedFallback: boolean): void {
+    this.lastModel = model
+    this._onCall?.({ model, usedFallback })
+  }
+
+  private async tryChain<T>(fn: (c: LLMClient) => Promise<T>): Promise<T> {
+    const tiers: Array<{ client: LLMClient; usedFallback: boolean }> = [
+      { client: this.primary, usedFallback: false },
+      ...this.fallbacks.map((client) => ({ client, usedFallback: true })),
+    ]
+    const errors: string[] = []
+    for (const tier of tiers) {
+      try {
+        const out = await fn(tier.client)
+        this.report(tier.client.model, tier.usedFallback)
+        if (tier.usedFallback) this.fallbackCalls++
+        return out
+      } catch (err: any) {
+        errors.push(`${tier.client.model}: ${err.message}`)
+        if (tier.usedFallback) this.fallbackCalls++
+        console.warn(`[Fallback] ${tier.client.model} failed: ${err.message}`)
+      }
+    }
+    throw new Error(`All LLM models exhausted — ${errors.join('; ')}`)
   }
 
   async generate(systemPrompt: string, userPrompt: string): Promise<string> {
-    try {
-      const out = await this.primary.generate(systemPrompt, userPrompt)
-      this.lastModel = this.primary.model
-      this._onCall?.({ model: this.primary.model, usedFallback: false })
-      return out
-    } catch (primaryErr: any) {
-      console.warn(`[Fallback] Primary failed: ${primaryErr.message}`)
-      this.fallbackCalls++
-      try {
-        const out = await this.fallback.generate(systemPrompt, userPrompt)
-        this.lastModel = this.fallback.model
-        this._onCall?.({ model: this.fallback.model, usedFallback: true })
-        return out
-      } catch (fallbackErr: any) {
-        throw new Error(
-          `Both LLM models exhausted — primary (${this.primary.model}): ${primaryErr.message}; ` +
-          `fallback (${this.fallback.model}): ${fallbackErr.message}`,
-        )
-      }
-    }
+    return this.tryChain((c) => c.generate(systemPrompt, userPrompt))
   }
 
   async generateObject<T>(systemPrompt: string, userPrompt: string, schema: any): Promise<T> {
-    try {
-      const out = await this.primary.generateObject<T>(systemPrompt, userPrompt, schema)
-      this.lastModel = this.primary.model
-      this._onCall?.({ model: this.primary.model, usedFallback: false })
-      return out
-    } catch (primaryErr: any) {
-      console.warn(`[Fallback] Primary failed: ${primaryErr.message}`)
-      this.fallbackCalls++
-      try {
-        const out = await this.fallback.generateObject<T>(systemPrompt, userPrompt, schema)
-        this.lastModel = this.fallback.model
-        this._onCall?.({ model: this.fallback.model, usedFallback: true })
-        return out
-      } catch (fallbackErr: any) {
-        throw new Error(
-          `Both LLM models exhausted — primary (${this.primary.model}): ${primaryErr.message}; ` +
-          `fallback (${this.fallback.model}): ${fallbackErr.message}`,
-        )
-      }
-    }
+    return this.tryChain((c) => c.generateObject<T>(systemPrompt, userPrompt, schema))
   }
 
   async generateWithImage(systemPrompt: string, userPrompt: string, imageDataUrl: string): Promise<string> {
-    let primaryErr: any = null
-    if (this.primary.generateWithImage) {
+    const tiers: Array<{ client: LLMClient; usedFallback: boolean }> = [
+      { client: this.primary, usedFallback: false },
+      ...this.fallbacks.map((client) => ({ client, usedFallback: true })),
+    ]
+    const errors: string[] = []
+    for (const tier of tiers) {
+      if (!tier.client.generateWithImage) {
+        errors.push(`${tier.client.model}: unsupported`)
+        continue
+      }
       try {
-        const out = await this.primary.generateWithImage(systemPrompt, userPrompt, imageDataUrl)
-        this.lastModel = this.primary.model
-        this._onCall?.({ model: this.primary.model, usedFallback: false })
+        const out = await tier.client.generateWithImage(systemPrompt, userPrompt, imageDataUrl)
+        this.report(tier.client.model, tier.usedFallback)
+        if (tier.usedFallback) this.fallbackCalls++
         return out
-      } catch (e: any) {
-        primaryErr = e
-        console.warn(`[Fallback] Primary image call failed: ${e.message}`)
+      } catch (err: any) {
+        errors.push(`${tier.client.model}: ${err.message}`)
+        if (tier.usedFallback) this.fallbackCalls++
+        console.warn(`[Fallback] ${tier.client.model} image call failed: ${err.message}`)
       }
     }
-    if (!this.fallback.generateWithImage) {
-      throw new Error('Neither primary nor fallback LLM supports image input')
-    }
-    this.fallbackCalls++
-    try {
-      const out = await this.fallback.generateWithImage(systemPrompt, userPrompt, imageDataUrl)
-      this.lastModel = this.fallback.model
-      this._onCall?.({ model: this.fallback.model, usedFallback: true })
-      return out
-    } catch (fallbackErr: any) {
-      throw new Error(
-        `Both LLM models exhausted for image — primary (${this.primary.model}): ${primaryErr?.message ?? 'unsupported'}; ` +
-        `fallback (${this.fallback.model}): ${fallbackErr.message}`,
-      )
-    }
+    throw new Error(`All LLM models exhausted for image — ${errors.join('; ')}`)
   }
 }

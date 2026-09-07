@@ -73,6 +73,13 @@ export async function GET() {
     FALLBACK_QUICK_LLM_BACKEND_URL: process.env.FALLBACK_QUICK_LLM_BACKEND_URL || 'unset',
     FALLBACK_DEEP_LLM_API_KEY: process.env.FALLBACK_DEEP_LLM_API_KEY ? 'set(' + process.env.FALLBACK_DEEP_LLM_API_KEY.substring(0, 8) + '...)' : 'unset',
     FALLBACK_QUICK_LLM_API_KEY: process.env.FALLBACK_QUICK_LLM_API_KEY ? 'set(' + process.env.FALLBACK_QUICK_LLM_API_KEY.substring(0, 8) + '...)' : 'unset',
+    FALLBACK2_LLM_PROVIDER: process.env.FALLBACK2_LLM_PROVIDER || 'unset',
+    FALLBACK2_DEEP_THINK_MODEL: process.env.FALLBACK2_DEEP_THINK_MODEL || 'unset',
+    FALLBACK2_QUICK_THINK_MODEL: process.env.FALLBACK2_QUICK_THINK_MODEL || 'unset',
+    FALLBACK2_DEEP_LLM_BACKEND_URL: process.env.FALLBACK2_DEEP_LLM_BACKEND_URL || 'unset',
+    FALLBACK2_QUICK_LLM_BACKEND_URL: process.env.FALLBACK2_QUICK_LLM_BACKEND_URL || 'unset',
+    FALLBACK2_DEEP_LLM_API_KEY: process.env.FALLBACK2_DEEP_LLM_API_KEY ? 'set(' + process.env.FALLBACK2_DEEP_LLM_API_KEY.substring(0, 8) + '...)' : 'unset',
+    FALLBACK2_QUICK_LLM_API_KEY: process.env.FALLBACK2_QUICK_LLM_API_KEY ? 'set(' + process.env.FALLBACK2_QUICK_LLM_API_KEY.substring(0, 8) + '...)' : 'unset',
   }
 
   return NextResponse.json(results)

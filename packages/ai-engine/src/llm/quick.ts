@@ -45,7 +45,42 @@ export function createQuickLLM(config: AppConfig, opts?: QuickLLMOptions): { llm
       temperature: config.temperature,
       maxTokens: opts?.maxTokens,
     })
-    llm = new FallbackClient(primary, fallback)
+    llm = new FallbackClient(primary, [fallback])
+
+    // tier2（FALLBACK2_*）：任一變數存在即啟用，provider 缺省沿用 tier1。
+    const hasTier2 = [
+      process.env.FALLBACK2_LLM_PROVIDER,
+      process.env.FALLBACK2_LLM_BACKEND_URL,
+      process.env.FALLBACK2_LLM_API_KEY,
+      process.env.FALLBACK2_QUICK_THINK_MODEL,
+      process.env.FALLBACK2_QUICK_LLM_BACKEND_URL,
+      process.env.FALLBACK2_QUICK_LLM_API_KEY,
+    ].some((v) => v?.trim())
+    if (hasTier2) {
+      const provider2 = process.env.FALLBACK2_LLM_PROVIDER?.trim() || fallbackProvider
+      const model2 = process.env.FALLBACK2_QUICK_THINK_MODEL?.trim() || fallbackModel
+      const baseUrl2 =
+        process.env.FALLBACK2_QUICK_LLM_BACKEND_URL?.trim() ||
+        process.env.FALLBACK2_LLM_BACKEND_URL?.trim() ||
+        process.env.FALLBACK_LLM_BACKEND_URL?.trim() ||
+        (provider2 !== 'google' ? config.backendUrl : '') ||
+        undefined
+      const apiKey2 =
+        process.env.FALLBACK2_QUICK_LLM_API_KEY?.trim() ||
+        process.env.FALLBACK2_QUICK_OPENAI_API_KEY?.trim() ||
+        process.env.FALLBACK2_LLM_API_KEY?.trim() ||
+        process.env.FALLBACK2_OPENAI_API_KEY?.trim() ||
+        undefined
+      const fallback2 = LLMFactory.create({
+        provider: provider2,
+        model: model2,
+        apiKey: apiKey2,
+        baseUrl: baseUrl2,
+        temperature: config.temperature,
+        maxTokens: opts?.maxTokens,
+      })
+      llm = new FallbackClient(primary, [fallback, fallback2])
+    }
   }
 
   return { llm, primary, fallbackModel }

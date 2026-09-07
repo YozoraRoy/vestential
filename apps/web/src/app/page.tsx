@@ -132,18 +132,18 @@ export default async function Home() {
     },
     {
       href: null,
-      icon: BarChart3,
-      title: dict.home.optionsTitle,
-      desc: dict.home.optionsDesc,
-      accent: 'accent',
+      icon: Bot,
+      title: dict.home.agentTitle,
+      desc: dict.home.agentDesc,
+      accent: 'violet',
       developing: true,
     },
     {
       href: null,
-      icon: Bot,
-      title: dict.home.agentTitle,
-      desc: dict.home.agentDesc,
-      accent: 'green',
+      icon: BarChart3,
+      title: dict.home.optionsTitle,
+      desc: dict.home.optionsDesc,
+      accent: 'accent',
       developing: true,
     },
   ] as const
@@ -187,7 +187,13 @@ export default async function Home() {
             const accentCls =
               f.accent === 'accent'
                 ? 'bg-[var(--accent)]/15 text-[var(--accent)]'
-                : 'bg-[var(--accent-green)]/15 text-[var(--accent-green)]'
+                : f.accent === 'violet'
+                  ? 'bg-[var(--accent-violet)]/15 text-[var(--accent-violet)]'
+                  : 'bg-[var(--accent-green)]/15 text-[var(--accent-green)]'
+            const cardHoverCls =
+              f.accent === 'violet'
+                ? ' hover:border-[var(--accent-violet)]/60 hover:-translate-y-0.5 hover:shadow-[0_10px_34px_rgba(167,139,250,0.16)]'
+                : cardHover
             const inner = (
               <>
                 <div className="flex items-start justify-between mb-3">
@@ -222,7 +228,7 @@ export default async function Home() {
               )
             }
             return (
-              <Link key={f.title} href={localizePath(locale, f.href!)} className={`${cardBase}${cardHover}`}>
+              <Link key={f.title} href={localizePath(locale, f.href!)} className={`${cardBase}${cardHoverCls}`}>
                 {inner}
               </Link>
             )

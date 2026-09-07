@@ -77,6 +77,12 @@ export interface ModelPlan {
     quickBaseUrl?: string
     deepApiKeyHint?: string
     quickApiKeyHint?: string
+    deep2?: string
+    quick2?: string
+    deep2BaseUrl?: string
+    quick2BaseUrl?: string
+    deep2ApiKeyHint?: string
+    quick2ApiKeyHint?: string
   } | null
 }
 
@@ -123,29 +129,48 @@ export class TradingEngine {
     // 環境變數優先序：
     //   群組專屬 (FALLBACK_DEEP_*) > 通用 (FALLBACK_LLM_*) > 沿用 primary。
     const fallbackProvider = process.env.FALLBACK_LLM_PROVIDER
+    const fallbackDeepModel = process.env.FALLBACK_DEEP_THINK_MODEL ?? 'gemini-2.5-flash'
+    const fallbackQuickModel = process.env.FALLBACK_QUICK_THINK_MODEL ?? 'gemini-2.5-flash'
+
+    // tier2（FALLBACK2_*）：只要任一 tier2 變數存在即啟用，provider 缺省沿用 tier1。
+    const hasTier2 = [
+      process.env.FALLBACK2_LLM_PROVIDER,
+      process.env.FALLBACK2_LLM_BACKEND_URL,
+      process.env.FALLBACK2_LLM_API_KEY,
+      process.env.FALLBACK2_DEEP_THINK_MODEL,
+      process.env.FALLBACK2_QUICK_THINK_MODEL,
+      process.env.FALLBACK2_DEEP_LLM_BACKEND_URL,
+      process.env.FALLBACK2_DEEP_LLM_API_KEY,
+      process.env.FALLBACK2_QUICK_LLM_BACKEND_URL,
+      process.env.FALLBACK2_QUICK_LLM_API_KEY,
+    ].some((v) => v?.trim())
+
     let fallbackPlan: ModelPlan['fallback'] = null
     if (fallbackProvider) {
-      const fallbackDeepModel = process.env.FALLBACK_DEEP_THINK_MODEL ?? 'gemini-2.5-flash'
-      const fallbackQuickModel = process.env.FALLBACK_QUICK_THINK_MODEL ?? 'gemini-2.5-flash'
-
-      const createFallbackClient = (
-        model: string,
-        group: 'deep' | 'quick',
-      ): LLMClient => {
-        const groupPrefix = group === 'deep' ? 'FALLBACK_DEEP_' : 'FALLBACK_QUICK_'
+      const tier1Provider: string = fallbackProvider
+      const tier2Provider = process.env.FALLBACK2_LLM_PROVIDER?.trim() || tier1Provider
+      // 用 tier (1|2) 統一解析各層的 provider/model/baseUrl/apiKey。
+      const createFallbackClient = (group: 'deep' | 'quick', tier: 1 | 2): LLMClient => {
+        const prefix = tier === 1 ? 'FALLBACK_' : 'FALLBACK2_'
+        const groupPrefix = group === 'deep' ? `${prefix}DEEP_` : `${prefix}QUICK_`
+        const provider = tier === 1 ? tier1Provider : tier2Provider
+        const model =
+          process.env[`${groupPrefix}THINK_MODEL`]?.trim() ||
+          (group === 'deep' ? fallbackDeepModel : fallbackQuickModel)
         const baseUrl =
           process.env[`${groupPrefix}LLM_BACKEND_URL`]?.trim() ||
+          process.env[`${prefix}LLM_BACKEND_URL`]?.trim() ||
           process.env.FALLBACK_LLM_BACKEND_URL?.trim() ||
-          (fallbackProvider !== 'google' ? this.config.backendUrl : '') ||
+          (provider !== 'google' ? this.config.backendUrl : '') ||
           undefined
         const apiKey =
           process.env[`${groupPrefix}LLM_API_KEY`]?.trim() ||
           process.env[`${groupPrefix}OPENAI_API_KEY`]?.trim() ||
-          process.env.FALLBACK_LLM_API_KEY?.trim() ||
-          process.env.FALLBACK_OPENAI_API_KEY?.trim() ||
+          process.env[`${prefix}LLM_API_KEY`]?.trim() ||
+          process.env[`${prefix}OPENAI_API_KEY`]?.trim() ||
           undefined
         return LLMFactory.create({
-          provider: fallbackProvider,
+          provider,
           model,
           apiKey,
           baseUrl,
@@ -156,8 +181,13 @@ export class TradingEngine {
         })
       }
 
-      this.deepLLM = new FallbackClient(this.deepLLM, createFallbackClient(fallbackDeepModel, 'deep'))
-      this.quickLLM = new FallbackClient(this.quickLLM, createFallbackClient(fallbackQuickModel, 'quick'))
+      const tier1Deep = createFallbackClient('deep', 1)
+      const tier1Quick = createFallbackClient('quick', 1)
+      this.deepLLM = new FallbackClient(this.deepLLM, [tier1Deep, ...(hasTier2 ? [createFallbackClient('deep', 2)] : [])])
+      this.quickLLM = new FallbackClient(this.quickLLM, [tier1Quick, ...(hasTier2 ? [createFallbackClient('quick', 2)] : [])])
+
+      const tier2DeepModel = process.env.FALLBACK2_DEEP_THINK_MODEL?.trim() || fallbackDeepModel
+      const tier2QuickModel = process.env.FALLBACK2_QUICK_THINK_MODEL?.trim() || fallbackQuickModel
       fallbackPlan = {
         provider: fallbackProvider,
         deep: fallbackDeepModel,
@@ -184,6 +214,36 @@ export class TradingEngine {
             process.env.FALLBACK_LLM_API_KEY ||
             process.env.FALLBACK_OPENAI_API_KEY,
         ),
+        ...(hasTier2
+          ? {
+              deep2: tier2DeepModel,
+              quick2: tier2QuickModel,
+              deep2BaseUrl:
+                process.env.FALLBACK2_DEEP_LLM_BACKEND_URL?.trim() ||
+                process.env.FALLBACK2_LLM_BACKEND_URL?.trim() ||
+                process.env.FALLBACK_LLM_BACKEND_URL?.trim() ||
+                (tier2Provider !== 'google' ? this.config.backendUrl : '') ||
+                undefined,
+              quick2BaseUrl:
+                process.env.FALLBACK2_QUICK_LLM_BACKEND_URL?.trim() ||
+                process.env.FALLBACK2_LLM_BACKEND_URL?.trim() ||
+                process.env.FALLBACK_LLM_BACKEND_URL?.trim() ||
+                (tier2Provider !== 'google' ? this.config.backendUrl : '') ||
+                undefined,
+              deep2ApiKeyHint: this.apiKeyHint(
+                process.env.FALLBACK2_DEEP_LLM_API_KEY ||
+                  process.env.FALLBACK2_DEEP_OPENAI_API_KEY ||
+                  process.env.FALLBACK2_LLM_API_KEY ||
+                  process.env.FALLBACK2_OPENAI_API_KEY,
+              ),
+              quick2ApiKeyHint: this.apiKeyHint(
+                process.env.FALLBACK2_QUICK_LLM_API_KEY ||
+                  process.env.FALLBACK2_QUICK_OPENAI_API_KEY ||
+                  process.env.FALLBACK2_LLM_API_KEY ||
+                  process.env.FALLBACK2_OPENAI_API_KEY,
+              ),
+            }
+          : {}),
       }
     }
 

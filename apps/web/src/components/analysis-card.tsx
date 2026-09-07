@@ -47,7 +47,13 @@ interface TokenUsage {
 interface ModelPlan {
   deep: string
   quick: string
-  fallback: { provider: string; deep: string; quick: string } | null
+  fallback: {
+    provider: string
+    deep: string
+    quick: string
+    deep2?: string
+    quick2?: string
+  } | null
 }
 
 interface AnalysisCardProps {
@@ -173,6 +179,7 @@ export function AnalysisCard({ analysis }: AnalysisCardProps) {
                   {analysis.modelPlan.fallback && (
                     <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-yellow-500/10 border border-yellow-500/20 px-2 py-0.5 text-yellow-400">
                       fallback: {analysis.modelPlan.fallback.deep}
+                      {analysis.modelPlan.fallback.deep2 ? ` → ${analysis.modelPlan.fallback.deep2}` : ''}
                     </span>
                   )}
                 </span>

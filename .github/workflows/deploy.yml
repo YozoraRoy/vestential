@@ -58,6 +58,13 @@ jobs:
               FALLBACK_DEEP_LLM_API_KEY="${{ secrets.FALLBACK_DEEP_LLM_API_KEY }}" \
               FALLBACK_QUICK_LLM_BACKEND_URL="${{ secrets.FALLBACK_QUICK_LLM_BACKEND_URL }}" \
               FALLBACK_QUICK_LLM_API_KEY="${{ secrets.FALLBACK_QUICK_LLM_API_KEY }}" \
+              FALLBACK2_LLM_PROVIDER=openai \
+              FALLBACK2_DEEP_THINK_MODEL=qwen/qwen3.8-27b \
+              FALLBACK2_QUICK_THINK_MODEL=qwen/qwen3.8-27b \
+              FALLBACK2_DEEP_LLM_BACKEND_URL="${{ secrets.FALLBACK2_DEEP_LLM_BACKEND_URL }}" \
+              FALLBACK2_DEEP_LLM_API_KEY="${{ secrets.FALLBACK2_DEEP_LLM_API_KEY }}" \
+              FALLBACK2_QUICK_LLM_BACKEND_URL="${{ secrets.FALLBACK2_QUICK_LLM_BACKEND_URL }}" \
+              FALLBACK2_QUICK_LLM_API_KEY="${{ secrets.FALLBACK2_QUICK_LLM_API_KEY }}" \
               LLM_TEMPERATURE=0.7 \
               LLM_DISABLE_THINKING=true \
               LLM_TIMEOUT_MS=180000 \
