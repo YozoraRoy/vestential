@@ -225,6 +225,76 @@ function getSqliteDb(): Database.Database | null {
         generated_at TEXT,
         created_at TEXT DEFAULT (datetime('now', 'localtime'))
       );
+      CREATE TABLE IF NOT EXISTS arena_seasons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'registration',
+        start_date TEXT,
+        end_date TEXT,
+        registration_start TEXT,
+        registration_end TEXT,
+        created_at TEXT DEFAULT (datetime('now', 'localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_arena_season_status ON arena_seasons(status);
+      CREATE TABLE IF NOT EXISTS arena_agents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        season_id INTEGER NOT NULL,
+        owner_user_id INTEGER NOT NULL DEFAULT 0,
+        name TEXT NOT NULL,
+        division TEXT NOT NULL DEFAULT 'season',
+        strategy_id TEXT NOT NULL,
+        tone TEXT NOT NULL DEFAULT 'neutral',
+        initial_capital REAL NOT NULL DEFAULT 200000,
+        cash REAL NOT NULL DEFAULT 200000,
+        status TEXT NOT NULL DEFAULT 'active',
+        joined_at TEXT,
+        adjust_count INTEGER NOT NULL DEFAULT 0,
+        last_round_date TEXT,
+        reset_note TEXT,
+        created_at TEXT DEFAULT (datetime('now', 'localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_arena_agent_owner ON arena_agents(owner_user_id);
+      CREATE INDEX IF NOT EXISTS idx_arena_agent_season ON arena_agents(season_id, status);
+      CREATE TABLE IF NOT EXISTS arena_holdings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        symbol TEXT NOT NULL,
+        symbol_name TEXT,
+        shares REAL NOT NULL DEFAULT 0,
+        avg_cost REAL NOT NULL DEFAULT 0,
+        updated_round_date TEXT,
+        UNIQUE(agent_id, symbol)
+      );
+      CREATE INDEX IF NOT EXISTS idx_arena_holding_agent ON arena_holdings(agent_id);
+      CREATE TABLE IF NOT EXISTS arena_trades (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        round_date TEXT NOT NULL,
+        action TEXT NOT NULL,
+        symbol TEXT,
+        symbol_name TEXT,
+        shares REAL,
+        price REAL,
+        fee REAL,
+        tax REAL,
+        reason TEXT,
+        model TEXT,
+        fallback_used INTEGER DEFAULT 0,
+        error TEXT,
+        created_at TEXT DEFAULT (datetime('now', 'localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_arena_trade_agent ON arena_trades(agent_id, round_date);
+      CREATE TABLE IF NOT EXISTS arena_equity_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        season_id INTEGER NOT NULL,
+        round_date TEXT NOT NULL,
+        cash REAL NOT NULL,
+        equity REAL NOT NULL,
+        return_pct REAL NOT NULL DEFAULT 0,
+        UNIQUE(agent_id, round_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_arena_snapshot_agent ON arena_equity_snapshots(agent_id, round_date);
 
       UPDATE odd_lot_trades SET price = 34.15, volume = 19443, bid_price = 34.15, bid_volume = 8943, ask_price = 34.20, ask_volume = 6092 WHERE stock_id = '2887';
       UPDATE shareholder_gifts SET gift_name = '多用途矽膠隔熱餐墊(二入)', last_buy_date = '08/14' WHERE stock_id = '2887';
@@ -498,6 +568,107 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           generated_at NVARCHAR(100),
           created_at   DATETIME DEFAULT GETDATE()
         );
+      END
+    `)
+
+    // ── AI Agent 競技場 (arena_*)：沿用 per-table 獨立守衛，已上線 DB 也能補建 ──
+    await _pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_seasons')
+      BEGIN
+        CREATE TABLE arena_seasons (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          name NVARCHAR(100) NOT NULL UNIQUE,
+          status NVARCHAR(20) NOT NULL DEFAULT 'registration',
+          start_date NVARCHAR(20),
+          end_date NVARCHAR(20),
+          registration_start NVARCHAR(20),
+          registration_end NVARCHAR(20),
+          created_at DATETIME DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_arena_season_status ON arena_seasons(status);
+      END
+    `)
+
+    await _pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_agents')
+      BEGIN
+        CREATE TABLE arena_agents (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          season_id INT NOT NULL,
+          owner_user_id INT NOT NULL DEFAULT 0,
+          name NVARCHAR(80) NOT NULL,
+          division NVARCHAR(10) NOT NULL DEFAULT 'season',
+          strategy_id NVARCHAR(40) NOT NULL,
+          tone NVARCHAR(20) NOT NULL DEFAULT 'neutral',
+          initial_capital FLOAT NOT NULL DEFAULT 200000,
+          cash FLOAT NOT NULL DEFAULT 200000,
+          status NVARCHAR(10) NOT NULL DEFAULT 'active',
+          joined_at NVARCHAR(20),
+          adjust_count INT NOT NULL DEFAULT 0,
+          last_round_date NVARCHAR(20),
+          reset_note NVARCHAR(200),
+          created_at DATETIME DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_arena_agent_owner ON arena_agents(owner_user_id);
+        CREATE INDEX idx_arena_agent_season ON arena_agents(season_id, status);
+      END
+    `)
+
+    await _pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_holdings')
+      BEGIN
+        CREATE TABLE arena_holdings (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          agent_id INT NOT NULL,
+          symbol NVARCHAR(20) NOT NULL,
+          symbol_name NVARCHAR(100),
+          shares FLOAT NOT NULL DEFAULT 0,
+          avg_cost FLOAT NOT NULL DEFAULT 0,
+          updated_round_date NVARCHAR(20),
+          CONSTRAINT uq_arena_holding UNIQUE (agent_id, symbol)
+        );
+        CREATE INDEX idx_arena_holding_agent ON arena_holdings(agent_id);
+      END
+    `)
+
+    await _pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_trades')
+      BEGIN
+        CREATE TABLE arena_trades (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          agent_id INT NOT NULL,
+          round_date NVARCHAR(20) NOT NULL,
+          action NVARCHAR(10) NOT NULL,
+          symbol NVARCHAR(20),
+          symbol_name NVARCHAR(100),
+          shares FLOAT,
+          price FLOAT,
+          fee FLOAT,
+          tax FLOAT,
+          reason NVARCHAR(MAX),
+          model NVARCHAR(100),
+          fallback_used INT DEFAULT 0,
+          error NVARCHAR(500),
+          created_at DATETIME DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_arena_trade_agent ON arena_trades(agent_id, round_date);
+      END
+    `)
+
+    await _pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_equity_snapshots')
+      BEGIN
+        CREATE TABLE arena_equity_snapshots (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          agent_id INT NOT NULL,
+          season_id INT NOT NULL,
+          round_date NVARCHAR(20) NOT NULL,
+          cash FLOAT NOT NULL,
+          equity FLOAT NOT NULL,
+          return_pct FLOAT NOT NULL DEFAULT 0,
+          CONSTRAINT uq_arena_snapshot UNIQUE (agent_id, round_date)
+        );
+        CREATE INDEX idx_arena_snapshot_agent ON arena_equity_snapshots(agent_id, round_date);
       END
     `)
 
@@ -2105,4 +2276,468 @@ export async function consumeRecognitionQuota(userId: number, date: string, max:
     console.error('[SQLite] consumeRecognitionQuota error:', e)
     return { allowed: false, used: 0, remaining: 0, max }
   }
+}
+
+// ─── AI Agent 競技場 (arena_*) ──────────────────────────────────
+
+export const ARENA_MAX_AGENTS_PER_USER = 1
+
+export interface ArenaSeasonRow {
+  id: number
+  name: string
+  status: 'registration' | 'live' | 'closed'
+  start_date: string | null
+  end_date: string | null
+  registration_start: string | null
+  registration_end: string | null
+  created_at?: string
+}
+
+export interface ArenaAgentRow {
+  id: number
+  season_id: number
+  owner_user_id: number
+  name: string
+  division: 'season' | 'open'
+  strategy_id: string
+  tone: 'aggressive' | 'neutral' | 'conservative'
+  initial_capital: number
+  cash: number
+  status: 'active' | 'paused' | 'reset'
+  joined_at: string | null
+  adjust_count: number
+  last_round_date: string | null
+  reset_note: string | null
+  created_at?: string
+}
+
+export interface ArenaHoldingRow {
+  agent_id: number
+  symbol: string
+  symbol_name: string | null
+  shares: number
+  avg_cost: number
+  updated_round_date: string | null
+}
+
+export interface ArenaTradeRow {
+  id: number
+  agent_id: number
+  round_date: string
+  action: string
+  symbol: string | null
+  symbol_name: string | null
+  shares: number | null
+  price: number | null
+  fee: number | null
+  tax: number | null
+  reason: string | null
+  model: string | null
+  fallback_used: number
+  error: string | null
+  created_at?: string
+}
+
+export interface ArenaSnapshotRow {
+  id: number
+  agent_id: number
+  season_id: number
+  round_date: string
+  cash: number
+  equity: number
+  return_pct: number
+}
+
+export interface ArenaAgentInput {
+  name: string
+  division: 'season' | 'open'
+  strategyId: string
+  tone: 'aggressive' | 'neutral' | 'conservative'
+  initialCapital?: number
+}
+
+export async function saveArenaSeason(input: {
+  name: string
+  status?: ArenaSeasonRow['status']
+  startDate?: string
+  endDate?: string
+  registrationStart?: string
+  registrationEnd?: string
+}): Promise<number> {
+  const status = input.status ?? 'registration'
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('name', sql.NVarChar(100), input.name)
+          .input('status', sql.NVarChar(20), status)
+          .input('start', sql.NVarChar(20), input.startDate ?? null)
+          .input('end', sql.NVarChar(20), input.endDate ?? null)
+          .input('regStart', sql.NVarChar(20), input.registrationStart ?? null)
+          .input('regEnd', sql.NVarChar(20), input.registrationEnd ?? null)
+          .query(`
+            INSERT INTO arena_seasons (name, status, start_date, end_date, registration_start, registration_end)
+            VALUES (@name, @status, @start, @end, @regStart, @regEnd);
+            SELECT SCOPE_IDENTITY() AS id
+          `)
+        return Number(result.recordset?.[0]?.id ?? -1)
+      } catch (e) {
+        console.error('[AzureSQL] saveArenaSeason error:', e)
+      }
+    }
+    return -1
+  }
+  const db = getSqliteDb()
+  if (!db) return -1
+  try {
+    const info = db.prepare(`
+      INSERT INTO arena_seasons (name, status, start_date, end_date, registration_start, registration_end)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(input.name, status, input.startDate ?? null, input.endDate ?? null, input.registrationStart ?? null, input.registrationEnd ?? null)
+    return Number(info.lastInsertRowid)
+  } catch (e) {
+    console.error('[SQLite] saveArenaSeason error:', e)
+    return -1
+  }
+}
+
+export async function getArenaSeasonById(id: number): Promise<ArenaSeasonRow | undefined> {
+  return dbQueryFirst<ArenaSeasonRow>('SELECT * FROM arena_seasons WHERE id = @id LIMIT 1', { id })
+}
+
+export async function getActiveArenaSeason(): Promise<ArenaSeasonRow | undefined> {
+  return dbQueryFirst<ArenaSeasonRow>(
+    "SELECT * FROM arena_seasons WHERE status IN ('registration', 'live') ORDER BY id DESC LIMIT 1",
+  )
+}
+
+export async function listArenaSeasons(): Promise<ArenaSeasonRow[]> {
+  return dbQueryAll<ArenaSeasonRow>('SELECT * FROM arena_seasons ORDER BY id DESC')
+}
+
+export async function updateArenaSeasonStatus(id: number, status: ArenaSeasonRow['status']): Promise<void> {
+  await dbExecute('UPDATE arena_seasons SET status = @status WHERE id = @id', { id, status })
+}
+
+export async function createArenaAgent(ownerUserId: number, input: ArenaAgentInput): Promise<number> {
+  const capital = input.initialCapital ?? 200000
+  const nowStr = new Date().toISOString().substring(0, 10)
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const season = await getActiveArenaSeason()
+        const seasonId = season?.id ?? -1
+        const result = await pool.request()
+          .input('seasonId', sql.Int, seasonId)
+          .input('owner', sql.Int, ownerUserId)
+          .input('name', sql.NVarChar(80), input.name)
+          .input('division', sql.NVarChar(10), input.division)
+          .input('strategy', sql.NVarChar(40), input.strategyId)
+          .input('tone', sql.NVarChar(20), input.tone)
+          .input('capital', sql.Float, capital)
+          .input('joined', sql.NVarChar(20), nowStr)
+          .query(`
+            INSERT INTO arena_agents (season_id, owner_user_id, name, division, strategy_id, tone, initial_capital, cash, joined_at)
+            VALUES (@seasonId, @owner, @name, @division, @strategy, @tone, @capital, @capital, @joined);
+            SELECT SCOPE_IDENTITY() AS id
+          `)
+        return Number(result.recordset?.[0]?.id ?? -1)
+      } catch (e) {
+        console.error('[AzureSQL] createArenaAgent error:', e)
+      }
+    }
+    return -1
+  }
+  const db = getSqliteDb()
+  if (!db) return -1
+  try {
+    const season = await getActiveArenaSeason()
+    const seasonId = season?.id ?? -1
+    const info = db.prepare(`
+      INSERT INTO arena_agents (season_id, owner_user_id, name, division, strategy_id, tone, initial_capital, cash, joined_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(seasonId, ownerUserId, input.name, input.division, input.strategyId, input.tone, capital, capital, nowStr)
+    return Number(info.lastInsertRowid)
+  } catch (e) {
+    console.error('[SQLite] createArenaAgent error:', e)
+    return -1
+  }
+}
+
+export function getActiveArenaAgentByOwner(ownerUserId: number): Promise<ArenaAgentRow | undefined> {
+  return dbQueryFirst<ArenaAgentRow>(
+    "SELECT * FROM arena_agents WHERE owner_user_id = @owner AND status = 'active' ORDER BY id DESC LIMIT 1",
+    { owner: ownerUserId },
+  )
+}
+
+export function countArenaAgentsByOwner(ownerUserId: number): Promise<number> {
+  return dbQueryFirst<{ cnt: number }>(
+    "SELECT COUNT(*) AS cnt FROM arena_agents WHERE owner_user_id = @owner AND status IN ('active', 'paused')",
+    { owner: ownerUserId },
+  ).then((r) => r?.cnt ?? 0)
+}
+
+export function getArenaAgentById(id: number): Promise<ArenaAgentRow | undefined> {
+  return dbQueryFirst<ArenaAgentRow>('SELECT * FROM arena_agents WHERE id = @id LIMIT 1', { id })
+}
+
+export function listActiveArenaAgents(): Promise<ArenaAgentRow[]> {
+  return dbQueryAll<ArenaAgentRow>("SELECT * FROM arena_agents WHERE status = 'active' ORDER BY id")
+}
+
+export function listArenaAgentsBySeason(seasonId: number): Promise<ArenaAgentRow[]> {
+  return dbQueryAll<ArenaAgentRow>("SELECT * FROM arena_agents WHERE season_id = @seasonId AND status = 'active' ORDER BY id", { seasonId })
+}
+
+export async function updateArenaAgentConfig(
+  id: number,
+  patch: { name?: string; strategyId?: string; tone?: string },
+): Promise<boolean> {
+  const agent = await getArenaAgentById(id)
+  if (!agent) return false
+  const name = patch.name ?? agent.name
+  const strategyId = patch.strategyId ?? agent.strategy_id
+  const tone = patch.tone ?? agent.tone
+  const changed = strategyId !== agent.strategy_id || tone !== agent.tone
+  await dbExecute(
+    'UPDATE arena_agents SET name = @name, strategy_id = @strategyId, tone = @tone, adjust_count = adjust_count + @delta WHERE id = @id',
+    { id, name, strategyId, tone, delta: changed ? 1 : 0 },
+  )
+  return true
+}
+
+export async function setArenaAgentStatus(id: number, status: ArenaAgentRow['status'], resetNote?: string): Promise<boolean> {
+  const agent = await getArenaAgentById(id)
+  if (!agent) return false
+  await dbExecute(
+    'UPDATE arena_agents SET status = @status, reset_note = @resetNote WHERE id = @id',
+    { id, status, resetNote: resetNote ?? agent.reset_note ?? null },
+  )
+  return true
+}
+
+export async function updateArenaAgentLastRound(id: number, roundDate: string): Promise<void> {
+  await dbExecute('UPDATE arena_agents SET last_round_date = @roundDate WHERE id = @id', { id, roundDate })
+}
+
+export async function updateArenaAgentCash(id: number, cash: number): Promise<void> {
+  await dbExecute('UPDATE arena_agents SET cash = @cash WHERE id = @id', { id, cash })
+}
+
+export function getArenaHoldings(agentId: number): Promise<ArenaHoldingRow[]> {
+  return dbQueryAll<ArenaHoldingRow>('SELECT * FROM arena_holdings WHERE agent_id = @agentId ORDER BY symbol', { agentId })
+}
+
+export async function replaceArenaHoldings(
+  agentId: number,
+  holdings: Array<{ symbol: string; symbolName?: string | null; shares: number; avgCost: number; roundDate: string }>,
+): Promise<void> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      await pool.request().input('agentId', sql.Int, agentId).query('DELETE FROM arena_holdings WHERE agent_id = @agentId')
+      for (const h of holdings) {
+        if (h.shares <= 0) continue
+        await pool.request()
+          .input('agentId', sql.Int, agentId)
+          .input('symbol', sql.NVarChar(20), h.symbol)
+          .input('name', sql.NVarChar(100), h.symbolName ?? null)
+          .input('shares', sql.Float, h.shares)
+          .input('cost', sql.Float, h.avgCost)
+          .input('round', sql.NVarChar(20), h.roundDate)
+          .query(`
+            INSERT INTO arena_holdings (agent_id, symbol, symbol_name, shares, avg_cost, updated_round_date)
+            VALUES (@agentId, @symbol, @name, @shares, @cost, @round)
+          `)
+      }
+    } catch (e) {
+      console.error('[AzureSQL] replaceArenaHoldings error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    const del = db.prepare('DELETE FROM arena_holdings WHERE agent_id = ?')
+    const ins = db.prepare(`
+      INSERT INTO arena_holdings (agent_id, symbol, symbol_name, shares, avg_cost, updated_round_date)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    const tx = db.transaction((rows: typeof holdings) => {
+      del.run(agentId)
+      for (const h of rows) {
+        if (h.shares <= 0) continue
+        ins.run(agentId, h.symbol, h.symbolName ?? null, h.shares, h.avgCost, h.roundDate)
+      }
+    })
+    tx(holdings)
+  } catch (e) {
+    console.error('[SQLite] replaceArenaHoldings error:', e)
+  }
+}
+
+export async function insertArenaTrade(record: {
+  agentId: number
+  roundDate: string
+  action: string
+  symbol?: string | null
+  symbolName?: string | null
+  shares?: number | null
+  price?: number | null
+  fee?: number | null
+  tax?: number | null
+  reason?: string | null
+  model?: string | null
+  fallbackUsed?: boolean
+  error?: string | null
+}): Promise<void> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      await pool.request()
+        .input('agentId', sql.Int, record.agentId)
+        .input('round', sql.NVarChar(20), record.roundDate)
+        .input('action', sql.NVarChar(10), record.action)
+        .input('symbol', sql.NVarChar(20), record.symbol ?? null)
+        .input('name', sql.NVarChar(100), record.symbolName ?? null)
+        .input('shares', sql.Float, record.shares ?? null)
+        .input('price', sql.Float, record.price ?? null)
+        .input('fee', sql.Float, record.fee ?? null)
+        .input('tax', sql.Float, record.tax ?? null)
+        .input('reason', sql.NVarChar(sql.MAX), record.reason ?? null)
+        .input('model', sql.NVarChar(100), record.model ?? null)
+        .input('fb', sql.Int, record.fallbackUsed ? 1 : 0)
+        .input('error', sql.NVarChar(500), record.error ?? null)
+        .query(`
+          INSERT INTO arena_trades (agent_id, round_date, action, symbol, symbol_name, shares, price, fee, tax, reason, model, fallback_used, error)
+          VALUES (@agentId, @round, @action, @symbol, @name, @shares, @price, @fee, @tax, @reason, @model, @fb, @error)
+        `)
+    } catch (e) {
+      console.error('[AzureSQL] insertArenaTrade error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    db.prepare(`
+      INSERT INTO arena_trades (agent_id, round_date, action, symbol, symbol_name, shares, price, fee, tax, reason, model, fallback_used, error)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(record.agentId, record.roundDate, record.action, record.symbol ?? null, record.symbolName ?? null,
+      record.shares ?? null, record.price ?? null, record.fee ?? null, record.tax ?? null, record.reason ?? null,
+      record.model ?? null, record.fallbackUsed ? 1 : 0, record.error ?? null)
+  } catch (e) {
+    console.error('[SQLite] insertArenaTrade error:', e)
+  }
+}
+
+export function getArenaTrades(agentId: number, limit = 50): Promise<ArenaTradeRow[]> {
+  return dbQueryAll<ArenaTradeRow>('SELECT * FROM arena_trades WHERE agent_id = @agentId ORDER BY round_date DESC, id DESC LIMIT @limit', { agentId, limit })
+}
+
+export async function upsertArenaSnapshot(snapshot: {
+  agentId: number
+  seasonId: number
+  roundDate: string
+  cash: number
+  equity: number
+  returnPct: number
+}): Promise<void> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      await pool.request()
+        .input('agentId', sql.Int, snapshot.agentId)
+        .input('round', sql.NVarChar(20), snapshot.roundDate)
+        .input('seasonId', sql.Int, snapshot.seasonId)
+        .input('cash', sql.Float, snapshot.cash)
+        .input('equity', sql.Float, snapshot.equity)
+        .input('returnPct', sql.Float, snapshot.returnPct)
+        .query(`
+          UPDATE arena_equity_snapshots SET season_id = @seasonId, cash = @cash, equity = @equity, return_pct = @returnPct
+          WHERE agent_id = @agentId AND round_date = @round;
+          IF @@ROWCOUNT = 0
+            INSERT INTO arena_equity_snapshots (agent_id, season_id, round_date, cash, equity, return_pct)
+            VALUES (@agentId, @seasonId, @round, @cash, @equity, @returnPct)
+        `)
+    } catch (e) {
+      console.error('[AzureSQL] upsertArenaSnapshot error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    db.prepare(`
+      INSERT INTO arena_equity_snapshots (agent_id, season_id, round_date, cash, equity, return_pct)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(agent_id, round_date) DO UPDATE SET
+        season_id = excluded.season_id,
+        cash = excluded.cash,
+        equity = excluded.equity,
+        return_pct = excluded.return_pct
+    `).run(snapshot.agentId, snapshot.seasonId, snapshot.roundDate, snapshot.cash, snapshot.equity, snapshot.returnPct)
+  } catch (e) {
+    console.error('[SQLite] upsertArenaSnapshot error:', e)
+  }
+}
+
+export function getArenaSnapshots(agentId: number): Promise<ArenaSnapshotRow[]> {
+  return dbQueryAll<ArenaSnapshotRow>('SELECT * FROM arena_equity_snapshots WHERE agent_id = @agentId ORDER BY round_date', { agentId })
+}
+
+export interface ArenaLeaderboardRow {
+  agent_id: number
+  agent_name: string
+  division: 'season' | 'open'
+  strategy_id: string
+  tone: string
+  status: string
+  equity: number | null
+  cash: number | null
+  return_pct: number | null
+  round_date: string | null
+  rounds: number
+  joined_at: string | null
+}
+
+export function getArenaLeaderboard(seasonId: number, division: 'season' | 'open' | null): Promise<ArenaLeaderboardRow[]> {
+  const divisionSql = division ? 'AND a.division = @division' : ''
+  return dbQueryAll<ArenaLeaderboardRow>(
+    `
+      SELECT
+        a.id AS agent_id,
+        a.name AS agent_name,
+        a.division,
+        a.strategy_id,
+        a.tone,
+        a.status,
+        s.equity,
+        s.cash,
+        s.return_pct,
+        s.round_date,
+        (SELECT COUNT(*) FROM arena_equity_snapshots c WHERE c.agent_id = a.id) AS rounds,
+        a.joined_at
+      FROM arena_agents a
+      LEFT JOIN arena_equity_snapshots s ON s.agent_id = a.id
+        AND s.round_date = (SELECT MAX(s2.round_date) FROM arena_equity_snapshots s2 WHERE s2.agent_id = a.id)
+      WHERE a.season_id = @seasonId ${divisionSql}
+      ORDER BY a.division, s.return_pct DESC, s.equity DESC, a.id ASC
+    `,
+    division ? { seasonId, division } : { seasonId },
+  )
+}
+
+export function resetArenaAgentLedger(agentId: number): Promise<void> {
+  return (async () => {
+    await dbExecute('DELETE FROM arena_holdings WHERE agent_id = @agentId', { agentId })
+    await dbExecute('DELETE FROM arena_trades WHERE agent_id = @agentId', { agentId })
+    await dbExecute('DELETE FROM arena_equity_snapshots WHERE agent_id = @agentId', { agentId })
+  })()
 }

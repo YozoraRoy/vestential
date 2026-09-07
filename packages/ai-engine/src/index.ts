@@ -19,3 +19,4 @@ export type {
 } from './portfolio.js'
 export { recognizePortfolioImage } from './recognize-image.js'
 export type { RecognizedPosition, RecognizePortfolioImageResult } from './recognize-image.js'
+export * from './arena/index.js'

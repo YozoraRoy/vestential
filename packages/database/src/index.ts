@@ -11,8 +11,16 @@ export {
   searchStocksByName, fuzzySearchStocksByName, damerauLevenshtein,
   deleteAnalysisRecord,
   saveMarketFocus, getMarketFocus, saveMarketFocusMeta, getMarketFocusMeta,
+  ARENA_MAX_AGENTS_PER_USER,
+  saveArenaSeason, getArenaSeasonById, getActiveArenaSeason, listArenaSeasons, updateArenaSeasonStatus,
+  createArenaAgent, getActiveArenaAgentByOwner, countArenaAgentsByOwner,
+  getArenaAgentById, listActiveArenaAgents, listArenaAgentsBySeason,
+  updateArenaAgentConfig, setArenaAgentStatus, updateArenaAgentLastRound, updateArenaAgentCash,
+  getArenaHoldings, replaceArenaHoldings, insertArenaTrade, getArenaTrades,
+  upsertArenaSnapshot, getArenaSnapshots, getArenaLeaderboard, resetArenaAgentLedger,
 } from './db.js'
-export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta } from './db.js'
+export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta,
+  ArenaSeasonRow, ArenaAgentRow, ArenaHoldingRow, ArenaTradeRow, ArenaSnapshotRow, ArenaAgentInput, ArenaLeaderboardRow } from './db.js'
 export { exportSyncData, mergeExports, applySyncMerge, applySyncImport, SYNC_TABLES } from './sync.js'
 export type { SyncExport, SyncRow, MergedExport, SyncTableName, TaggedRow, RowSource } from './sync.js'
 export type { Database } from 'better-sqlite3'
