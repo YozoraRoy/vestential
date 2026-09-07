@@ -36,7 +36,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `每位使用者最多可建立 ${ARENA_MAX_AGENTS_PER_USER} 位 agent` }, { status: 409 })
   }
 
-  const id = await createArenaAgent(user.id, { name, division, strategyId, tone })
+  const personality = typeof body?.personality === 'string' && body.personality.trim() ? body.personality.trim().slice(0, 40) : null
+  const strategyParams = body?.strategyParams ? body.strategyParams : undefined
+
+  const id = await createArenaAgent(user.id, { name, division, strategyId, tone, personality, strategyParams })
   if (id <= 0) return NextResponse.json({ error: '建立失敗' }, { status: 500 })
 
   return NextResponse.json({ id, message: '已建立' }, { status: 201 })

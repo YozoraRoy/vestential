@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { getCurrentUserFromReq } from '@/lib/auth'
-import { getActiveArenaAgentByOwner, getArenaHoldings, getArenaSnapshots, getArenaTrades } from '@stock/database'
+import { getActiveArenaAgentByOwner, getArenaHoldings, getArenaSnapshots, getArenaTrades, getArenaDecisionLogs } from '@stock/database'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,14 +12,15 @@ export async function GET(req: NextRequest) {
   const agent = await getActiveArenaAgentByOwner(user.id)
   if (!agent) return NextResponse.json({ agent: null }, { headers: { 'Cache-Control': 'no-store' } })
 
-  const [holdings, snapshots, trades] = await Promise.all([
+  const [holdings, snapshots, trades, decisionLogs] = await Promise.all([
     getArenaHoldings(agent.id),
     getArenaSnapshots(agent.id),
     getArenaTrades(agent.id, 50),
+    getArenaDecisionLogs(agent.id),
   ])
 
   return NextResponse.json(
-    { agent, holdings, snapshots, trades },
+    { agent, holdings, snapshots, trades, decisionLogs },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

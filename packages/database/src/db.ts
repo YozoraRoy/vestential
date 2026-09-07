@@ -330,6 +330,60 @@ function getSqliteDb(): Database.Database | null {
     try {
       _db.exec('ALTER TABLE arena_agents ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0;')
     } catch {}
+    try {
+      _db.exec('ALTER TABLE arena_agents ADD COLUMN personality TEXT;')
+    } catch {}
+    try {
+      _db.exec('ALTER TABLE arena_agents ADD COLUMN strategy_params TEXT;')
+    } catch {}
+    try {
+      _db.exec('ALTER TABLE arena_trades ADD COLUMN slot INTEGER;')
+    } catch {}
+
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS arena_intraday_prices (
+        round_date TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        slot INTEGER NOT NULL,
+        time_label TEXT,
+        price REAL NOT NULL,
+        change_pct REAL,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        PRIMARY KEY (round_date, symbol, slot)
+      );
+      CREATE INDEX IF NOT EXISTS idx_arena_intraday_date ON arena_intraday_prices(round_date);
+
+      CREATE TABLE IF NOT EXISTS arena_market_briefings (
+        round_date TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        model TEXT,
+        fallback_used INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+      );
+
+      CREATE TABLE IF NOT EXISTS arena_decision_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        season_id INTEGER,
+        round_date TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        slot INTEGER,
+        content TEXT NOT NULL,
+        model TEXT,
+        fallback_used INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_arena_decision_agent_date ON arena_decision_logs(agent_id, round_date);
+      CREATE INDEX IF NOT EXISTS idx_arena_decision_round_date ON arena_decision_logs(round_date);
+
+      CREATE TABLE IF NOT EXISTS arena_discussions (
+        round_date TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        model TEXT,
+        fallback_used INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+      );
+    `)
 
     return _db
   } catch (err) {
@@ -699,6 +753,68 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           CONSTRAINT uq_arena_snapshot UNIQUE (agent_id, round_date)
         );
         CREATE INDEX idx_arena_snapshot_agent ON arena_equity_snapshots(agent_id, round_date);
+      END
+
+      IF COL_LENGTH('arena_agents', 'personality') IS NULL
+        ALTER TABLE arena_agents ADD personality NVARCHAR(100);
+      IF COL_LENGTH('arena_agents', 'strategy_params') IS NULL
+        ALTER TABLE arena_agents ADD strategy_params NVARCHAR(MAX);
+      IF COL_LENGTH('arena_trades', 'slot') IS NULL
+        ALTER TABLE arena_trades ADD slot INT;
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_intraday_prices')
+      BEGIN
+        CREATE TABLE arena_intraday_prices (
+          round_date NVARCHAR(20) NOT NULL,
+          symbol NVARCHAR(20) NOT NULL,
+          slot INT NOT NULL,
+          time_label NVARCHAR(20),
+          price FLOAT NOT NULL,
+          change_pct FLOAT,
+          created_at DATETIME2 DEFAULT GETDATE(),
+          CONSTRAINT pk_arena_intraday PRIMARY KEY (round_date, symbol, slot)
+        );
+        CREATE INDEX idx_arena_intraday_date ON arena_intraday_prices(round_date);
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_market_briefings')
+      BEGIN
+        CREATE TABLE arena_market_briefings (
+          round_date NVARCHAR(20) PRIMARY KEY,
+          content NVARCHAR(MAX) NOT NULL,
+          model NVARCHAR(100),
+          fallback_used INT DEFAULT 0,
+          created_at DATETIME2 DEFAULT GETDATE()
+        );
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_decision_logs')
+      BEGIN
+        CREATE TABLE arena_decision_logs (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          agent_id INT NOT NULL,
+          season_id INT,
+          round_date NVARCHAR(20) NOT NULL,
+          phase NVARCHAR(20) NOT NULL,
+          slot INT,
+          content NVARCHAR(MAX) NOT NULL,
+          model NVARCHAR(100),
+          fallback_used INT DEFAULT 0,
+          created_at DATETIME2 DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_arena_decision_agent_date ON arena_decision_logs(agent_id, round_date);
+        CREATE INDEX idx_arena_decision_round_date ON arena_decision_logs(round_date);
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_discussions')
+      BEGIN
+        CREATE TABLE arena_discussions (
+          round_date NVARCHAR(20) PRIMARY KEY,
+          content NVARCHAR(MAX) NOT NULL,
+          model NVARCHAR(100),
+          fallback_used INT DEFAULT 0,
+          created_at DATETIME2 DEFAULT GETDATE()
+        );
       END
     `)
 
@@ -2331,6 +2447,8 @@ export interface ArenaAgentRow {
   division: 'season' | 'open'
   strategy_id: string
   tone: 'aggressive' | 'neutral' | 'conservative'
+  personality: string | null
+  strategy_params: string | null
   initial_capital: number
   cash: number
   status: 'active' | 'paused' | 'reset'
@@ -2355,6 +2473,7 @@ export interface ArenaTradeRow {
   id: number
   agent_id: number
   round_date: string
+  slot: number | null
   action: string
   symbol: string | null
   symbol_name: string | null
@@ -2379,11 +2498,52 @@ export interface ArenaSnapshotRow {
   return_pct: number
 }
 
+export interface ArenaIntradayPriceRow {
+  round_date: string
+  symbol: string
+  slot: number
+  time_label: string | null
+  price: number
+  change_pct: number | null
+  created_at?: string
+}
+
+export interface ArenaMarketBriefingRow {
+  round_date: string
+  content: string
+  model: string | null
+  fallback_used: number
+  created_at?: string
+}
+
+export interface ArenaDecisionLogRow {
+  id: number
+  agent_id: number
+  season_id: number | null
+  round_date: string
+  phase: string
+  slot: number | null
+  content: string
+  model: string | null
+  fallback_used: number
+  created_at?: string
+}
+
+export interface ArenaDiscussionRow {
+  round_date: string
+  content: string
+  model: string | null
+  fallback_used: number
+  created_at?: string
+}
+
 export interface ArenaAgentInput {
   name: string
   division: 'season' | 'open'
   strategyId: string
   tone: 'aggressive' | 'neutral' | 'conservative'
+  personality?: string | null
+  strategyParams?: Record<string, unknown> | null
   initialCapital?: number
 }
 
@@ -2458,11 +2618,41 @@ export async function ensureActiveArenaSeason(): Promise<ArenaSeasonRow | undefi
   return getArenaSeasonById(id)
 }
 
-const SYSTEM_DEMO_AGENTS: Array<{ name: string; strategy_id: string; tone: string }> = [
-  { name: '存股老阿伯', strategy_id: 'buffett', tone: 'conservative' },
-  { name: '少年股神阿虎', strategy_id: 'growth', tone: 'aggressive' },
-  { name: '股息包租嬤', strategy_id: 'dividend', tone: 'conservative' },
-  { name: '佛系平衡嬤', strategy_id: 'balanced', tone: 'neutral' },
+const SYSTEM_DEMO_AGENTS: Array<{
+  name: string
+  strategy_id: string
+  tone: string
+  personality: string
+  strategy_params: Record<string, number>
+}> = [
+  {
+    name: '存股老阿伯',
+    strategy_id: 'buffett',
+    tone: 'conservative',
+    personality: 'zen',
+    strategy_params: { maxPositionPct: 25, stopLossPct: 20, minCashBufferPct: 10, maxTradesPerSlot: 2 },
+  },
+  {
+    name: '少年股神阿虎',
+    strategy_id: 'growth',
+    tone: 'aggressive',
+    personality: 'decisive',
+    strategy_params: { maxPositionPct: 40, stopLossPct: 10, minCashBufferPct: 0, maxTradesPerSlot: 5 },
+  },
+  {
+    name: '股息包租嬤',
+    strategy_id: 'dividend',
+    tone: 'conservative',
+    personality: 'risk_averse',
+    strategy_params: { maxPositionPct: 20, stopLossPct: 15, minCashBufferPct: 15, maxTradesPerSlot: 2 },
+  },
+  {
+    name: '佛系平衡嬤',
+    strategy_id: 'balanced',
+    tone: 'neutral',
+    personality: 'contrarian',
+    strategy_params: { maxPositionPct: 30, stopLossPct: 15, minCashBufferPct: 5, maxTradesPerSlot: 3 },
+  },
 ]
 
 // 內建系統示範 agent：一律 owner_user_id = 0、division = 'open'、is_system = 1。
@@ -2472,16 +2662,36 @@ export async function ensureSystemArenaAgents(seasonId: number): Promise<number>
     'SELECT COUNT(*) AS cnt FROM arena_agents WHERE season_id = @seasonId AND owner_user_id = 0',
     { seasonId },
   )
-  if ((existing?.cnt ?? 0) > 0) return existing?.cnt ?? 0
-
   const today = new Date().toISOString().slice(0, 10)
+  if ((existing?.cnt ?? 0) > 0) {
+    // 冪等補齊既有系統 agent 的性格與參數
+    for (const demo of SYSTEM_DEMO_AGENTS) {
+      await dbExecute(
+        `UPDATE arena_agents
+         SET personality = @personality, strategy_params = @params
+         WHERE season_id = @seasonId AND owner_user_id = 0 AND name = @name AND (personality IS NULL OR strategy_params IS NULL)`,
+        { seasonId, name: demo.name, personality: demo.personality, params: JSON.stringify(demo.strategy_params) },
+      )
+    }
+    return existing?.cnt ?? 0
+  }
+
   for (const demo of SYSTEM_DEMO_AGENTS) {
     await dbExecute(
       `INSERT INTO arena_agents
         (season_id, owner_user_id, name, division, strategy_id, tone,
-         initial_capital, cash, status, is_system, joined_at)
-       VALUES (@seasonId, 0, @name, 'open', @strategyId, @tone, 200000, 200000, 'active', 1, @joinedAt)`,
-      { seasonId, name: demo.name, strategyId: demo.strategy_id, tone: demo.tone, joinedAt: today },
+         personality, strategy_params, initial_capital, cash, status, is_system, joined_at)
+       VALUES (@seasonId, 0, @name, 'open', @strategyId, @tone,
+         @personality, @params, 200000, 200000, 'active', 1, @joinedAt)`,
+      {
+        seasonId,
+        name: demo.name,
+        strategyId: demo.strategy_id,
+        tone: demo.tone,
+        personality: demo.personality,
+        params: JSON.stringify(demo.strategy_params),
+        joinedAt: today,
+      },
     )
   }
   return SYSTEM_DEMO_AGENTS.length
@@ -2498,6 +2708,9 @@ export async function updateArenaSeasonStatus(id: number, status: ArenaSeasonRow
 export async function createArenaAgent(ownerUserId: number, input: ArenaAgentInput): Promise<number> {
   const capital = input.initialCapital ?? 200000
   const nowStr = new Date().toISOString().substring(0, 10)
+  const personality = input.personality ?? null
+  const strategyParams = input.strategyParams ? JSON.stringify(input.strategyParams) : null
+
   if (isAzureSql) {
     const pool = await getAzurePool()
     if (pool) {
@@ -2511,11 +2724,13 @@ export async function createArenaAgent(ownerUserId: number, input: ArenaAgentInp
           .input('division', sql.NVarChar(10), input.division)
           .input('strategy', sql.NVarChar(40), input.strategyId)
           .input('tone', sql.NVarChar(20), input.tone)
+          .input('personality', sql.NVarChar(100), personality)
+          .input('params', sql.NVarChar(sql.MAX), strategyParams)
           .input('capital', sql.Float, capital)
           .input('joined', sql.NVarChar(20), nowStr)
           .query(`
-            INSERT INTO arena_agents (season_id, owner_user_id, name, division, strategy_id, tone, initial_capital, cash, joined_at)
-            VALUES (@seasonId, @owner, @name, @division, @strategy, @tone, @capital, @capital, @joined);
+            INSERT INTO arena_agents (season_id, owner_user_id, name, division, strategy_id, tone, personality, strategy_params, initial_capital, cash, joined_at)
+            VALUES (@seasonId, @owner, @name, @division, @strategy, @tone, @personality, @params, @capital, @capital, @joined);
             SELECT SCOPE_IDENTITY() AS id
           `)
         return Number(result.recordset?.[0]?.id ?? -1)
@@ -2531,9 +2746,9 @@ export async function createArenaAgent(ownerUserId: number, input: ArenaAgentInp
     const season = await getActiveArenaSeason()
     const seasonId = season?.id ?? -1
     const info = db.prepare(`
-      INSERT INTO arena_agents (season_id, owner_user_id, name, division, strategy_id, tone, initial_capital, cash, joined_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(seasonId, ownerUserId, input.name, input.division, input.strategyId, input.tone, capital, capital, nowStr)
+      INSERT INTO arena_agents (season_id, owner_user_id, name, division, strategy_id, tone, personality, strategy_params, initial_capital, cash, joined_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(seasonId, ownerUserId, input.name, input.division, input.strategyId, input.tone, personality, strategyParams, capital, capital, nowStr)
     return Number(info.lastInsertRowid)
   } catch (e) {
     console.error('[SQLite] createArenaAgent error:', e)
@@ -2569,17 +2784,21 @@ export function listArenaAgentsBySeason(seasonId: number): Promise<ArenaAgentRow
 
 export async function updateArenaAgentConfig(
   id: number,
-  patch: { name?: string; strategyId?: string; tone?: string },
+  patch: { name?: string; strategyId?: string; tone?: string; personality?: string | null; strategyParams?: Record<string, unknown> | null },
 ): Promise<boolean> {
   const agent = await getArenaAgentById(id)
   if (!agent) return false
   const name = patch.name ?? agent.name
   const strategyId = patch.strategyId ?? agent.strategy_id
   const tone = patch.tone ?? agent.tone
+  const personality = patch.personality !== undefined ? patch.personality : agent.personality
+  const strategyParams = patch.strategyParams !== undefined ? (patch.strategyParams ? JSON.stringify(patch.strategyParams) : null) : agent.strategy_params
   const changed = strategyId !== agent.strategy_id || tone !== agent.tone
   await dbExecute(
-    'UPDATE arena_agents SET name = @name, strategy_id = @strategyId, tone = @tone, adjust_count = adjust_count + @delta WHERE id = @id',
-    { id, name, strategyId, tone, delta: changed ? 1 : 0 },
+    `UPDATE arena_agents
+     SET name = @name, strategy_id = @strategyId, tone = @tone, personality = @personality, strategy_params = @strategyParams, adjust_count = adjust_count + @delta
+     WHERE id = @id`,
+    { id, name, strategyId, tone, personality, strategyParams, delta: changed ? 1 : 0 },
   )
   return true
 }
@@ -2658,6 +2877,7 @@ export async function replaceArenaHoldings(
 export async function insertArenaTrade(record: {
   agentId: number
   roundDate: string
+  slot?: number | null
   action: string
   symbol?: string | null
   symbolName?: string | null
@@ -2677,6 +2897,7 @@ export async function insertArenaTrade(record: {
       await pool.request()
         .input('agentId', sql.Int, record.agentId)
         .input('round', sql.NVarChar(20), record.roundDate)
+        .input('slot', sql.Int, record.slot ?? null)
         .input('action', sql.NVarChar(10), record.action)
         .input('symbol', sql.NVarChar(20), record.symbol ?? null)
         .input('name', sql.NVarChar(100), record.symbolName ?? null)
@@ -2689,8 +2910,8 @@ export async function insertArenaTrade(record: {
         .input('fb', sql.Int, record.fallbackUsed ? 1 : 0)
         .input('error', sql.NVarChar(500), record.error ?? null)
         .query(`
-          INSERT INTO arena_trades (agent_id, round_date, action, symbol, symbol_name, shares, price, fee, tax, reason, model, fallback_used, error)
-          VALUES (@agentId, @round, @action, @symbol, @name, @shares, @price, @fee, @tax, @reason, @model, @fb, @error)
+          INSERT INTO arena_trades (agent_id, round_date, slot, action, symbol, symbol_name, shares, price, fee, tax, reason, model, fallback_used, error)
+          VALUES (@agentId, @round, @slot, @action, @symbol, @name, @shares, @price, @fee, @tax, @reason, @model, @fb, @error)
         `)
     } catch (e) {
       console.error('[AzureSQL] insertArenaTrade error:', e)
@@ -2701,9 +2922,9 @@ export async function insertArenaTrade(record: {
   if (!db) return
   try {
     db.prepare(`
-      INSERT INTO arena_trades (agent_id, round_date, action, symbol, symbol_name, shares, price, fee, tax, reason, model, fallback_used, error)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(record.agentId, record.roundDate, record.action, record.symbol ?? null, record.symbolName ?? null,
+      INSERT INTO arena_trades (agent_id, round_date, slot, action, symbol, symbol_name, shares, price, fee, tax, reason, model, fallback_used, error)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(record.agentId, record.roundDate, record.slot ?? null, record.action, record.symbol ?? null, record.symbolName ?? null,
       record.shares ?? null, record.price ?? null, record.fee ?? null, record.tax ?? null, record.reason ?? null,
       record.model ?? null, record.fallbackUsed ? 1 : 0, record.error ?? null)
   } catch (e) {
@@ -2820,4 +3041,249 @@ export function resetArenaAgentLedger(agentId: number): Promise<void> {
     await dbExecute('DELETE FROM arena_trades WHERE agent_id = @agentId', { agentId })
     await dbExecute('DELETE FROM arena_equity_snapshots WHERE agent_id = @agentId', { agentId })
   })()
+}
+
+// ── 盤中時點路徑 (arena_intraday_prices) ──────────────────────
+export async function saveArenaIntradayPrices(
+  rows: Array<{
+    roundDate: string
+    symbol: string
+    slot: number
+    timeLabel?: string | null
+    price: number
+    changePct?: number | null
+  }>,
+): Promise<void> {
+  if (rows.length === 0) return
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      for (const r of rows) {
+        await pool.request()
+          .input('round', sql.NVarChar(20), r.roundDate)
+          .input('symbol', sql.NVarChar(20), r.symbol)
+          .input('slot', sql.Int, r.slot)
+          .input('timeLabel', sql.NVarChar(20), r.timeLabel ?? null)
+          .input('price', sql.Float, r.price)
+          .input('change', sql.Float, r.changePct ?? null)
+          .query(`
+            UPDATE arena_intraday_prices
+            SET time_label = @timeLabel, price = @price, change_pct = @change
+            WHERE round_date = @round AND symbol = @symbol AND slot = @slot;
+            IF @@ROWCOUNT = 0
+              INSERT INTO arena_intraday_prices (round_date, symbol, slot, time_label, price, change_pct)
+              VALUES (@round, @symbol, @slot, @timeLabel, @price, @change)
+          `)
+      }
+    } catch (e) {
+      console.error('[AzureSQL] saveArenaIntradayPrices error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    const ins = db.prepare(`
+      INSERT INTO arena_intraday_prices (round_date, symbol, slot, time_label, price, change_pct)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(round_date, symbol, slot) DO UPDATE SET
+        time_label = excluded.time_label,
+        price = excluded.price,
+        change_pct = excluded.change_pct
+    `)
+    const tx = db.transaction((items: typeof rows) => {
+      for (const r of items) {
+        ins.run(r.roundDate, r.symbol, r.slot, r.timeLabel ?? null, r.price, r.changePct ?? null)
+      }
+    })
+    tx(rows)
+  } catch (e) {
+    console.error('[SQLite] saveArenaIntradayPrices error:', e)
+  }
+}
+
+export function getArenaIntradayPrices(roundDate: string, symbol?: string): Promise<ArenaIntradayPriceRow[]> {
+  if (symbol) {
+    return dbQueryAll<ArenaIntradayPriceRow>(
+      'SELECT * FROM arena_intraday_prices WHERE round_date = @roundDate AND symbol = @symbol ORDER BY slot ASC',
+      { roundDate, symbol },
+    )
+  }
+  return dbQueryAll<ArenaIntradayPriceRow>(
+    'SELECT * FROM arena_intraday_prices WHERE round_date = @roundDate ORDER BY symbol ASC, slot ASC',
+    { roundDate },
+  )
+}
+
+// ── 盤前簡報 (arena_market_briefings) ─────────────────────────
+export async function saveArenaMarketBriefing(
+  roundDate: string,
+  content: string,
+  model?: string | null,
+  fallbackUsed?: boolean | null,
+): Promise<void> {
+  const fb = fallbackUsed ? 1 : 0
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      await pool.request()
+        .input('round', sql.NVarChar(20), roundDate)
+        .input('content', sql.NVarChar(sql.MAX), content)
+        .input('model', sql.NVarChar(100), model ?? null)
+        .input('fb', sql.Int, fb)
+        .query(`
+          UPDATE arena_market_briefings
+          SET content = @content, model = @model, fallback_used = @fb
+          WHERE round_date = @round;
+          IF @@ROWCOUNT = 0
+            INSERT INTO arena_market_briefings (round_date, content, model, fallback_used)
+            VALUES (@round, @content, @model, @fb)
+        `)
+    } catch (e) {
+      console.error('[AzureSQL] saveArenaMarketBriefing error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    db.prepare(`
+      INSERT INTO arena_market_briefings (round_date, content, model, fallback_used)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(round_date) DO UPDATE SET
+        content = excluded.content,
+        model = excluded.model,
+        fallback_used = excluded.fallback_used
+    `).run(roundDate, content, model ?? null, fb)
+  } catch (e) {
+    console.error('[SQLite] saveArenaMarketBriefing error:', e)
+  }
+}
+
+export function getArenaMarketBriefing(roundDate: string): Promise<ArenaMarketBriefingRow | undefined> {
+  return dbQueryFirst<ArenaMarketBriefingRow>(
+    'SELECT * FROM arena_market_briefings WHERE round_date = @roundDate LIMIT 1',
+    { roundDate },
+  )
+}
+
+// ── 決策時間軸記錄 (arena_decision_logs) ──────────────────────
+export async function insertArenaDecisionLog(record: {
+  agentId: number
+  seasonId?: number | null
+  roundDate: string
+  phase: string
+  slot?: number | null
+  content: string
+  model?: string | null
+  fallbackUsed?: boolean | null
+}): Promise<void> {
+  const fb = record.fallbackUsed ? 1 : 0
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      await pool.request()
+        .input('agentId', sql.Int, record.agentId)
+        .input('seasonId', sql.Int, record.seasonId ?? null)
+        .input('round', sql.NVarChar(20), record.roundDate)
+        .input('phase', sql.NVarChar(20), record.phase)
+        .input('slot', sql.Int, record.slot ?? null)
+        .input('content', sql.NVarChar(sql.MAX), record.content)
+        .input('model', sql.NVarChar(100), record.model ?? null)
+        .input('fb', sql.Int, fb)
+        .query(`
+          INSERT INTO arena_decision_logs (agent_id, season_id, round_date, phase, slot, content, model, fallback_used)
+          VALUES (@agentId, @seasonId, @round, @phase, @slot, @content, @model, @fb)
+        `)
+    } catch (e) {
+      console.error('[AzureSQL] insertArenaDecisionLog error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    db.prepare(`
+      INSERT INTO arena_decision_logs (agent_id, season_id, round_date, phase, slot, content, model, fallback_used)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(record.agentId, record.seasonId ?? null, record.roundDate, record.phase, record.slot ?? null, record.content, record.model ?? null, fb)
+  } catch (e) {
+    console.error('[SQLite] insertArenaDecisionLog error:', e)
+  }
+}
+
+export function getArenaDecisionLogs(agentId: number, roundDate?: string): Promise<ArenaDecisionLogRow[]> {
+  if (roundDate) {
+    return dbQueryAll<ArenaDecisionLogRow>(
+      'SELECT * FROM arena_decision_logs WHERE agent_id = @agentId AND round_date = @roundDate ORDER BY id ASC',
+      { agentId, roundDate },
+    )
+  }
+  return dbQueryAll<ArenaDecisionLogRow>(
+    'SELECT * FROM arena_decision_logs WHERE agent_id = @agentId ORDER BY round_date DESC, id ASC LIMIT 100',
+    { agentId },
+  )
+}
+
+export function getArenaRoundDecisionLogs(roundDate: string): Promise<ArenaDecisionLogRow[]> {
+  return dbQueryAll<ArenaDecisionLogRow>(
+    'SELECT * FROM arena_decision_logs WHERE round_date = @roundDate ORDER BY agent_id ASC, id ASC',
+    { roundDate },
+  )
+}
+
+// ── 圓桌討論 (arena_discussions) ──────────────────────────────
+export async function saveArenaDiscussion(
+  roundDate: string,
+  content: string,
+  model?: string | null,
+  fallbackUsed?: boolean | null,
+): Promise<void> {
+  const fb = fallbackUsed ? 1 : 0
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      await pool.request()
+        .input('round', sql.NVarChar(20), roundDate)
+        .input('content', sql.NVarChar(sql.MAX), content)
+        .input('model', sql.NVarChar(100), model ?? null)
+        .input('fb', sql.Int, fb)
+        .query(`
+          UPDATE arena_discussions
+          SET content = @content, model = @model, fallback_used = @fb
+          WHERE round_date = @round;
+          IF @@ROWCOUNT = 0
+            INSERT INTO arena_discussions (round_date, content, model, fallback_used)
+            VALUES (@round, @content, @model, @fb)
+        `)
+    } catch (e) {
+      console.error('[AzureSQL] saveArenaDiscussion error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    db.prepare(`
+      INSERT INTO arena_discussions (round_date, content, model, fallback_used)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(round_date) DO UPDATE SET
+        content = excluded.content,
+        model = excluded.model,
+        fallback_used = excluded.fallback_used
+    `).run(roundDate, content, model ?? null, fb)
+  } catch (e) {
+    console.error('[SQLite] saveArenaDiscussion error:', e)
+  }
+}
+
+export function getArenaDiscussion(roundDate: string): Promise<ArenaDiscussionRow | undefined> {
+  return dbQueryFirst<ArenaDiscussionRow>(
+    'SELECT * FROM arena_discussions WHERE round_date = @roundDate LIMIT 1',
+    { roundDate },
+  )
 }

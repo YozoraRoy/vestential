@@ -663,6 +663,23 @@ export interface Dict {
     statusActive: string
     statusPaused: string
     currency: string
+    personalityLabel: string
+    personalityCustom: string
+    personalityCustomPlaceholder: string
+    paramsTitle: string
+    paramMaxPosition: string
+    paramStopLoss: string
+    paramMinCash: string
+    paramMaxTrades: string
+    timelineTitle: string
+    timelineBtn: string
+    timelineEmpty: string
+    briefingTitle: string
+    discussionTitle: string
+    phasePremarket: string
+    phaseTrade: string
+    phasePostclose: string
+    drawerClose: string
   }
 }
 

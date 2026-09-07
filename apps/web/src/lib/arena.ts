@@ -3,10 +3,13 @@ import {
   LightweightStrategist,
   buildDefaultDailyUniverse,
   fetchArenaMarket,
+  normalizeArenaStrategyParams,
   type ArenaHolding,
   type ArenaStore,
   type ArenaStrategist,
   type ArenaUniverseItem,
+  type ArenaIntradayPriceRecord,
+  type ArenaDecisionLogRecord,
 } from '@stock/ai-engine'
 import {
   listActiveArenaAgents,
@@ -16,6 +19,11 @@ import {
   upsertArenaSnapshot,
   updateArenaAgentLastRound,
   updateArenaAgentCash,
+  saveArenaIntradayPrices,
+  saveArenaMarketBriefing,
+  insertArenaDecisionLog,
+  saveArenaDiscussion,
+  ensureActiveArenaSeason,
   dbQueryFirst,
 } from '@stock/database'
 import type { ArenaAgentRecord, ArenaTradeRecord, ArenaSnapshotRecord } from '@stock/ai-engine'
@@ -25,20 +33,30 @@ export function dbArenaStore(): ArenaStore {
   return {
     async listActiveAgents(): Promise<ArenaAgentRecord[]> {
       const rows = await listActiveArenaAgents()
-      return rows.map((r) => ({
-        id: r.id,
-        ownerUserId: String(r.owner_user_id),
-        name: r.name,
-        division: r.division,
-        strategyId: r.strategy_id,
-        tone: r.tone,
-        initialCapital: r.initial_capital,
-        cash: r.cash,
-        status: r.status,
-        lastRoundDate: r.last_round_date ?? null,
-        seasonId: r.season_id > 0 ? r.season_id : null,
-        seasonName: null,
-      }))
+      return rows.map((r) => {
+        let parsedParams: unknown = null
+        if (r.strategy_params) {
+          try {
+            parsedParams = JSON.parse(r.strategy_params)
+          } catch {}
+        }
+        return {
+          id: r.id,
+          ownerUserId: String(r.owner_user_id),
+          name: r.name,
+          division: r.division,
+          strategyId: r.strategy_id,
+          tone: r.tone,
+          initialCapital: r.initial_capital,
+          cash: r.cash,
+          status: r.status,
+          lastRoundDate: r.last_round_date ?? null,
+          seasonId: r.season_id > 0 ? r.season_id : null,
+          seasonName: null,
+          personality: r.personality ?? null,
+          strategyParams: normalizeArenaStrategyParams(parsedParams),
+        }
+      })
     },
 
     async getHoldings(agentId: number): Promise<ArenaHolding[]> {
@@ -68,6 +86,7 @@ export function dbArenaStore(): ArenaStore {
       await insertArenaTrade({
         agentId: record.agentId,
         roundDate: record.roundDate,
+        slot: record.slot ?? null,
         action: record.action,
         symbol: record.symbol ?? null,
         symbolName: record.symbolName ?? null,
@@ -97,6 +116,31 @@ export function dbArenaStore(): ArenaStore {
       await updateArenaAgentLastRound(agentId, roundDate)
       await updateArenaAgentCash(agentId, cash)
     },
+
+    async saveIntradayPrices(rows: ArenaIntradayPriceRecord[]): Promise<void> {
+      await saveArenaIntradayPrices(rows)
+    },
+
+    async saveMarketBriefing(roundDate: string, content: string, model?: string | null, fallbackUsed?: boolean | null): Promise<void> {
+      await saveArenaMarketBriefing(roundDate, content, model, fallbackUsed)
+    },
+
+    async insertDecisionLog(record: ArenaDecisionLogRecord): Promise<void> {
+      await insertArenaDecisionLog({
+        agentId: record.agentId,
+        seasonId: record.seasonId,
+        roundDate: record.roundDate,
+        phase: record.phase,
+        slot: record.slot,
+        content: record.content,
+        model: record.model,
+        fallbackUsed: record.fallbackUsed,
+      })
+    },
+
+    async saveDiscussion(roundDate: string, content: string, model?: string | null, fallbackUsed?: boolean | null): Promise<void> {
+      await saveArenaDiscussion(roundDate, content, model, fallbackUsed)
+    },
   }
 }
 
@@ -122,6 +166,9 @@ export interface ArenaTickResult {
   trades: number
   errors: string[]
   modelCalls: number
+  slots?: number
+  premarket?: boolean
+  discussion?: boolean
 }
 
 let tickGate: Promise<ArenaTickResult> | null = null
@@ -138,6 +185,7 @@ export async function runArenaTick(roundDate: string): Promise<ArenaTickResult> 
 
   if (tickGate) return tickGate
   tickGate = (async (): Promise<ArenaTickResult> => {
+    await ensureActiveArenaSeason()
     const universe: ArenaUniverseItem[] = await buildDefaultDailyUniverse(roundDate)
     const { prices, history } = await fetchArenaMarket(universe, roundDate)
     const result = await runArenaRound({

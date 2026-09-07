@@ -18,9 +18,14 @@ export {
   updateArenaAgentConfig, setArenaAgentStatus, updateArenaAgentLastRound, updateArenaAgentCash,
   getArenaHoldings, replaceArenaHoldings, insertArenaTrade, getArenaTrades,
   upsertArenaSnapshot, getArenaSnapshots, getArenaLeaderboard, resetArenaAgentLedger,
+  saveArenaIntradayPrices, getArenaIntradayPrices,
+  saveArenaMarketBriefing, getArenaMarketBriefing,
+  insertArenaDecisionLog, getArenaDecisionLogs, getArenaRoundDecisionLogs,
+  saveArenaDiscussion, getArenaDiscussion,
 } from './db.js'
 export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta,
-  ArenaSeasonRow, ArenaAgentRow, ArenaHoldingRow, ArenaTradeRow, ArenaSnapshotRow, ArenaAgentInput, ArenaLeaderboardRow } from './db.js'
+  ArenaSeasonRow, ArenaAgentRow, ArenaHoldingRow, ArenaTradeRow, ArenaSnapshotRow, ArenaAgentInput, ArenaLeaderboardRow,
+  ArenaIntradayPriceRow, ArenaMarketBriefingRow, ArenaDecisionLogRow, ArenaDiscussionRow } from './db.js'
 export { exportSyncData, mergeExports, applySyncMerge, applySyncImport, SYNC_TABLES } from './sync.js'
 export type { SyncExport, SyncRow, MergedExport, SyncTableName, TaggedRow, RowSource } from './sync.js'
 export type { Database } from 'better-sqlite3'

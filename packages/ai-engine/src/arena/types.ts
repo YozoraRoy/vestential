@@ -64,11 +64,35 @@ export interface ArenaPrice {
   price: number
   changePct?: number
   date?: string
+  open?: number
+  high?: number
+  low?: number
+}
+
+/** 當日 OHLC + 前一日收盤（供合成盤中路徑與盤前統計）。 */
+export interface ArenaDayOhlc {
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  prevClose?: number
+}
+
+/** 單一時點（盤中決策窗）的全池參考價。 */
+export interface ArenaSlotPrice {
+  slot: number
+  timeLabel: string
+  price: number
+  changePct?: number
 }
 
 export interface ArenaHistoryPoint {
   date: string
   close: number
+  open?: number
+  high?: number
+  low?: number
 }
 
 export type ArenaHistory = ArenaHistoryPoint[]
@@ -107,4 +131,64 @@ export interface ArenaAgentParams {
   name: string
   strategyId: string
   tone: ArenaTone
+}
+
+/** 盤中決策時點（09:30 / 10:30 / 11:30 / 13:00，可經 ARENA_SLOT_TIMES 覆寫）。 */
+export const DEFAULT_ARENA_SLOT_TIMES = ['09:30', '10:30', '11:30', '13:00']
+
+export function arenaSlotTimes(): string[] {
+  const raw = process.env.ARENA_SLOT_TIMES
+  if (raw?.trim()) {
+    const items = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(s))
+    if (items.length > 0) return items
+  }
+  return DEFAULT_ARENA_SLOT_TIMES
+}
+
+/** 使用者可自訂的細部策略參數（全數字，clamp 於範圍內）。 */
+export interface ArenaStrategyParams {
+  maxPositionPct: number
+  stopLossPct: number
+  minCashBufferPct: number
+  maxTradesPerSlot: number
+}
+
+export const ARENA_STRATEGY_PARAMS_DEFAULTS: ArenaStrategyParams = {
+  maxPositionPct: 30,
+  stopLossPct: 15,
+  minCashBufferPct: 5,
+  maxTradesPerSlot: 3,
+}
+
+const PARAM_RANGES: Record<keyof ArenaStrategyParams, [number, number]> = {
+  maxPositionPct: [5, 50],
+  stopLossPct: [5, 50],
+  minCashBufferPct: [0, 40],
+  maxTradesPerSlot: [0, 10],
+}
+
+export function normalizeArenaStrategyParams(raw: unknown): ArenaStrategyParams {
+  const out = { ...ARENA_STRATEGY_PARAMS_DEFAULTS }
+  let target = raw
+  if (typeof target === 'string') {
+    try {
+      target = JSON.parse(target)
+    } catch {
+      return out
+    }
+  }
+  if (target && typeof target === 'object' && !Array.isArray(target)) {
+    const rec = target as Record<string, unknown>
+    for (const key of Object.keys(PARAM_RANGES) as Array<keyof ArenaStrategyParams>) {
+      const v = rec[key]
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        const [min, max] = PARAM_RANGES[key]
+        out[key] = Math.round(Math.min(max, Math.max(min, v)))
+      }
+    }
+  }
+  return out
 }

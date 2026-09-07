@@ -1,6 +1,6 @@
 import { loadConfig } from '@stock/core'
 import { registry } from '@stock/market-data'
-import { DEFAULT_ARENA_UNIVERSE, type ArenaHistory, type ArenaPrice, type ArenaUniverseItem } from './types.js'
+import { DEFAULT_ARENA_UNIVERSE, type ArenaDayOhlc, type ArenaHistory, type ArenaPrice, type ArenaUniverseItem } from './types.js'
 
 /** 移植自 engine.ts 的台股代號解析：純數字代號依序試 .TW / .TWO。 */
 export async function resolveTwSymbol(raw: string): Promise<string> {
@@ -23,6 +23,8 @@ export async function resolveTwSymbol(raw: string): Promise<string> {
 export interface LoadedArenaPrice extends ArenaPrice {
   /** 已解析的 Yahoo 代號（含後綴），寫交易日誌用。 */
   resolvedSymbol?: string
+  /** 當日 OHLC + 前日收盤（供合成盤中路徑與盤前統計）。 */
+  day?: ArenaDayOhlc
 }
 
 function sleep(ms: number): Promise<void> {
@@ -69,33 +71,53 @@ export async function fetchArenaMarket(
         .filter((r) => r.timestamp <= Date.now())
         .sort((a, b) => b.timestamp - a.timestamp)
 
-      const target = new Date(`${roundDate}T23:59:59`).getTime()
+      const around = new Date(`${roundDate}T00:00:00`)
+      const target = around.getTime() + 23 * 3600_000 + 59 * 60_000 + 59_000
       const snap = rounds.find((r) => {
         const d = new Date(r.timestamp)
         return d.toISOString().slice(0, 10) === roundDate
       })
 
-      const lookbackStart = target - (lookbackDays + 8) * 86_400_000
+      const lookbackStart = around.getTime() - (lookbackDays + 8) * 86_400_000
       const recent = rounds
         .filter((r) => r.timestamp <= target && r.timestamp >= lookbackStart)
         .sort((a, b) => a.timestamp - b.timestamp)
       for (const r of recent) {
-        hist.push({ date: new Date(r.timestamp).toISOString().slice(0, 10), close: r.close })
+        hist.push({
+          date: new Date(r.timestamp).toISOString().slice(0, 10),
+          close: r.close,
+          open: r.open || undefined,
+          high: r.high || undefined,
+          low: r.low || undefined,
+        })
       }
 
       const px = snap ?? recent[recent.length - 1]
       if (!px) return null
 
       let pct: number | undefined = undefined
-      if (pct === undefined && recent.length >= 2) {
+      if (recent.length >= 2) {
         const prev = recent[recent.length - 2].close
         pct = prev > 0 ? Math.round(((recent[recent.length - 1].close - prev) / prev) * 10000) / 100 : 0
+      }
+
+      const day: ArenaDayOhlc = {
+        date: new Date(px.timestamp).toISOString().slice(0, 10),
+        open: px.open > 0 ? px.open : px.close,
+        high: px.high > 0 ? px.high : px.close,
+        low: px.low > 0 ? px.low : px.close,
+        close: px.close,
+        prevClose: recent.length >= 2 ? recent[recent.length - 2].close : undefined,
       }
 
       return {
         resolved,
         price: Math.round(px.close * 100) / 100,
+        open: Math.round(day.open * 100) / 100,
+        high: Math.round(day.high * 100) / 100,
+        low: Math.round(day.low * 100) / 100,
         changePct: pct !== undefined ? Math.round(pct * 100) / 100 : undefined,
+        day,
         history: hist,
       }
     } catch {
@@ -110,9 +132,13 @@ export async function fetchArenaMarket(
       symbol: item.symbol,
       symbolName: item.name,
       price: entry.price,
+      open: entry.open,
+      high: entry.high,
+      low: entry.low,
       changePct: entry.changePct,
       date: entry.history[entry.history.length - 1].date,
       resolvedSymbol: entry.resolved,
+      day: entry.day,
     }
     history[item.symbol] = entry.history
   })

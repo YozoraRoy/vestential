@@ -38,10 +38,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (strategyId !== undefined && !VALID_STRATEGIES.has(strategyId)) return NextResponse.json({ error: '無效的策略' }, { status: 400 })
   if (tone !== undefined && !VALID_TONES.has(tone)) return NextResponse.json({ error: '無效的風險偏好' }, { status: 400 })
 
+  const personality = typeof body?.personality === 'string'
+    ? (body.personality.trim() ? body.personality.trim().slice(0, 40) : null)
+    : body?.personality === null ? null : undefined
+  const strategyParams = body?.strategyParams !== undefined ? body.strategyParams : undefined
+
   const ok = await updateArenaAgentConfig(agentId, {
     name: name !== undefined ? name : undefined,
     strategyId,
     tone,
+    personality,
+    strategyParams,
   })
   if (!ok) return NextResponse.json({ error: '更新失敗' }, { status: 500 })
   return NextResponse.json({ message: '已更新' })

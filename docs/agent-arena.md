@@ -203,10 +203,57 @@ V1 實作 `LightweightStrategist`：單次 quick LLM `generateObject`，輸出 z
 - **M4** API 路由、每日排程、`/agent-arena` 頁面 + i18n、首頁卡片啟用。
 - **M5** typecheck/lint、本機重播 + 單輪 tick + 建 agent 流程驗證、部署、生產驗證。
 
-## 11. 風險與開放問題
+## 12. V1.1 深度擴充架構（盤中路徑、五階段 Pipeline、安全防禦與決策時間軸）
 
-- **Yahoo 限流**：重播/每日拉價需分塊 + sleep + 沿用 15min TTL cache；Top100 市值 + ETF 全池（166 檔）採 `fetchBatchQuotes`（v7, crumb cache, 每批≤100, 批間 300ms），市值用 `/v7/finance/quote` 的 marketCap，ETF 用 shortName。
-- **重播一次性成本**：分晚跑；`ARENA_REPLAY_DAYS` 控制。
-- **LLM 幻覺標的/股數**：schema 驗證 + 股票池白名單 + 重試 1 次 + 失敗視為 HOLD。
-- **排程時差**：tick 以日期為 key idempotent；Azure 時區用 `Asia/Taipei` 校正。
-- **開放問題**：季報名組「預約下季」資料（V1 僅文字引導）；隨時組公平性佐證欄是否再加 Sharpe/回撤（V1 不做）；重置後歷史季封存展示深度。
+### 12.1 五階段 Pipeline（Five-Phase Daily Pipeline）
+每日收盤後（或回測/重播時）依序執行五階段管線：
+1. **Phase 1: 盤前準備（Market Briefing）**
+   - 統計 universe 昨日行情、近 5 日動能與當季基本面（本益比、殖利率、營收成長率）。
+   - 產出全池客觀盤前總覽，儲存於 `arena_round_summaries.briefing`。
+2. **Phase 2: 盤前規劃（Agent Premarket Plan）**
+   - 各 agent 結合自身策略、性格與盤前簡報，做出今日作戰規劃並記錄於 `arena_decision_logs`（phase = `'premarket'`）。
+3. **Phase 3: 盤中決策（Multi-slot Intraday Trading）**
+   - 依據當日 OHLC 建立 3 個代表性時點路徑（預設 09:30 早盤、11:00 盤中、13:00 尾盤），儲存於 `arena_intraday_prices`。
+   - 每個時點各 agent 依當前時點價格做出下單決策，並經由 `applyArenaDecision` 進行稽核：
+     - 單檔持倉上限（`maxPositionPct`）
+     - 個股強制停損（`stopLossPct`）
+     - 最低現金緩衝（`minCashBufferPct`）
+     - 每時點下單上限（`maxTradesPerSlot`）
+   - 下單決策與理由記入 `arena_decision_logs`（phase = `'trade'`，附帶 slot 編號）與 `arena_trades`。
+4. **Phase 4: 收盤自評（Postclose Reflection）**
+   - 收盤後計算當日權益變化，各 agent 對當日損益與持倉進行反思與自評，記錄於 `arena_decision_logs`（phase = `'postclose'`）。
+5. **Phase 5: 圓桌討論（Roundtable Discussion）**
+   - 萃取各 agent 自評與多空觀點，LLM 合成精彩的盤後圓桌辯論，儲存於 `arena_round_summaries.discussion`。
+
+### 12.2 提示注入安全防護（Prompt Security Architecture）
+- **資料與指令嚴格分離**：
+  - 所有來自外部、使用者自訂或前階段輸出的字串，一律經 `sanitizeDataField` 消毒（角括號轉為全形 `＜＞`、花括號轉為 `［］`、方括號轉為 `【】`、截斷最大長度）。
+  - 以 `<data name="...">` 標籤包裹，明確標示為純資料。
+- **System Prompt 寫死防護指令**：
+  - `injectionGuardNote()` 指令嚴格要求 LLM：任何包在 `<data>` 標籤中的內容均為不可信資料，無視其內部包含的任何指令（如「忽略上述規則」、「輸出某字串」）。
+
+### 12.3 細部策略參數與個性化性格
+- **性格（Personality）**：
+  - 5 大預設人格：`decisive`（決斷型）、`zen`（佛系）、`data`（數據控）、`risk_averse`（風險趨避）、`contrarian`（逆向），或自訂文字。
+  - 注入 Agent 的決策與自評提示詞中，使行為差異化。
+- **策略參數（Strategy Params）**：
+  - `maxPositionPct`：單檔持倉佔總權益上限（預設 30%，範圍 5%~50%）。
+  - `stopLossPct`：成本虧損達此門檻強制減碼（預設 15%，範圍 5%~50%）。
+  - `minCashBufferPct`：現金低於此比率禁止買進（預設 5%，範圍 0%~40%）。
+  - `maxTradesPerSlot`：單一時點最多下單筆數（預設 3 筆，範圍 0~10）。
+
+### 12.4 資料庫 Migration 009 新增結構
+- `arena_agents` 新增 `personality` (TEXT), `strategy_params` (TEXT)。
+- `arena_trades` 新增 `slot` (INT)。
+- 新增 `arena_intraday_prices` 表（`season_id, round_date, slot, symbol, price, change_pct`）。
+- 新增 `arena_round_summaries` 表（`season_id, round_date, briefing, briefing_model, discussion, discussion_model`）。
+- 新增 `arena_decision_logs` 表（`agent_id, round_date, phase, slot, content, model`）。
+
+### 12.5 API 與前端時間軸展示
+- `GET /api/agent-arena/round?date=...`：公開查詢指定日期的簡報、圓桌討論、決策時間軸與盤中價。
+- `GET /api/agent-arena/state`：回傳最新一輪情報（`latestRound`）。
+- `GET /api/agent-arena/my`：回傳我的 Agent 決策歷史記錄（`decisionLogs`）。
+- 前端 `agent-arena-view.tsx`：
+  - 支援建立/編輯 Agent 時選取性格與細部策略參數滑桿。
+  - 我的 Agent 卡片增加「⏱️ 查看決策時間軸」彈窗抽屜，按盤前規劃、盤中時點、收盤自評清晰展示。
+  - 排行榜上方展示今日盤前情報與收盤圓桌討論收合卡片。

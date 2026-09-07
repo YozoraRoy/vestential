@@ -1,6 +1,7 @@
 import {
   type ArenaDecision,
   type ArenaHolding,
+  type ArenaStrategyParams,
   ARENA_FEE_MIN,
   ARENA_FEE_RATE,
   ARENA_MAX_POSITION_RATIO,
@@ -68,18 +69,22 @@ function mergeHolding(
   }
 }
 
+
 export interface ApplyArenaDecisionParams {
   cash: number
   holdings: ArenaHolding[]
-  /** symbol -> 收盤價（key 為無後綴代號，例如 2330）。 */
+  /** symbol -> 收盤價或盤中時點價（key 為無後綴代號，例如 2330）。 */
   closes: Record<string, number>
   symbolNames?: Record<string, string>
   decision: ArenaDecision
   slippage?: number
+  /** 細部策略參數（可省略；省略即不啟用停損/現金緩衝/下單上限稽核）。 */
+  strategyParams?: Partial<ArenaStrategyParams>
 }
 
 export function applyArenaDecision(params: ApplyArenaDecisionParams): ArenaLedgerResult {
   const { cash, holdings, closes, symbolNames, decision, slippage } = params
+  const sp = params.strategyParams
   const slip = slippage ?? ARENA_SLIPPAGE_DEFAULT
   let cashAfter = cash
   const holdingsAfter = holdings.map((h) => ({ ...h }))
@@ -87,6 +92,39 @@ export function applyArenaDecision(params: ApplyArenaDecisionParams): ArenaLedge
   const rejected: ArenaLedgerEntry[] = []
 
   const round2 = (n: number) => Math.round(n * 100) / 100
+
+  /** 強制停損：個股現價自成本跌幅達 stopLossPct% → 自動減碼一半。 */
+  if (sp?.stopLossPct && sp.stopLossPct > 0) {
+    for (const h of [...holdingsAfter]) {
+      const mark = closes[h.symbol]
+      if (!mark || mark <= 0 || h.avgCost <= 0) continue
+      if (mark <= h.avgCost * (1 - sp.stopLossPct / 100)) {
+        const shares = Math.max(1, Math.floor(h.shares / 2))
+        const execPrice = round2(mark * (1 - slip))
+        const notional = round2(shares * execPrice)
+        const fee = round2(Math.max(ARENA_FEE_MIN, notional * ARENA_FEE_RATE))
+        const tax = round2(notional * ARENA_SELL_TAX_RATE)
+        const proceeds = round2(notional - fee - tax)
+        cashAfter = round2(cashAfter + proceeds)
+        mergeHolding(holdingsAfter, h.symbol, h.symbolName, -shares, execPrice)
+        entries.push({
+          action: 'SELL',
+          symbol: h.symbol,
+          symbolName: h.symbolName,
+          shares,
+          price: execPrice,
+          notional,
+          fee,
+          tax,
+          reason: `自動停損：成本 ${round2(h.avgCost)}、現價 ${mark}，跌幅達 ${sp.stopLossPct}% 強制減碼一半`,
+        })
+      }
+    }
+  }
+
+  let tradeCount = 0
+  const maxTrades = sp?.maxTradesPerSlot != null ? Math.max(0, sp.maxTradesPerSlot) : Infinity
+  const bufferPct = sp?.minCashBufferPct != null ? Math.max(0, sp.minCashBufferPct) : 0
 
   for (const action of decision.actions) {
     if (action.action === 'HOLD') {
@@ -102,6 +140,10 @@ export function applyArenaDecision(params: ApplyArenaDecisionParams): ArenaLedge
     const name = symbolNames?.[action.symbol]
 
     if (action.action === 'BUY') {
+      if (tradeCount >= maxTrades) {
+        rejected.push({ action: action.action, symbol: action.symbol, shares: action.shares, reason: '超過本時點下單筆數上限' })
+        continue
+      }
       const shares = action.shares && action.shares > 0 ? Math.floor(action.shares) : 1
       const execPrice = round2(px * (1 + slip))
       const notional = round2(shares * execPrice)
@@ -115,6 +157,18 @@ export function applyArenaDecision(params: ApplyArenaDecisionParams): ArenaLedge
       const projectedEquity = computeArenaEquity(cashAfter - cost, projectedHoldings, closesAbs)
       const newRatio = ((projectedHoldings.find((h) => h.symbol === action.symbol)?.shares ?? 0) * px) / projectedEquity
 
+      if (bufferPct > 0 && projectedEquity > 0) {
+        const required = projectedEquity * (bufferPct / 100)
+        if (cashAfter - cost < round2(required)) {
+          rejected.push({
+            action: action.action,
+            symbol: action.symbol,
+            shares,
+            reason: `買入後現金低於權益 ${bufferPct}% 的現金緩衝下限`,
+          })
+          continue
+        }
+      }
       if (cost > cashAfter) {
         rejected.push({ action: action.action, symbol: action.symbol, shares, reason: '現金不足' })
         continue
@@ -131,6 +185,7 @@ export function applyArenaDecision(params: ApplyArenaDecisionParams): ArenaLedge
 
       cashAfter = round2(cashAfter - cost)
       mergeHolding(holdingsAfter, action.symbol, name, shares, execPrice)
+      tradeCount++
       entries.push({
         action: 'BUY',
         symbol: action.symbol,
@@ -142,6 +197,10 @@ export function applyArenaDecision(params: ApplyArenaDecisionParams): ArenaLedge
         reason: action.reason,
       })
     } else {
+      if (tradeCount >= maxTrades) {
+        rejected.push({ action: action.action, symbol: action.symbol, shares: action.shares, reason: '超過本時點下單筆數上限' })
+        continue
+      }
       const existing = holdingsAfter.find((h) => h.symbol === action.symbol)
       const owned = existing?.shares ?? 0
       if (owned <= 0) {
@@ -157,6 +216,7 @@ export function applyArenaDecision(params: ApplyArenaDecisionParams): ArenaLedge
 
       cashAfter = round2(cashAfter + proceeds)
       mergeHolding(holdingsAfter, action.symbol, name, -shares, execPrice)
+      tradeCount++
       entries.push({
         action: 'SELL',
         symbol: action.symbol,

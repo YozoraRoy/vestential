@@ -1,4 +1,6 @@
-import type { ArenaDecision, ArenaHistory, ArenaHolding, ArenaPrice, ArenaUniverseItem } from './types.js'
+import type { ArenaDecision, ArenaHistory, ArenaHolding, ArenaPrice, ArenaSlotPrice, ArenaStrategyParams, ArenaUniverseItem } from './types.js'
+
+export type ArenaDecisionPhase = 'premarket' | 'trade' | 'postclose'
 
 export interface ArenaDecisionContext {
   agent: {
@@ -18,6 +20,22 @@ export interface ArenaDecisionContext {
   /** symbol -> 近 N 日歷史走勢（供決策參考）。 */
   history: Record<string, ArenaHistory>
   universe: ArenaUniverseItem[]
+  /** 決策階段：trade = 盤中買賣決策（decide 僅被此階段呼叫）。 */
+  phase: ArenaDecisionPhase
+  /** 盤中時點編號（trade 階段的 slot index）。 */
+  slot?: number
+  /** 盤中時點標籤，例如「10:30」。 */
+  slotTimeLabel?: string
+  /** symbol -> 本時點價（trade 階段用）。 */
+  slotPrices?: Record<string, number>
+  /** symbol -> 本日合成盤中路徑（僅含持股）。 */
+  heldDayPaths?: Record<string, ArenaSlotPrice[]>
+  /** 當日盤前簡報內容。 */
+  briefing?: string
+  /** agent 性格（純資料，詳見 persona.ts）。 */
+  personality?: string | null
+  /** 細部策略參數（已正規化 clamp）。 */
+  strategyParams: ArenaStrategyParams
 }
 
 export interface ArenaDecisionResult {
