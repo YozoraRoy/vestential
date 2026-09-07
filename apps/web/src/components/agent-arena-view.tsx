@@ -308,7 +308,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   <input
                     defaultValue={my.agent.name}
                     onChange={(e) => setFName(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-panel)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)]"
                   />
                 </div>
                 <div>
@@ -316,7 +316,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   <select
                     value={fStrategy || my.agent.strategy_id}
                     onChange={(e) => setFStrategy(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-panel)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] [&>option]:bg-[var(--bg-secondary)] [&>option]:text-[var(--text-primary)]"
                   >
                     {STRATEGIES.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -330,7 +330,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   <select
                     value={fTone || my.agent.tone}
                     onChange={(e) => setFTone(e.target.value as Tone)}
-                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-panel)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] [&>option]:bg-[var(--bg-secondary)] [&>option]:text-[var(--text-primary)]"
                   >
                     <option value="aggressive">{d.toneAggressive}</option>
                     <option value="neutral">{d.toneNeutral}</option>
@@ -415,7 +415,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                     value={fName}
                     onChange={(e) => setFName(e.target.value)}
                     placeholder={d.namePlaceholder}
-                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-panel)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)]"
                   />
                 </div>
                 <div>
@@ -423,7 +423,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   <select
                     value={fStrategy}
                     onChange={(e) => setFStrategy(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-panel)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] [&>option]:bg-[var(--bg-secondary)] [&>option]:text-[var(--text-primary)]"
                   >
                     {STRATEGIES.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -437,7 +437,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   <select
                     value={fTone}
                     onChange={(e) => setFTone(e.target.value as Tone)}
-                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-panel)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] [&>option]:bg-[var(--bg-secondary)] [&>option]:text-[var(--text-primary)]"
                   >
                     <option value="aggressive">{d.toneAggressive}</option>
                     <option value="neutral">{d.toneNeutral}</option>
