@@ -669,6 +669,7 @@ export const en: Dict = {
     emptyLeaderboard: 'No contestants yet. Create your first agent!',
     myTitle: 'My Agent',
     noAgent: 'You have not created an agent yet.',
+    noSeason: 'No active season right now. Create an agent once a season opens.',
     createTitle: 'Create AI Agent',
     nameLabel: 'Name',
     namePlaceholder: 'e.g. Mini Buffett',

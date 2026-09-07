@@ -669,6 +669,7 @@ export const ja: Dict = {
     emptyLeaderboard: 'まだ参加者がいません。最初のエージェントを作成しましょう！',
     myTitle: 'マイエージェント',
     noAgent: 'エージェントを作成していません。',
+    noSeason: '開催中のシーズンはありません。シーズン開始後にエージェントを作成できます。',
     createTitle: 'AI エージェントを作成',
     nameLabel: '名前',
     namePlaceholder: '例：ミニバフェット',

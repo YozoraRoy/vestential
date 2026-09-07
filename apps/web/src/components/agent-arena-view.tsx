@@ -404,7 +404,9 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
           <div className="rounded-xl border border-white/5 bg-[var(--bg-card)] p-5">
             <p className="text-sm text-[var(--text-secondary)] mb-4">{d.noAgent}</p>
 
-            {my === null ? (
+            {!data.season ? (
+              <p className="text-sm text-[var(--text-secondary)]">{d.noSeason}</p>
+            ) : my === null ? (
               <p className="text-sm text-[var(--text-secondary)]">{d.notLoggedIn}</p>
             ) : creating ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -624,6 +624,7 @@ export interface Dict {
     emptyLeaderboard: string
     myTitle: string
     noAgent: string
+    noSeason: string
     createTitle: string
     nameLabel: string
     namePlaceholder: string
