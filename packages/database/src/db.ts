@@ -1885,29 +1885,54 @@ export interface MarketFocusMeta {
   generated_at: string | null
 }
 
-/** 全量取代 market_focus 內容（每次 refresh 重新挑選一輪新聞）。 */
+/** 儲存市場焦點新聞：保留歷史資料不刪除，依 url 進行去重與更新。 */
 export async function saveMarketFocus(items: MarketFocusItem[]): Promise<void> {
-  await dbExecute('DELETE FROM market_focus')
   for (const it of items) {
     if (!it.title || !it.url) continue
-    await dbExecute(
-      'INSERT INTO market_focus (title, url, source, published_at, reason, summary, content, source_url) VALUES (@title, @url, @source, @published_at, @reason, @summary, @content, @source_url)',
-      {
-        title: it.title.slice(0, 500),
-        url: it.url.slice(0, 2000),
-        source: it.source ? it.source.slice(0, 200) : null,
-        published_at: it.published_at ? it.published_at.slice(0, 100) : null,
-        reason: it.reason ?? null,
-        summary: it.summary ?? null,
-        content: it.content ?? null,
-        source_url: it.source_url ? it.source_url.slice(0, 2000) : null,
-      },
-    )
+    const existing = await dbQueryFirst<{ id: number }>('SELECT id FROM market_focus WHERE url = @url', { url: it.url })
+    if (existing?.id) {
+      await dbExecute(
+        'UPDATE market_focus SET title = @title, source = @source, published_at = @published_at, reason = @reason, summary = @summary, content = @content, source_url = @source_url WHERE id = @id',
+        {
+          id: existing.id,
+          title: it.title.slice(0, 500),
+          source: it.source ? it.source.slice(0, 200) : null,
+          published_at: it.published_at ? it.published_at.slice(0, 100) : null,
+          reason: it.reason ?? null,
+          summary: it.summary ?? null,
+          content: it.content ?? null,
+          source_url: it.source_url ? it.source_url.slice(0, 2000) : null,
+        },
+      )
+    } else {
+      await dbExecute(
+        'INSERT INTO market_focus (title, url, source, published_at, reason, summary, content, source_url) VALUES (@title, @url, @source, @published_at, @reason, @summary, @content, @source_url)',
+        {
+          title: it.title.slice(0, 500),
+          url: it.url.slice(0, 2000),
+          source: it.source ? it.source.slice(0, 200) : null,
+          published_at: it.published_at ? it.published_at.slice(0, 100) : null,
+          reason: it.reason ?? null,
+          summary: it.summary ?? null,
+          content: it.content ?? null,
+          source_url: it.source_url ? it.source_url.slice(0, 2000) : null,
+        },
+      )
+    }
   }
 }
 
-/** 讀取最新一輪市場焦點新聞（以發布時間新到舊排序）。 */
-export async function getMarketFocus(limit: number = 6): Promise<MarketFocusItem[]> {
+/** 讀取市場焦點新聞：預設過濾近 days 天（預設 2 天），若遇假期新聞較少則 fallback 回傳最新資料避免開天窗。 */
+export async function getMarketFocus(limit: number = 6, days: number = 2): Promise<MarketFocusItem[]> {
+  const sinceDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+  const recent = await dbQueryAll<MarketFocusItem>(
+    `SELECT id, title, url, source, published_at, reason, summary, content, source_url FROM market_focus WHERE published_at >= @sinceDate ORDER BY published_at DESC, id DESC LIMIT ${limit}`,
+    { sinceDate },
+  )
+  if (recent.length > 0) {
+    return recent
+  }
+  // 遇週末或長假時若無 2 天內新聞，回傳最新資料以維持介面體驗
   return dbQueryAll<MarketFocusItem>(
     `SELECT id, title, url, source, published_at, reason, summary, content, source_url FROM market_focus ORDER BY published_at DESC, id DESC LIMIT ${limit}`,
   )

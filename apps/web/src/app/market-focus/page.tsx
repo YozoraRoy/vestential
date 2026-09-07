@@ -38,7 +38,7 @@ function formatDateTime(s: string): string {
 
 export default async function MarketFocusPage() {
   const locale = await getLocale()
-  const [focus, meta] = await Promise.all([getMarketFocus(10), getMarketFocusMeta()])
+  const [focus, meta] = await Promise.all([getMarketFocus(20, 2), getMarketFocusMeta()])
 
   const graph: object[] = [
     {
