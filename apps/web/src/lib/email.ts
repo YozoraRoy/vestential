@@ -95,83 +95,156 @@ function escapeHtml(s: string | null | undefined): string {
 }
 
 // ─── ① 每日市場焦點總覽信 ──────────────────────────────────────
-const BRAND_HEADER = `
-  <div style="background:#111827;color:#ffffff;padding:20px 24px;border-radius:12px 12px 0 0;">
-    <span style="font-size:18px;font-weight:700;letter-spacing:1px;">Vestential · 市場焦點</span>
+function buildBrandHeader(generatedAtIso?: string | null): string {
+  const timeStr = formatTwDateTime(generatedAtIso ?? new Date().toISOString())
+  return `
+  <div style="background:#0f172a;background:linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);color:#ffffff;padding:26px 28px;border-radius:12px 12px 0 0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <span style="font-size:20px;font-weight:800;letter-spacing:0.5px;color:#ffffff;">Vestential · 市場焦點</span>
+      <span style="background:rgba(255,255,255,0.12);color:#c7d2fe;font-size:11px;font-weight:600;padding:3px 10px;border-radius:9999px;border:1px solid rgba(255,255,255,0.15);">近 2 天精選</span>
+    </div>
+    <div style="font-size:13px;color:#94a3b8;line-height:1.6;margin-top:4px;">
+      依價值投資與長期累積精神，由 AI 篩選近期台股關鍵要聞與產業實質影響
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1);font-size:12px;color:#cbd5e1;display:flex;gap:16px;">
+      <span>🕒 發布時間：${escapeHtml(timeStr)}</span>
+      <span style="margin-left:12px;">📊 來源：多來源財經聚合</span>
+    </div>
   </div>`
+}
 
-function buildSummaryHtml(summary: string, items: MarketFocusItem[]): string {
+function buildSummaryHtml(summary: string, items: MarketFocusItem[], generatedAtIso?: string | null): string {
   const listHtml = items
     .map((it, i) => {
       const link = it.source_url ?? it.url
-      const reason = it.reason ? `<div style="color:#4b5563;margin:6px 0 2px;">💬 選取理由:${escapeHtml(it.reason)}</div>` : ''
-      const time = it.published_at ? `<span style="color:#9ca3af;">🕒 ${escapeHtml(formatTwDateTime(it.published_at))}</span>` : ''
+      const sourceBadge = it.source
+        ? `<span style="display:inline-block;background:#e0e7ff;color:#3730a3;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;margin-right:8px;">${escapeHtml(it.source)}</span>`
+        : ''
+      const time = it.published_at ? `<span style="color:#64748b;font-size:12px;">🕒 ${escapeHtml(formatTwDateTime(it.published_at))}</span>` : ''
+
+      const summaryBlock = it.summary
+        ? `
+        <div style="background:#f8fafc;border-left:3px solid #3b82f6;padding:10px 14px;border-radius:0 8px 8px 0;margin:10px 0;font-size:13.5px;line-height:1.75;color:#334155;">
+          <div style="font-weight:700;color:#1e40af;font-size:12px;margin-bottom:3px;">📝 AI 重點摘要</div>
+          ${escapeHtml(it.summary)}
+        </div>`
+        : ''
+
+      const reasonBlock = it.reason
+        ? `<div style="color:#475569;font-size:13px;margin:8px 0 4px;line-height:1.6;">
+            <b style="color:#0f172a;">💡 選取理由：</b>${escapeHtml(it.reason)}
+          </div>`
+        : ''
+
       return `
-      <div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin:10px 0;">
-        <div style="font-size:15px;font-weight:600;color:#111827;">${i + 1}. ${escapeHtml(it.title)}</div>
-        ${time ? `<div style="color:#9ca3af;margin-top:4px;font-size:13px;">${time}</div>` : ''}
-        ${reason}
-        <div style="margin-top:8px;font-size:13px;">🔗 <a href="${escapeHtml(link)}" style="color:#2563eb;word-break:break-all;">前往原文 →</a></div>
+      <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;margin:12px 0;background:#ffffff;">
+        <div style="margin-bottom:6px;">
+          ${sourceBadge}
+          ${time}
+        </div>
+        <div style="font-size:15.5px;font-weight:700;color:#0f172a;line-height:1.5;">
+          ${i + 1}. ${escapeHtml(it.title)}
+        </div>
+        ${summaryBlock}
+        ${reasonBlock}
+        <div style="margin-top:10px;font-size:13px;">
+          <a href="${escapeHtml(link)}" style="color:#2563eb;text-decoration:none;font-weight:600;" target="_blank">閱讀新聞原文 →</a>
+        </div>
       </div>`
     })
     .join('\n')
 
   return `
-    <div style="background:#f3f4f6;padding:24px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,Microsoft JhengHei,sans-serif;">
-      <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;">
-        ${BRAND_HEADER}
-        <div style="padding:24px;">
-          <div style="font-size:20px;font-weight:800;color:#111827;margin-bottom:12px;">✨ 今日市場總覽</div>
-          <div style="font-size:15px;line-height:1.8;color:#374151;white-space:pre-wrap;">${escapeHtml(summary)}</div>
-          <div style="text-align:center;margin:22px 0;">
-            <a href="${escapeHtml(SITE_LINK)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 28px;border-radius:9999px;">查看完整頁面 →</a>
+    <div style="background:#f1f5f9;padding:24px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,Microsoft JhengHei,sans-serif;">
+      <div style="max-width:620px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
+        ${buildBrandHeader(generatedAtIso)}
+        <div style="padding:26px 24px;">
+          <!-- 總覽區塊 -->
+          <div style="margin-bottom:24px;">
+            <div style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:4px;">✨ 本期市場總覽</div>
+            <div style="font-size:13px;color:#64748b;margin-bottom:12px;">由 AI 通讀近期重要財經要聞後，提煉出當前台股大盤、焦點產業與總體經濟核心脈動：</div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;font-size:14.5px;line-height:1.85;color:#1e293b;white-space:pre-wrap;">${escapeHtml(summary)}</div>
           </div>
-          <div style="border-top:1px solid #e5e7eb;padding-top:16px;">
-            <div style="font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;">📰 本日精選新聞</div>
+
+          <!-- 前往官網按鈕 -->
+          <div style="text-align:center;margin:24px 0 28px;">
+            <a href="${escapeHtml(SITE_LINK)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:9999px;box-shadow:0 2px 4px rgba(37,99,235,0.2);">前往 Vestential 瀏覽完整市場焦點 →</a>
+          </div>
+
+          <!-- 精選新聞列表 -->
+          <div style="border-top:1px solid #e2e8f0;padding-top:20px;">
+            <div style="font-size:17px;font-weight:800;color:#0f172a;margin-bottom:4px;">📰 本期精選新聞</div>
+            <div style="font-size:13px;color:#64748b;margin-bottom:14px;">嚴選具實質基本面影響力的關鍵報導，每則皆附 AI 摘要與選取原因：</div>
             ${listHtml}
           </div>
         </div>
-        <div style="background:#f9fafb;padding:16px 24px;font-size:12px;color:#6b7280;line-height:1.7;">
-          本信由 Vestential 自動產生並寄送。<br/>
-          資料來源:鉅亨網;內容僅供參考,不構成投資建議。<br/>
-          <a href="${escapeHtml(SITE_BASE)}" style="color:#9ca3af;">Vestential</a> — 價值投資路上的必備工具
+
+        <!-- 頁尾 -->
+        <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 24px;font-size:12px;color:#64748b;line-height:1.8;">
+          <b>關於此信件：</b><br/>
+          • 本信由 Vestential 排程自動產出並寄送（每 4 小時追蹤一次最新市場焦點）。<br/>
+          • 篩選範圍涵蓋近 2 天重點報導；內容僅供研究參考，不構成任何買賣投資建議。<br/>
+          • 新聞原始全文版權均屬原始媒體所有。<br/>
+          <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1;color:#94a3b8;">
+            <a href="${escapeHtml(SITE_BASE)}" style="color:#64748b;text-decoration:underline;">Vestential 首頁</a> · 
+            <a href="${escapeHtml(SITE_LINK)}" style="color:#64748b;text-decoration:underline;">市場焦點專頁</a> — 價值投資路上的必備工具
+          </div>
         </div>
       </div>
     </div>`
 }
 
-function buildSummaryText(summary: string, items: MarketFocusItem[]): string {
+function buildSummaryText(summary: string, items: MarketFocusItem[], generatedAtIso?: string | null): string {
+  const timeStr = formatTwDateTime(generatedAtIso ?? new Date().toISOString())
   const list = items
     .map((it, i) => {
       const link = it.source_url ?? it.url
-      const reason = it.reason ? `   選取理由:${it.reason}\n` : ''
+      const source = it.source ? `[${it.source}] ` : ''
       const time = it.published_at ? ` (${formatTwDateTime(it.published_at)})` : ''
-      return `${i + 1}. ${it.title}${time}\n${reason}   前往原文: ${link}`
+      const summaryPart = it.summary ? `   【AI 重點摘要】${it.summary}\n` : ''
+      const reasonPart = it.reason ? `   【選取理由】${it.reason}\n` : ''
+      return `${i + 1}. ${source}${it.title}${time}\n${summaryPart}${reasonPart}   前往原文: ${link}`
     })
-    .join('\n')
-  return `今日市場焦點 (Vestential) - ${formatTwDate(new Date().toISOString())}
+    .join('\n\n')
 
-今日市場總覽:
+  return `========================================
+Vestential · 市場焦點（近 2 天精選）
+發布時間：${timeStr}
+說明：依價值投資精神，由 AI 篩選近期台股關鍵要聞與產業實質影響
+========================================
+
+【✨ 本期市場總覽】
+（由 AI 通讀近期要聞提煉之核心脈絡）
 ${summary}
 
-本日精選新聞:
+----------------------------------------
+【📰 本期精選新聞】
+（共 ${items.length} 則關鍵報導，附 AI 摘要與選取原因）
+----------------------------------------
 ${list}
 
-查看完整頁面: ${SITE_LINK}
+========================================
+查看完整網頁版：${SITE_LINK}
 
-本信由 Vestential 自動產生並寄送。
-資料來源:鉅亨網;內容僅供參考,不構成投資建議。`
+※ 本信由 Vestential 自動排程產生並發送。
+※ 資料來源涵蓋鉅亨網、經濟日報等財經媒體；內容僅供研究參考，不構成投資建議。
+========================================`
 }
 
 /** 將最新一輪市場焦點總覽寄給 NOTIFY_TO。回傳是否成功送出。 */
 export async function sendMarketFocusSummary(): Promise<boolean> {
-  const [meta, items] = await Promise.all([getMarketFocusMeta(), getMarketFocus(6)])
+  const [meta, items] = await Promise.all([getMarketFocusMeta(), getMarketFocus(6, 2)])
   if (!meta?.summary) {
     console.warn('[Notify] market_focus_meta 無內容,略過寄送')
     return false
   }
-  const subject = `📬 今日市場焦點 (Vestential) — ${formatTwDate(meta.generated_at ?? new Date().toISOString())}`
-  return sendMailCore(subject, buildSummaryText(meta.summary, items), buildSummaryHtml(meta.summary, items))
+  const dateStr = formatTwDate(meta.generated_at ?? new Date().toISOString())
+  const subject = `📬 今日市場焦點 (Vestential) — ${dateStr}（近 2 天重點精選）`
+  return sendMailCore(
+    subject,
+    buildSummaryText(meta.summary, items, meta.generated_at),
+    buildSummaryHtml(meta.summary, items, meta.generated_at),
+  )
 }
 
 // ─── ② 異常告警信 ───────────────────────────────────────────────
