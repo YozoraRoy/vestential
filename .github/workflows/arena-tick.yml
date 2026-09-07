@@ -1,0 +1,47 @@
+name: Arena tick (AI Agent 競技場每日收官)
+
+on:
+  schedule:
+    # 每週一至五 台灣時間 15:30 (UTC 07:30)，收盤後數據齊全後驅動每日競技場收官
+    - cron: '30 7 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute Taiwan trading date (Asia/Taipei)
+        id: date
+        run: |
+          # 以 Asia/Taipei 時區計算「今天」；若為六日則回推到最近交易日。
+          TODAY=$(TZ='Asia/Taipei' date +%Y-%m-%d)
+          DOW=$(TZ='Asia/Taipei' date +%u)
+          if [ "$DOW" = "6" ]; then
+            TARGET=$(TZ='Asia/Taipei' date -d '-1 day' +%Y-%m-%d)
+          elif [ "$DOW" = "7" ]; then
+            TARGET=$(TZ='Asia/Taipei' date -d '-2 day' +%Y-%m-%d)
+          else
+            TARGET=$TODAY
+          fi
+          echo "target=$TARGET"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger arena tick on Azure
+        run: |
+          echo "Running arena tick for ${{ steps.date.outputs.target }}"
+          CODE=$(curl -s -o /tmp/arena_tick.json -w "%{http_code}" \
+            --max-time 300 \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.SYNC_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "https://stock-platform-roy.azurewebsites.net/api/agent-arena/tick?date=${{ steps.date.outputs.target }}")
+          echo "HTTP $CODE"
+          cat /tmp/arena_tick.json
+          echo ""
+          if [ "$CODE" != "200" ]; then
+            echo "::error::arena tick failed (HTTP $CODE)"
+            exit 1
+          fi

@@ -45,7 +45,7 @@ export interface ArenaSnapshotRecord {
 export interface ArenaStore {
   listActiveAgents(): Promise<ArenaAgentRecord[]>
   getHoldings(agentId: number): Promise<ArenaHolding[]>
-  replaceHoldings(agentId: number, holdings: ArenaHolding[]): Promise<void>
+  replaceHoldings(agentId: number, holdings: ArenaHolding[], roundDate: string): Promise<void>
   insertTrade(record: ArenaTradeRecord): Promise<void>
   insertSnapshot(snapshot: ArenaSnapshotRecord): Promise<void>
   advanceRound(agentId: number, roundDate: string, cash: number): Promise<void>

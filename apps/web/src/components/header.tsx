@@ -16,6 +16,7 @@ const navItems: { key: keyof Dict['nav']; href: string }[] = [
   { key: 'portfolio', href: '/portfolio' },
   { key: 'analyze', href: '/analyze' },
   { key: 'marketFocus', href: '/market-focus' },
+  { key: 'agentArena', href: '/agent-arena' },
 ]
 
 export interface HeaderUser {

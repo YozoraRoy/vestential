@@ -1,5 +1,5 @@
 import type { MarketDataProvider } from '../provider.js'
-import type { OHLCV, Quote, Fundamentals, CompanyProfile } from '../types.js'
+import type { OHLCV, Quote, Fundamentals, CompanyProfile, BatchQuote } from '../types.js'
 import { MarketDataError } from '@stock/core'
 import { TTLCache } from '../cache.js'
 
@@ -8,6 +8,9 @@ const historyCache = new TTLCache<OHLCV[]>(15 * 60 * 1000)
 
 /** 標的類型（ETF / EQUITY）快取：很少變動，重用避免重複呼叫 Yahoo。 */
 const assetTypeCache = new TTLCache<string>(60 * 60 * 1000)
+
+/** v7 finance/quote 的 crumb：連同 cookie 一起取得，2 小時 TTL。 */
+const crumbCache = new TTLCache<{ cookies: string; crumb: string }>(2 * 60 * 60 * 1000)
 
 interface YahooResult {
   chart?: {
@@ -77,6 +80,51 @@ async function detectQuoteType(symbol: string): Promise<string> {
   }
 }
 
+/** 取得 v7 quote 所需的 crumb + cookie（快取 2 小時）。 */
+async function getCrumb(): Promise<{ cookies: string; crumb: string }> {
+  const cached = crumbCache.get('crumb')
+  if (cached) return cached
+  const agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+  const fc = await fetch('https://fc.yahoo.com', { headers: { 'User-Agent': agent } })
+  const setCookies = (fc.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ')
+    || (fc.headers.get('set-cookie') ?? '')
+  const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+    headers: { 'User-Agent': agent, Cookie: setCookies, Accept: 'text/plain' },
+  })
+  const crumb = (await crumbRes.text()).trim()
+  const value = { cookies: setCookies, crumb }
+  if (crumb) crumbCache.set('crumb', value)
+  return value
+}
+
+/** 以 v7 finance/quote 一次抓多檔（每批 ≤100）的市值/價格/名稱/類型。批次數多就循序避限流。 */
+export async function fetchBatchQuotes(symbols: string[]): Promise<BatchQuote[]> {
+  const agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+  const { cookies, crumb } = await getCrumb()
+  const out: BatchQuote[] = []
+
+  for (let i = 0; i < symbols.length; i += 100) {
+    const chunk = symbols.slice(i, i + 100)
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(chunk.join(','))}&crumb=${encodeURIComponent(crumb)}&lang=en-US&region=US`
+    const res = await fetch(url, {
+      headers: { 'User-Agent': agent, Cookie: cookies, Accept: 'application/json' },
+    })
+    if (!res.ok) throw new MarketDataError(`Yahoo batch quote error: ${res.status}`)
+    const data: any = await res.json()
+    for (const q of data?.quoteResponse?.result ?? []) {
+      out.push({
+        symbol: q.symbol,
+        marketCap: typeof q.marketCap === 'number' && q.marketCap > 0 ? q.marketCap : undefined,
+        price: typeof q.regularMarketPrice === 'number' ? q.regularMarketPrice : undefined,
+        name: q.shortName ?? q.longname,
+        quoteType: q.quoteType,
+      })
+    }
+    if (i + 100 < symbols.length) await new Promise((r) => setTimeout(r, 300))
+  }
+  return out
+}
+
 export const yahooFinanceProvider: MarketDataProvider = {
   name: 'yahoo-finance',
 
@@ -140,8 +188,25 @@ export const yahooFinanceProvider: MarketDataProvider = {
   },
 
   async getFundamentals(symbol: string): Promise<Fundamentals> {
-    const data: any = await yahooFetch(`/chart/${symbol}?range=1d&interval=1d`)
-    return { symbol }
+    const url = `https://query1.finance.yahoo.com/v11/finance/quoteSummary/${symbol}?modules=price,summaryDetail`
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    const data: any = await res.json()
+    const price = data?.quoteSummary?.result?.[0]?.price ?? {}
+    const summary = data?.quoteSummary?.result?.[0]?.summaryDetail ?? {}
+
+    const num = (v: any): number | undefined => {
+      const raw = typeof v === 'object' && v !== null ? v.raw : v
+      return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined
+    }
+    return {
+      symbol,
+      marketCap: num(price.marketCap) ?? num(summary.marketCap),
+      peRatio: num(summary.trailingPE) ?? num(summary.forwardPE),
+      eps: num(summary.trailingEps),
+      dividendYield: num(summary.dividendYield),
+      sector: price.sector,
+      industry: price.industry,
+    }
   },
 
   async getProfile(symbol: string): Promise<CompanyProfile> {
@@ -171,5 +236,9 @@ export const yahooFinanceProvider: MarketDataProvider = {
       market: q.exchange ?? 'US',
       quoteType: q.quoteType,
     }))
+  },
+
+  async getBatchQuotes(symbols: string[]): Promise<BatchQuote[]> {
+    return fetchBatchQuotes(symbols)
   },
 }

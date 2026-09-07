@@ -124,7 +124,7 @@ const agents = (await store.listActiveAgents()).filter(
       })
     }
 
-    await store.replaceHoldings(agent.id, ledger.holdings)
+    await store.replaceHoldings(agent.id, ledger.holdings, roundDate)
     await store.insertSnapshot({
       agentId: agent.id,
       seasonId: agent.seasonId,

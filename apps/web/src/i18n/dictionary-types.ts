@@ -34,6 +34,7 @@ export interface Dict {
     portfolio: string
     backtest: string
     marketFocus: string
+    agentArena: string
   }
   switcher: {
     label: string
@@ -598,6 +599,68 @@ export interface Dict {
     guestRedeemed: string
     guestErrCodeRequired: string
     guestAiLoginRequired: string
+  }
+  agentArena: {
+    metaTitle: string
+    metaDesc: string
+    title: string
+    subtitle: string
+    loading: string
+    notLoggedIn: string
+    loginCta: string
+    capital: string
+    leaderboardTitle: string
+    divisionSeason: string
+    divisionOpen: string
+    colRank: string
+    colAgent: string
+    colDivision: string
+    colStrategy: string
+    colTone: string
+    colEquity: string
+    colReturn: string
+    colRounds: string
+    colJoined: string
+    emptyLeaderboard: string
+    myTitle: string
+    noAgent: string
+    createTitle: string
+    nameLabel: string
+    namePlaceholder: string
+    divisionLabel: string
+    strategyLabel: string
+    toneLabel: string
+    toneAggressive: string
+    toneNeutral: string
+    toneConservative: string
+    btnCreate: string
+    btnCreating: string
+    btnEdit: string
+    btnSave: string
+    btnCancel: string
+    btnPause: string
+    btnResume: string
+    btnDelete: string
+    btnRefresh: string
+    editTitle: string
+    holdingsTitle: string
+    noHoldings: string
+    tradesTitle: string
+    noTrades: string
+    colSymbol: string
+    colShares: string
+    colCost: string
+    colAction: string
+    colDate: string
+    colPrice: string
+    createSuccess: string
+    createFailed: string
+    updateFailed: string
+    actionFailed: string
+    deleteFailed: string
+    statusActive: string
+    statusPaused: string
+    currency: string
   }
 }
 

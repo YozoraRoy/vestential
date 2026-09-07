@@ -131,12 +131,12 @@ export default async function Home() {
       developing: false,
     },
     {
-      href: null,
+      href: '/agent-arena',
       icon: Bot,
       title: dict.home.agentTitle,
       desc: dict.home.agentDesc,
       accent: 'violet',
-      developing: true,
+      developing: false,
     },
     {
       href: null,

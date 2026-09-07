@@ -17,7 +17,7 @@
 ## 2. 範圍與非目標
 
 ### 範圍（V1）
-- 單一競賽股票池（universe，約 30 檔台股龍頭，`ARENA_UNIVERSE` 可載入）。
+- 單一競賽股票池（universe）：TWSE 市值 Top100 台股 + 66 檔 ETF（共 166 檔，參考 `buildDefaultDailyUniverse`；可透過 `ARENA_UNIVERSE` 以逗號分隔代號覆寫）。
 - 每 agent 每日一輪決策，決策由輕量 LLM 生成（quick 組 + 三層 fallback）。
 - 兩個組別：季報名組、隨時加入組（機制見 §3）。
 - 每日收盤後自動一輪（Azure 排程），開賽時可快速重播近期歷史交易日補滿曲線。
@@ -190,7 +190,7 @@ V1 實作 `LightweightStrategist`：單次 quick LLM `generateObject`，輸出 z
 
 ## 11. 風險與開放問題
 
-- **Yahoo 限流**：重播/每日拉價需分塊 + sleep + 沿用 15min TTL cache；股票池維持小（~30）。
+- **Yahoo 限流**：重播/每日拉價需分塊 + sleep + 沿用 15min TTL cache；Top100 市值 + ETF 全池（166 檔）採 `fetchBatchQuotes`（v7, crumb cache, 每批≤100, 批間 300ms），市值用 `/v7/finance/quote` 的 marketCap，ETF 用 shortName。
 - **重播一次性成本**：分晚跑；`ARENA_REPLAY_DAYS` 控制。
 - **LLM 幻覺標的/股數**：schema 驗證 + 股票池白名單 + 重試 1 次 + 失敗視為 HOLD。
 - **排程時差**：tick 以日期為 key idempotent；Azure 時區用 `Asia/Taipei` 校正。
