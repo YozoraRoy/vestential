@@ -228,7 +228,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
     reload().catch(() => setError(d.actionFailed))
   }, [reload, d.actionFailed])
 
-  const call = async (url: string, opts: RequestInit): Promise<{ ok: boolean; json?: any }> => {
+  const apiCall = async (url: string, opts: RequestInit): Promise<{ ok: boolean; json?: any }> => {
     const res = await fetch(url, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers ?? {}) } })
     const json = await res.json().catch(() => null)
     return { ok: res.ok, json }
@@ -240,7 +240,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
     setError(null)
     const personality = getResolvedPersonality()
     const strategyParams = getStrategyParamsJson()
-    const { ok, json } = await call('/api/agent-arena/agents', {
+    const { ok, json } = await apiCall('/api/agent-arena/agents', {
       method: 'POST',
       body: JSON.stringify({
         name: fName.trim(),
@@ -268,7 +268,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
     setError(null)
     const id = my?.agent?.id
     if (!id) return
-    const { ok, json } = await call(`/api/agent-arena/agents/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+    const { ok, json } = await apiCall(`/api/agent-arena/agents/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
     setBusy(false)
     if (!ok) {
       setError(json?.error ?? d.updateFailed)
@@ -283,7 +283,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
     if (!id || busy) return
     setBusy(true)
     setError(null)
-    const { ok, json } = await call(`/api/agent-arena/agents/${id}/${action}`, { method: 'POST' })
+    const { ok, json } = await apiCall(`/api/agent-arena/agents/${id}/${action}`, { method: 'POST' })
     setBusy(false)
     if (!ok) setError(json?.error ?? d.actionFailed)
     else reload()
@@ -294,7 +294,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
     if (!id || busy) return
     setBusy(true)
     setError(null)
-    const { ok, json } = await call(`/api/agent-arena/agents/${id}`, { method: 'DELETE' })
+    const { ok, json } = await apiCall(`/api/agent-arena/agents/${id}`, { method: 'DELETE' })
     setBusy(false)
     if (!ok) setError(json?.error ?? d.deleteFailed)
     else {
