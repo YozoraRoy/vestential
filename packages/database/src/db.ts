@@ -2407,9 +2407,19 @@ export async function getArenaSeasonById(id: number): Promise<ArenaSeasonRow | u
 }
 
 export async function getActiveArenaSeason(): Promise<ArenaSeasonRow | undefined> {
-  return dbQueryFirst<ArenaSeasonRow>(
+  const existing = await dbQueryFirst<ArenaSeasonRow>(
     "SELECT * FROM arena_seasons WHERE status IN ('registration', 'live') ORDER BY id DESC LIMIT 1",
   )
+  if (existing) return existing
+  // 沒有進行中賽季時自動建立一筆預設常駐賽季（live），確保賽場隨時可加入。
+  return ensureActiveArenaSeason()
+}
+
+export async function ensureActiveArenaSeason(): Promise<ArenaSeasonRow | undefined> {
+  const name = `${new Date().getFullYear()} 常駐賽季`
+  const id = await saveArenaSeason({ name, status: 'live' })
+  if (id <= 0) return undefined
+  return getArenaSeasonById(id)
 }
 
 export async function listArenaSeasons(): Promise<ArenaSeasonRow[]> {
