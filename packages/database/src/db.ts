@@ -313,6 +313,20 @@ function getSqliteDb(): Database.Database | null {
       _db.exec('ALTER TABLE market_focus ADD COLUMN summary TEXT;')
     } catch {}
 
+    // 既有 arena_agents 表補齊較晚期加入的欄位（冪等；全新 DB 欄位已存在時 ALTER 會拋錯，故獨立 try/catch）。
+    try {
+      _db.exec('ALTER TABLE arena_agents ADD COLUMN cash REAL NOT NULL DEFAULT 200000;')
+    } catch {}
+    try {
+      _db.exec('ALTER TABLE arena_agents ADD COLUMN adjust_count INTEGER NOT NULL DEFAULT 0;')
+    } catch {}
+    try {
+      _db.exec('ALTER TABLE arena_agents ADD COLUMN last_round_date TEXT;')
+    } catch {}
+    try {
+      _db.exec('ALTER TABLE arena_agents ADD COLUMN reset_note TEXT;')
+    } catch {}
+
     return _db
   } catch (err) {
     console.error('[SQLite] Failed to initialize (falling back to memory):', err)
@@ -612,6 +626,15 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
         CREATE INDEX idx_arena_agent_owner ON arena_agents(owner_user_id);
         CREATE INDEX idx_arena_agent_season ON arena_agents(season_id, status);
       END
+
+      IF COL_LENGTH('arena_agents', 'cash') IS NULL
+        ALTER TABLE arena_agents ADD cash FLOAT NOT NULL DEFAULT 200000;
+      IF COL_LENGTH('arena_agents', 'adjust_count') IS NULL
+        ALTER TABLE arena_agents ADD adjust_count INT NOT NULL DEFAULT 0;
+      IF COL_LENGTH('arena_agents', 'last_round_date') IS NULL
+        ALTER TABLE arena_agents ADD last_round_date NVARCHAR(20);
+      IF COL_LENGTH('arena_agents', 'reset_note') IS NULL
+        ALTER TABLE arena_agents ADD reset_note NVARCHAR(200);
     `)
 
     await _pool.request().query(`
