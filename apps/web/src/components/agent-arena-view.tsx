@@ -96,14 +96,13 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
 
   const [data, setData] = useState<StateData | null>(null)
   const [my, setMy] = useState<MyData | null>(null)
-  const [tab, setTab] = useState<Division>('season')
+  const [tab, setTab] = useState<Division>('open')
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const [fName, setFName] = useState('')
-  const [fDivision, setFDivision] = useState<Division>('season')
   const [fStrategy, setFStrategy] = useState('buffett')
   const [fTone, setFTone] = useState<Tone>('neutral')
 
@@ -136,7 +135,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
     setError(null)
     const { ok, json } = await call('/api/agent-arena/agents', {
       method: 'POST',
-      body: JSON.stringify({ name: fName.trim(), division: fDivision, strategyId: fStrategy, tone: fTone }),
+      body: JSON.stringify({ name: fName.trim(), division: 'open', strategyId: fStrategy, tone: fTone }),
     })
     setBusy(false)
     if (!ok) {
@@ -418,17 +417,6 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                     placeholder={d.namePlaceholder}
                     className="w-full rounded-lg border border-white/10 bg-[var(--bg-panel)] px-3 py-2 text-sm text-[var(--text-primary)]"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs text-[var(--text-secondary)] mb-1">{d.divisionLabel}</label>
-                  <select
-                    value={fDivision}
-                    onChange={(e) => setFDivision(e.target.value as Division)}
-                    className="w-full rounded-lg border border-white/10 bg-[var(--bg-panel)] px-3 py-2 text-sm text-[var(--text-primary)]"
-                  >
-                    <option value="season">{d.divisionSeason}</option>
-                    <option value="open">{d.divisionOpen}</option>
-                  </select>
                 </div>
                 <div>
                   <label className="block text-xs text-[var(--text-secondary)] mb-1">{d.strategyLabel}</label>
