@@ -247,6 +247,7 @@ function getSqliteDb(): Database.Database | null {
         initial_capital REAL NOT NULL DEFAULT 200000,
         cash REAL NOT NULL DEFAULT 200000,
         status TEXT NOT NULL DEFAULT 'active',
+        is_system INTEGER NOT NULL DEFAULT 0,
         joined_at TEXT,
         adjust_count INTEGER NOT NULL DEFAULT 0,
         last_round_date TEXT,
@@ -325,6 +326,9 @@ function getSqliteDb(): Database.Database | null {
     } catch {}
     try {
       _db.exec('ALTER TABLE arena_agents ADD COLUMN reset_note TEXT;')
+    } catch {}
+    try {
+      _db.exec('ALTER TABLE arena_agents ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0;')
     } catch {}
 
     return _db
@@ -617,6 +621,7 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           initial_capital FLOAT NOT NULL DEFAULT 200000,
           cash FLOAT NOT NULL DEFAULT 200000,
           status NVARCHAR(10) NOT NULL DEFAULT 'active',
+          is_system INT NOT NULL DEFAULT 0,
           joined_at NVARCHAR(20),
           adjust_count INT NOT NULL DEFAULT 0,
           last_round_date NVARCHAR(20),
@@ -635,6 +640,8 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
         ALTER TABLE arena_agents ADD last_round_date NVARCHAR(20);
       IF COL_LENGTH('arena_agents', 'reset_note') IS NULL
         ALTER TABLE arena_agents ADD reset_note NVARCHAR(200);
+      IF COL_LENGTH('arena_agents', 'is_system') IS NULL
+        ALTER TABLE arena_agents ADD is_system INT NOT NULL DEFAULT 0;
     `)
 
     await _pool.request().query(`
@@ -2327,6 +2334,7 @@ export interface ArenaAgentRow {
   initial_capital: number
   cash: number
   status: 'active' | 'paused' | 'reset'
+  is_system: number
   joined_at: string | null
   adjust_count: number
   last_round_date: string | null
@@ -2433,7 +2441,11 @@ export async function getActiveArenaSeason(): Promise<ArenaSeasonRow | undefined
   const existing = await dbQueryFirst<ArenaSeasonRow>(
     "SELECT * FROM arena_seasons WHERE status IN ('registration', 'live') ORDER BY id DESC LIMIT 1",
   )
-  if (existing) return existing
+  if (existing) {
+    // 已有進行中賽季：確認該賽季已種入系統示範 agent。
+    await ensureSystemArenaAgents(existing.id)
+    return existing
+  }
   // 沒有進行中賽季時自動建立一筆預設常駐賽季（live），確保賽場隨時可加入。
   return ensureActiveArenaSeason()
 }
@@ -2442,7 +2454,37 @@ export async function ensureActiveArenaSeason(): Promise<ArenaSeasonRow | undefi
   const name = `${new Date().getFullYear()} 常駐賽季`
   const id = await saveArenaSeason({ name, status: 'live' })
   if (id <= 0) return undefined
+  await ensureSystemArenaAgents(id)
   return getArenaSeasonById(id)
+}
+
+const SYSTEM_DEMO_AGENTS: Array<{ name: string; strategy_id: string; tone: string }> = [
+  { name: '存股老阿伯', strategy_id: 'buffett', tone: 'conservative' },
+  { name: '少年股神阿虎', strategy_id: 'growth', tone: 'aggressive' },
+  { name: '股息包租嬤', strategy_id: 'dividend', tone: 'conservative' },
+  { name: '佛系平衡嬤', strategy_id: 'balanced', tone: 'neutral' },
+]
+
+// 內建系統示範 agent：一律 owner_user_id = 0、division = 'open'、is_system = 1。
+// 不佔一般使用者名額，並隨每日 tick 一起參與（含 ETF 池），顯示於公開排行榜。
+export async function ensureSystemArenaAgents(seasonId: number): Promise<number> {
+  const existing = await dbQueryFirst<{ cnt: number }>(
+    'SELECT COUNT(*) AS cnt FROM arena_agents WHERE season_id = @seasonId AND owner_user_id = 0',
+    { seasonId },
+  )
+  if ((existing?.cnt ?? 0) > 0) return existing?.cnt ?? 0
+
+  const today = new Date().toISOString().slice(0, 10)
+  for (const demo of SYSTEM_DEMO_AGENTS) {
+    await dbExecute(
+      `INSERT INTO arena_agents
+        (season_id, owner_user_id, name, division, strategy_id, tone,
+         initial_capital, cash, status, is_system, joined_at)
+       VALUES (@seasonId, 0, @name, 'open', @strategyId, @tone, 200000, 200000, 'active', 1, @joinedAt)`,
+      { seasonId, name: demo.name, strategyId: demo.strategy_id, tone: demo.tone, joinedAt: today },
+    )
+  }
+  return SYSTEM_DEMO_AGENTS.length
 }
 
 export async function listArenaSeasons(): Promise<ArenaSeasonRow[]> {
@@ -2732,6 +2774,7 @@ export interface ArenaLeaderboardRow {
   strategy_id: string
   tone: string
   status: string
+  is_system: number
   equity: number | null
   cash: number | null
   return_pct: number | null
@@ -2751,6 +2794,7 @@ export function getArenaLeaderboard(seasonId: number, division: 'season' | 'open
         a.strategy_id,
         a.tone,
         a.status,
+        a.is_system,
         s.equity,
         s.cash,
         s.return_pct,

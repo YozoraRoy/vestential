@@ -670,6 +670,7 @@ export const en: Dict = {
     myTitle: 'My Agent',
     noAgent: 'You have not created an agent yet.',
     noSeason: 'No active season right now. Create an agent once a season opens.',
+    systemBadge: 'System',
     createTitle: 'Create AI Agent',
     nameLabel: 'Name',
     namePlaceholder: 'e.g. Mini Buffett',

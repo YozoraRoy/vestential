@@ -670,6 +670,7 @@ export const zhTW: Dict = {
     myTitle: '我的 Agent',
     noAgent: '你還沒有建立 Agent。',
     noSeason: '目前沒有進行中的賽季，賽季開放後即可建立 Agent。',
+    systemBadge: '系統',
     createTitle: '建立 AI Agent',
     nameLabel: '名稱',
     namePlaceholder: '例如：小巴菲特',

@@ -625,6 +625,7 @@ export interface Dict {
     myTitle: string
     noAgent: string
     noSeason: string
+    systemBadge: string
     createTitle: string
     nameLabel: string
     namePlaceholder: string

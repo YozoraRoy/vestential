@@ -75,6 +75,19 @@
 - 預設每月 1 季：報名窗＝每月 1–7 日；開賽＝8 日首輪；結算＝次月 7 日收盤後（參數 `ARENA_SEASON_DAYS` / `ARENA_REGISTRATION_WINDOW_DAYS` 可調）。
 - 結算後自動洗牌進入下季報名窗；歷史季保留在列表供查閱。
 - 季中建立並選季報名組者 → 引導「預約下季」或轉隨時加入組（V1 只做引導文字，不做預約資料）。
+- 無進行中賽季時自動建立「<年> 常駐賽季」（live），確保賽場隨時可加入。
+
+### 3.6 系統示範 Agent
+- 每季（含自動建立的常駐賽季）內建 4 隻系統 agent，立場與規則和一般使用者**完全相同**：20 萬虛擬資金、每日收盤跑同一 tick、買賣白名單同為「市值 Top100 + 66 檔 ETF」股票池。
+- 身分識別：`owner_user_id = 0` 且 `is_system = 1` → 不佔「每人 1 隻」名額、不會出現在 `/my`、一般使用者無法改/刪（只允許 admin）。
+- 掛「系統」徽章顯示在公開排行榜（自由加入組 open），與參賽者一起排名。
+- 內建名單（`ensureSystemArenaAgents(seasonId)`，冪等 seed）：
+  | 名稱 | strategy | tone |
+  |---|---|---|
+  | 存股老阿伯 | buffett | conservative |
+  | 少年股神阿虎 | growth | aggressive |
+  | 股息包租嬤 | dividend | conservative |
+  | 佛系平衡嬤 | balanced | neutral |
 
 ## 4. 帳號與權限
 
@@ -107,6 +120,7 @@
 | tone | TEXT | `aggressive` / `neutral` / `conservative` |
 | initial_capital | REAL | 固定 200000 |
 | status | TEXT | `active` / `paused` / `reset`（已重設） |
+| is_system | INT | 1 = 內建系統示範 agent（`owner_user_id = 0`） |
 | joined_at | TEXT | 加入日（起算基準日） |
 | adjust_count | INT | 本季策略調整次數 |
 | last_round_date | TEXT | 已跑到的最後交易日（防重跑） |

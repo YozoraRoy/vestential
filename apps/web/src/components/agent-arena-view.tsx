@@ -17,6 +17,7 @@ interface LeaderboardRow {
   strategy_id: string
   tone: string
   status: string
+  is_system: number
   equity: number | null
   cash: number | null
   return_pct: number | null
@@ -521,7 +522,14 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   {rows.map((r, i) => (
                     <tr key={r.agent_id} className="border-b border-white/5 last:border-0">
                       <td className="px-3 py-2.5 text-[var(--text-secondary)]">{i + 1}</td>
-                      <td className="px-3 py-2.5 font-medium text-[var(--text-primary)]">{r.agent_name}</td>
+                      <td className="px-3 py-2.5 font-medium text-[var(--text-primary)]">
+                        {r.agent_name}
+                        {r.is_system === 1 && (
+                          <span className="ml-2 inline-flex items-center rounded-full bg-[var(--accent-violet)]/15 px-2 py-0.5 text-[11px] font-medium text-[var(--accent-violet)]">
+                            {d.systemBadge}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2.5 text-[var(--text-secondary)] hidden sm:table-cell">{strategyName(r.strategy_id)}</td>
                       <td className="px-3 py-2.5 text-[var(--text-secondary)] hidden md:table-cell">{toneName(r.tone)}</td>
                       <td className="px-3 py-2.5 text-[var(--text-primary)]">

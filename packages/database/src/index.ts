@@ -12,7 +12,7 @@ export {
   deleteAnalysisRecord,
   saveMarketFocus, getMarketFocus, saveMarketFocusMeta, getMarketFocusMeta,
   ARENA_MAX_AGENTS_PER_USER,
-  saveArenaSeason, getArenaSeasonById, getActiveArenaSeason, ensureActiveArenaSeason, listArenaSeasons, updateArenaSeasonStatus,
+  saveArenaSeason, getArenaSeasonById, getActiveArenaSeason, ensureActiveArenaSeason, ensureSystemArenaAgents, listArenaSeasons, updateArenaSeasonStatus,
   createArenaAgent, getActiveArenaAgentByOwner, countArenaAgentsByOwner,
   getArenaAgentById, listActiveArenaAgents, listArenaAgentsBySeason,
   updateArenaAgentConfig, setArenaAgentStatus, updateArenaAgentLastRound, updateArenaAgentCash,

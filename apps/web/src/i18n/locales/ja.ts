@@ -670,6 +670,7 @@ export const ja: Dict = {
     myTitle: 'マイエージェント',
     noAgent: 'エージェントを作成していません。',
     noSeason: '開催中のシーズンはありません。シーズン開始後にエージェントを作成できます。',
+    systemBadge: 'システム',
     createTitle: 'AI エージェントを作成',
     nameLabel: '名前',
     namePlaceholder: '例：ミニバフェット',
