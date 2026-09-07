@@ -13,6 +13,7 @@ type Tone = 'aggressive' | 'neutral' | 'conservative'
 interface LeaderboardRow {
   agent_id: number
   agent_name: string
+  owner_name: string | null
   division: Division
   strategy_id: string
   tone: string
@@ -524,11 +525,15 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                       <td className="px-3 py-2.5 text-[var(--text-secondary)]">{i + 1}</td>
                       <td className="px-3 py-2.5 font-medium text-[var(--text-primary)]">
                         {r.agent_name}
-                        {r.is_system === 1 && (
+                        {r.is_system === 1 ? (
                           <span className="ml-2 inline-flex items-center rounded-full bg-[var(--accent-violet)]/15 px-2 py-0.5 text-[11px] font-medium text-[var(--accent-violet)]">
                             {d.systemBadge}
                           </span>
-                        )}
+                        ) : r.owner_name ? (
+                          <span className="ml-2 inline-flex items-center rounded-full bg-[var(--bg-card)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+                            @{r.owner_name}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2.5 text-[var(--text-secondary)] hidden sm:table-cell">{strategyName(r.strategy_id)}</td>
                       <td className="px-3 py-2.5 text-[var(--text-secondary)] hidden md:table-cell">{toneName(r.tone)}</td>

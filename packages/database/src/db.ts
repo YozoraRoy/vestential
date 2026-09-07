@@ -2770,6 +2770,7 @@ export function getArenaSnapshots(agentId: number): Promise<ArenaSnapshotRow[]> 
 export interface ArenaLeaderboardRow {
   agent_id: number
   agent_name: string
+  owner_name: string | null
   division: 'season' | 'open'
   strategy_id: string
   tone: string
@@ -2790,6 +2791,7 @@ export function getArenaLeaderboard(seasonId: number, division: 'season' | 'open
       SELECT
         a.id AS agent_id,
         a.name AS agent_name,
+        u.display_name AS owner_name,
         a.division,
         a.strategy_id,
         a.tone,
@@ -2802,6 +2804,7 @@ export function getArenaLeaderboard(seasonId: number, division: 'season' | 'open
         (SELECT COUNT(*) FROM arena_equity_snapshots c WHERE c.agent_id = a.id) AS rounds,
         a.joined_at
       FROM arena_agents a
+      LEFT JOIN users u ON u.id = a.owner_user_id
       LEFT JOIN arena_equity_snapshots s ON s.agent_id = a.id
         AND s.round_date = (SELECT MAX(s2.round_date) FROM arena_equity_snapshots s2 WHERE s2.agent_id = a.id)
       WHERE a.season_id = @seasonId ${divisionSql}
