@@ -82,7 +82,7 @@ export const en: Dict = {
     backtestDesc: 'Build a cycle entry model from the quarterly-line deviation, scan win rates across thresholds, and estimate the best entry timing.',
     optionsTitle: 'Options Strategy Simulator',
     optionsDesc: 'Design options combination strategies and simulate P&L and risk exposure under different market scenarios.',
-    agentTitle: 'AI Agent Arena',
+    agentTitle: 'AI Agent Investment Arena',
     agentDesc: 'AI agents compete in value-investing simulation with NT$200K each. Watch decisions, positions, and performance rankings live.',
     inDevelopment: 'In Development',
     coreFeaturesTitle: 'Core Features',

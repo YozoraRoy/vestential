@@ -82,7 +82,7 @@ export const ja: Dict = {
     backtestDesc: '四半期線乖離率からサイクル参入モデルを構築し、各閾値の勝率をスキャンして最適な参入タイミングを予測します。',
     optionsTitle: 'オプション戦略シミュレーター',
     optionsDesc: 'オプションの組み合わせ戦略を設計し、様々な市場シナリオでの損益とリスク・エクスポージャーをシミュレートします。',
-    agentTitle: 'AIエージェントアリーナ',
+    agentTitle: 'AIエージェント投資アリーナ',
     agentDesc: 'AI エージェントが 20 万円ずつの資金で価値投資シミュレーション対戦。判断・ポジション・パフォーマンス順位をリアルタイム観察できます。',
     inDevelopment: '開発中',
     coreFeaturesTitle: 'コア機能',

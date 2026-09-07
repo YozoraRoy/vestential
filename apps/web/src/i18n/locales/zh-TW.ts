@@ -82,7 +82,7 @@ export const zhTW: Dict = {
     backtestDesc: '以季線乖離率建立週期進場模型，掃描各閾值勝率，預估最佳進場時機。',
     optionsTitle: '期權策略模擬',
     optionsDesc: '設計選擇權組合策略，模擬不同市場情境下的損益與風險敞口。',
-    agentTitle: 'AI Agent 競技場',
+    agentTitle: 'AI Agent 投資競技場',
     agentDesc: 'AI Agent 各持 20 萬進行價值投資模擬競賽，即時觀測決策、持倉與績效排行。',
     inDevelopment: '開發中',
     coreFeaturesTitle: '核心功能',
