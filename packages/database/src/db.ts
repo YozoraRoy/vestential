@@ -383,6 +383,22 @@ function getSqliteDb(): Database.Database | null {
         fallback_used INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now','localtime'))
       );
+
+      CREATE TABLE IF NOT EXISTS social_posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platform TEXT NOT NULL,
+        edition_key TEXT NOT NULL,
+        content TEXT NOT NULL,
+        image_url TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        container_id TEXT,
+        external_id TEXT,
+        error TEXT,
+        published_at TEXT,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE (platform, edition_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_social_posts_platform_created ON social_posts(platform, created_at);
     `)
 
     return _db
@@ -815,6 +831,25 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           fallback_used INT DEFAULT 0,
           created_at DATETIME2 DEFAULT GETDATE()
         );
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'social_posts')
+      BEGIN
+        CREATE TABLE social_posts (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          platform NVARCHAR(20) NOT NULL,
+          edition_key NVARCHAR(100) NOT NULL,
+          content NVARCHAR(MAX) NOT NULL,
+          image_url NVARCHAR(500),
+          status NVARCHAR(30) NOT NULL DEFAULT 'pending',
+          container_id NVARCHAR(100),
+          external_id NVARCHAR(100),
+          error NVARCHAR(MAX),
+          published_at DATETIME2,
+          created_at DATETIME2 DEFAULT GETDATE(),
+          CONSTRAINT uq_social_post UNIQUE (platform, edition_key)
+        );
+        CREATE INDEX idx_social_posts_platform_created ON social_posts(platform, created_at);
       END
     `)
 
@@ -3310,5 +3345,125 @@ export function getArenaDiscussion(roundDate: string): Promise<ArenaDiscussionRo
   return dbQueryFirst<ArenaDiscussionRow>(
     'SELECT * FROM arena_discussions WHERE round_date = @roundDate LIMIT 1',
     { roundDate },
+  )
+}
+
+// ─── 社群小編 (social_posts) ─────────────────────────────────────
+export type SocialPostPlatform = 'instagram' | 'threads'
+export type SocialPostStatus = 'pending' | 'container_created' | 'published' | 'failed' | 'dry_run'
+
+export interface SocialPostRow {
+  id: number
+  platform: SocialPostPlatform
+  edition_key: string
+  content: string
+  image_url: string | null
+  status: SocialPostStatus
+  container_id: string | null
+  external_id: string | null
+  error: string | null
+  published_at: string | null
+  created_at: string
+}
+
+export interface SocialPostInput {
+  platform: SocialPostPlatform
+  editionKey: string
+  content: string
+  imageUrl?: string | null
+}
+
+/** 這期 edition 是否已對該平台發布過任何紀錄（含失敗），用於去重。 */
+export async function hasSocialPosted(platform: string, editionKey: string): Promise<boolean> {
+  const row = await dbQueryFirst<{ n: number }>(
+    'SELECT COUNT(*) AS n FROM social_posts WHERE platform = @platform AND edition_key = @editionKey LIMIT 1',
+    { platform, editionKey },
+  )
+  return (row?.n ?? 0) > 0
+}
+
+/** 建立一筆發文紀錄。若同 (platform, edition_key) 已存在則回傳既有紀錄，不重複插入。 */
+export async function createSocialPost(input: SocialPostInput): Promise<SocialPostRow> {
+  const existing = await dbQueryFirst<SocialPostRow>(
+    'SELECT * FROM social_posts WHERE platform = @platform AND edition_key = @editionKey LIMIT 1',
+    { platform: input.platform, editionKey: input.editionKey },
+  )
+  if (existing) return existing
+
+  try {
+    await dbExecute(
+      `INSERT INTO social_posts (platform, edition_key, content, image_url)
+       VALUES (@platform, @editionKey, @content, @imageUrl)`,
+      {
+        platform: input.platform,
+        editionKey: input.editionKey.slice(0, 100),
+        content: input.content.slice(0, 4000),
+        imageUrl: input.imageUrl ? input.imageUrl.slice(0, 500) : null,
+      },
+    )
+  } catch (e) {
+    if (String(e).includes('UNIQUE')) {
+      const raced = await dbQueryFirst<SocialPostRow>(
+        'SELECT * FROM social_posts WHERE platform = @platform AND edition_key = @editionKey LIMIT 1',
+        { platform: input.platform, editionKey: input.editionKey },
+      )
+      if (raced) return raced
+    }
+    throw e
+  }
+
+  const row = await dbQueryFirst<SocialPostRow>(
+    'SELECT * FROM social_posts WHERE platform = @platform AND edition_key = @editionKey LIMIT 1',
+    { platform: input.platform, editionKey: input.editionKey },
+  )
+  if (!row) throw new Error('createSocialPost: inserted row not found')
+  return row
+}
+
+/** 更新發文紀錄狀態與欄位（失敗原因 / container / external id …）。 */
+export async function updateSocialPost(
+  id: number,
+  patch: Partial<Pick<SocialPostRow, 'status' | 'container_id' | 'external_id' | 'error' | 'published_at' | 'image_url'>>,
+): Promise<void> {
+  const sets: string[] = []
+  const params: Record<string, any> = { id }
+  if (patch.status !== undefined) {
+    sets.push('status = @status')
+    params.status = patch.status
+  }
+  if (patch.container_id !== undefined) {
+    sets.push('container_id = @container_id')
+    params.container_id = patch.container_id
+  }
+  if (patch.external_id !== undefined) {
+    sets.push('external_id = @external_id')
+    params.external_id = patch.external_id
+  }
+  if (patch.error !== undefined) {
+    sets.push('error = @error')
+    params.error = patch.error
+  }
+  if (patch.published_at !== undefined) {
+    sets.push('published_at = @published_at')
+    params.published_at = patch.published_at
+  }
+  if (patch.image_url !== undefined) {
+    sets.push('image_url = @image_url')
+    params.image_url = patch.image_url
+  }
+  if (sets.length === 0) return
+  await dbExecute(`UPDATE social_posts SET ${sets.join(', ')} WHERE id = @id`, params)
+}
+
+/** 查詢最近 N 筆發文紀錄（跨平台或單平台）。 */
+export function listSocialPosts(platform?: string, limit = 20): Promise<SocialPostRow[]> {
+  if (platform) {
+    return dbQueryAll<SocialPostRow>(
+      'SELECT * FROM social_posts WHERE platform = @platform ORDER BY id DESC LIMIT ' + Math.max(1, limit),
+      { platform },
+    )
+  }
+  return dbQueryAll<SocialPostRow>(
+    'SELECT * FROM social_posts ORDER BY id DESC LIMIT ' + Math.max(1, limit),
   )
 }

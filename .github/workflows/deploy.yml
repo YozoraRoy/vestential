@@ -83,13 +83,19 @@ jobs:
               GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \
               LINE_CLIENT_ID="${{ secrets.LINE_CLIENT_ID }}" \
               LINE_CLIENT_SECRET="${{ secrets.LINE_CLIENT_SECRET }}" \
-              SYNC_TOKEN="${{ secrets.SYNC_TOKEN }}" \
+SYNC_TOKEN="${{ secrets.SYNC_TOKEN }}" \
               SMTP_HOST=smtp.gmail.com \
               SMTP_PORT=587 \
               SMTP_USER="${{ secrets.SMTP_USER }}" \
               SMTP_PASS="${{ secrets.SMTP_PASS }}" \
-              NOTIFY_FROM=vestential@gmail.com \
+              NOTIFY_FROM=vestential.com \
               NOTIFY_TO="${{ secrets.NOTIFY_TO }}" \
+              IG_ACCESS_TOKEN="${{ secrets.IG_ACCESS_TOKEN }}" \
+              IG_USER_ID="${{ secrets.IG_USER_ID }}" \
+              THREADS_ACCESS_TOKEN="${{ secrets.THREADS_ACCESS_TOKEN }}" \
+              THREADS_USER_ID="${{ secrets.THREADS_USER_ID }}" \
+              THREADS_APP_ID="${{ secrets.THREADS_APP_ID }}" \
+              THREADS_APP_SECRET="${{ secrets.THREADS_APP_SECRET }}" \
               ADMIN_LINE_USER_IDS=U992bf6b74efcd58e3dc5d3f8d356e880
 
       - name: Set startup command

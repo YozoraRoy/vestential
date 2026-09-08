@@ -4,6 +4,7 @@ import { migrate, getMarketFocusMeta } from '@stock/database'
 import { refreshMarketFocus } from '@/lib/market-focus'
 import { sendMarketFocusSummary, sendMarketFocusAlert, isSummaryFallback } from '@/lib/email'
 import { authorizeSync } from '@/lib/sync-auth'
+import { triggerSocialPublish } from '@/lib/social-trigger'
 
 export async function POST(req: Request) {
   if (!authorizeSync(req)) {
@@ -20,10 +21,13 @@ export async function POST(req: Request) {
     } else {
       await sendMarketFocusSummary()
     }
+    // 社群小編：有新版 edition 才發布（非致命，失敗不影響主流程）
+    const socialResult = await triggerSocialPublish().catch((e) => ({ triggered: false, error: e.message }))
     return NextResponse.json({
       success: true,
       count: items.length,
       timestamp: new Date().toISOString(),
+      social: socialResult,
     })
   } catch (error: any) {
     console.error('[API/market-focus/refresh] Failed:', error)
