@@ -1,4 +1,4 @@
-import { hasSocialPosted, createSocialPost, updateSocialPost } from '@stock/database'
+import { hasSocialPosted, createSocialPost, updateSocialPost, deleteSocialPostByEdition } from '@stock/database'
 import type { SocialPostRow, SocialPostPlatform } from '@stock/database'
 
 // ─── IG / Threads 發布層 ─────────────────────────────────────────
@@ -53,6 +53,11 @@ export async function alreadyPosted(platform: SocialPostPlatform, editionKey: st
   return hasSocialPosted(platform, editionKey)
 }
 
+/** 清除該平台該 edition 的發布紀錄（force 重發的前置步驟）。 */
+export async function clearSocialPost(platform: SocialPostPlatform, editionKey: string): Promise<void> {
+  await deleteSocialPostByEdition(platform, editionKey)
+}
+
 /**
  * 發布單一平台。若該 edition 已發布過則直接回傳既有狀態。
  * @param imageUrl 圖卡公開 URL（IG/Threads 需要公開可下載的圖片）。
@@ -64,9 +69,14 @@ export async function publishSocialPost(
   content: string,
   imageUrl: string | null,
   dryRun = false,
+  force = false,
 ): Promise<PublishResult> {
   if (await alreadyPosted(platform, editionKey)) {
-    return { platform, status: 'published', error: 'duplicate edition, skipped' }
+    if (!force) {
+      return { platform, status: 'published', error: 'duplicate edition, skipped' }
+    }
+    // force 重發：清除既有發布紀錄後重跑，才能再次發布同一 edition。
+    await clearSocialPost(platform, editionKey)
   }
 
   const env = platformEnv(platform)

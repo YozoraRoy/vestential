@@ -25,12 +25,15 @@ export {
   getArenaTradesByRound,
   insertArenaDecisionLog, getArenaDecisionLogs, getArenaRoundDecisionLogs,
   saveArenaDiscussion, getArenaDiscussion,
-  hasSocialPosted, createSocialPost, updateSocialPost, listSocialPosts,
+  hasSocialPosted, createSocialPost, updateSocialPost, listSocialPosts, deleteSocialPostByEdition,
+  getAgentSetting, setAgentSetting, listAgentSettings,
+  getUserUsageReport,
 } from './db.js'
 export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta,
   ArenaSeasonRow, ArenaAgentRow, ArenaHoldingRow, ArenaTradeRow, ArenaSnapshotRow, ArenaAgentInput, ArenaLeaderboardRow,
   ArenaIntradayPriceRow, ArenaMarketBriefingRow, ArenaDecisionLogRow, ArenaDiscussionRow,
-  SocialPostRow, SocialPostInput, SocialPostPlatform, SocialPostStatus } from './db.js'
+  SocialPostRow, SocialPostInput, SocialPostPlatform, SocialPostStatus,
+  AgentSettingRow, UserUsageReportRow } from './db.js'
 export { exportSyncData, mergeExports, applySyncMerge, applySyncImport, SYNC_TABLES } from './sync.js'
 export type { SyncExport, SyncRow, MergedExport, SyncTableName, TaggedRow, RowSource } from './sync.js'
 export type { Database } from 'better-sqlite3'

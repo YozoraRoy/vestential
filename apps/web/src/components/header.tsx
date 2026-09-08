@@ -24,6 +24,7 @@ export interface HeaderUser {
   displayName: string | null
   email: string | null
   avatarUrl: string | null
+  isAdmin?: boolean
 }
 
 export function Header({ initialUser }: { initialUser: HeaderUser | null }) {
@@ -146,6 +147,16 @@ export function Header({ initialUser }: { initialUser: HeaderUser | null }) {
                       <User className="w-4 h-4" />
                       {dict.common.myAnalysis}
                     </Link>
+                    {user.isAdmin && (
+                      <Link
+                        href={localizePath(locale, '/admin')}
+                        onClick={() => setMenuOpen(false)}
+                        className="flex items-center gap-2 px-4 py-2.5 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5 transition"
+                      >
+                        <Zap className="w-4 h-4 text-[var(--accent)]" />
+                        後台管理
+                      </Link>
+                    )}
                     <button
                       onClick={handleLogout}
                       className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-400 hover:bg-white/5 transition"

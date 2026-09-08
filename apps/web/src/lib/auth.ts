@@ -9,20 +9,53 @@ export const DAILY_ANALYSIS_LIMIT = 3
 export const DAILY_RECOGNITION_LIMIT = 10
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30 // 30 days
 
-/** 管理者判定：LINE 帳號 Roy（可透過 ADMIN_LINE_USER_IDS 指定 LINE User ID 覆寫）。 */
+/**
+ * 管理者判定（任一成立即為 admin）：
+ * 1. LINE：ADMIN_LINE_USER_IDS（或 fallback display_name === 'roy'）
+ * 2. Email：ADMIN_EMAILS（比對 user_identities.provider_email，大小寫不敏感）
+ */
 export async function isAdminUser(user: UserRow): Promise<boolean> {
-  const configuredIds = (process.env.ADMIN_LINE_USER_IDS || '')
+  const configuredLineIds = (process.env.ADMIN_LINE_USER_IDS || '')
     .split(',')
     .map(s => s.trim())
     .filter(Boolean)
   const identities = await getUserIdentities(user.id)
+
+  // LINE 判定
   const lineIdentities = identities.filter(i => i.provider === 'line')
-  if (lineIdentities.length === 0) return false
-  return lineIdentities.some(i =>
-    configuredIds.length > 0
-      ? configuredIds.includes(i.provider_user_id)
+  const isLineAdmin = lineIdentities.some(i =>
+    configuredLineIds.length > 0
+      ? configuredLineIds.includes(i.provider_user_id)
       : (user.display_name || '').trim().toLowerCase() === 'roy',
   )
+  if (isLineAdmin) return true
+
+  // Email 判定（大小寫不敏感）
+  const adminEmails = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean)
+  if (adminEmails.length === 0) return false
+  return identities.some(i =>
+    i.provider_email && adminEmails.includes(i.provider_email.trim().toLowerCase()),
+  )
+}
+
+/**
+ * Route handler 用：解析當前使用者；非登入回 401、登入但非 admin 回 403。
+ * @returns 當前 UserRow（已確認是 admin），否則 null（此時已寫入 response）。
+ */
+export async function requireAdmin(req: NextRequest, res: NextResponse): Promise<UserRow | null> {
+  const user = await getCurrentUserFromReq(req)
+  if (!user) {
+    res = NextResponse.json({ error: '請先登入' }, { status: 401 })
+    return null
+  }
+  if (!(await isAdminUser(user))) {
+    res = NextResponse.json({ error: '無管理員權限' }, { status: 403 })
+    return null
+  }
+  return user
 }
 
 export function getSecret(): Uint8Array {

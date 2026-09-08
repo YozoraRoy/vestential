@@ -1,6 +1,7 @@
 import { load } from 'cheerio'
 import { createQuickLLM } from '@stock/ai-engine'
 import { loadConfig } from '@stock/core'
+import { getAgentSetting } from '@stock/database'
 import type { MarketFocusItem } from '@stock/database'
 import { saveMarketFocus, saveMarketFocusMeta } from '@stock/database'
 
@@ -322,9 +323,13 @@ export async function generateDailySummary(items: MarketFocusItem[]): Promise<st
   try {
     const config = loadConfig()
     // 透過 createQuickLLM 帶上 fallback chain:primary(OpenAI)被配額 429 封鎖時自動切換備援模型
-    const { llm } = createQuickLLM(config, { maxTokens: 2048 })
+    const rawToken = (await getAgentSetting('market_focus.summary_max_tokens')) ?? ''
+    const maxTokens = (rawToken && Number(rawToken) > 0 && Number(rawToken)) || 2048
+    const { llm } = createQuickLLM(config, { maxTokens })
+    const promptOverride = (await getAgentSetting('market_focus.summary_prompt')) ?? ''
+    const system = promptOverride ? `${SUMMARY_SYSTEM_PROMPT}\n\n【後台覆寫指示】\n${promptOverride}` : SUMMARY_SYSTEM_PROMPT
     const list = items.map((it, i) => `${i + 1}. [${it.source}] ${it.title}${it.reason ? `（選取理由：${it.reason}）` : ''}`).join('\n')
-    const raw = await llm.generate(SUMMARY_SYSTEM_PROMPT, `以下是今日精選新聞：\n${list}\n\n請撰寫當日市場總覽。`)
+    const raw = await llm.generate(system, `以下是今日精選新聞：\n${list}\n\n請撰寫當日市場總覽。`)
     const parsed = JSON.parse(raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()) as { summary?: string }
     const summary = typeof parsed?.summary === 'string' ? parsed.summary.trim() : ''
     if (summary) return summary
@@ -369,13 +374,18 @@ interface SelectEntry {
   reason: string
 }
 
-/** 依「價值投資」精神用 LLM 過濾候選新聞;失敗時回傳原始前 10 則(理由為空)當兜底。 */
+/** 依「價值投資」精神用 LLM 過濾候選新聞;失敗時回傳原始前 N 則(理由為空)當兜底。 */
 export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<MarketFocusItem[]> {
   if (candidates.length === 0) return []
   try {
     const config = loadConfig()
     const { llm } = createQuickLLM(config, { maxTokens: 2048 })
-    const raw = await llm.generate(SYSTEM_PROMPT, buildUserPrompt(candidates))
+    const rawCount = (await getAgentSetting('market_focus.select_count')) ?? ''
+    const selectCount = (rawCount && Number(rawCount) > 0 && Number(rawCount)) || 10
+    const promptOverride = (await getAgentSetting('market_focus.select_prompt')) ?? ''
+    const system = promptOverride ? `${SYSTEM_PROMPT}\n\n【後台覆寫指示】\n${promptOverride}` : SYSTEM_PROMPT
+    const prompt = buildUserPrompt(candidates).replace(`\n\n請選出符合原則的 10 則。`, `\n\n請選出符合原則的 ${selectCount} 則。`)
+    const raw = await llm.generate(system, prompt)
     const parsed = JSON.parse(raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()) as {
       selected: SelectEntry[]
     }
@@ -391,13 +401,15 @@ export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<Marke
         published_at: c.publishedAt,
         reason: typeof s.reason === 'string' ? s.reason.trim() : null,
       })
-      if (items.length >= 10) break
+      if (items.length >= selectCount) break
     }
     if (items.length > 0) return items
   } catch (e) {
     console.error('[MarketFocus] LLM filter failed, falling back to raw headlines:', e)
   }
-  return candidates.slice(0, 10).map((c) => ({
+  const rawCount2 = (await getAgentSetting('market_focus.select_count').catch(() => null)) ?? ''
+  const fallbackCount = (rawCount2 && Number(rawCount2) > 0 && Number(rawCount2)) || 10
+  return candidates.slice(0, fallbackCount).map((c) => ({
     title: c.title,
     url: c.url,
     source: c.source,
@@ -462,6 +474,23 @@ export async function generateArticleSummaries(
 
 /** 抓取候選新聞 (多來源聚合池) → 保留近 2 天且依發布時間新到舊排序 → AI 過濾 → 並行爬全文 → AI 逐則摘要與當日總覽 → 寫入 DB。回傳儲存後的清單。 */
 export async function refreshMarketFocus(): Promise<MarketFocusItem[]> {
+  const { enriched } = await runMarketFocusPipeline(false)
+  return enriched
+}
+
+/**
+ * 市場焦點乾跑（後台預覽用）：跑完整生成流程但不寫 DB。
+ * 回傳精選新聞清單＋每日總覽，供 /admin 預覽後再決定是否發布。
+ */
+export async function previewMarketFocus(): Promise<{
+  items: MarketFocusItem[]
+  summary: string
+}> {
+  const { enriched, summary } = await runMarketFocusPipeline(true)
+  return { items: enriched, summary }
+}
+
+async function runMarketFocusPipeline(dryRun: boolean): Promise<{ enriched: MarketFocusItem[]; summary: string }> {
   const candidates = await fetchMultiSourceCandidates()
 
   const now = Date.now()
@@ -475,7 +504,7 @@ export async function refreshMarketFocus(): Promise<MarketFocusItem[]> {
   const items = (await filterNewsByAI(recent))
     .map((it) => ({ ...it, published_at: it.published_at ? toIsoDate(it.published_at) : '' }))
     .sort((a, b) => b.published_at.localeCompare(a.published_at))
-    .slice(0, 10)
+    .slice(0, 12)
 
   const crawled = await Promise.allSettled(items.map((it) => fetchArticleContent(it.url)))
   const enriched: MarketFocusItem[] = items.map((it, i) => ({
@@ -493,8 +522,10 @@ export async function refreshMarketFocus(): Promise<MarketFocusItem[]> {
     enriched[i].summary = articleSummaries[i] || null
   }
 
-  await saveMarketFocus(enriched)
   const summary = await generateDailySummary(enriched)
-  await saveMarketFocusMeta({ summary, generatedAt: new Date().toISOString() })
-  return enriched
+  if (!dryRun) {
+    await saveMarketFocus(enriched)
+    await saveMarketFocusMeta({ summary, generatedAt: new Date().toISOString() })
+  }
+  return { enriched, summary }
 }

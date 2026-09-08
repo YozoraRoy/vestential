@@ -26,9 +26,10 @@ export interface SocialPublishOutcome {
  * @param platforms 預設兩平台皆發。
  */
 export async function triggerSocialPublish(
-  options: { dryRun?: boolean; platforms?: SocialPostPlatform[] } = {},
+  options: { dryRun?: boolean; platforms?: SocialPostPlatform[]; force?: boolean } = {},
 ): Promise<SocialPublishOutcome> {
   const dryRun = options.dryRun ?? false
+  const force = options.force ?? false
   const platforms = options.platforms?.length ? options.platforms : (['instagram', 'threads'] as SocialPostPlatform[])
 
   const meta = await getMarketFocusMeta()
@@ -39,9 +40,12 @@ export async function triggerSocialPublish(
   const editionKey = meta.generated_at
   const items = await getMarketFocus(6, 2)
 
-  const unresolved = (
-    await Promise.all(platforms.map(async (p) => ({ platform: p, posted: await alreadyPosted(p, editionKey!) })))
-  ).filter((x) => !x.posted)
+  // force 重發時跳過去重，所有指定平台一律重跑；否則只處理未發布過的平台。
+  const unresolved = force
+    ? platforms.map((p) => ({ platform: p, posted: false }))
+    : (
+        await Promise.all(platforms.map(async (p) => ({ platform: p, posted: await alreadyPosted(p, editionKey!) })))
+      ).filter((x) => !x.posted)
 
   if (unresolved.length === 0) {
     return { triggered: false, skipped: true, editionKey, message: 'edition 已發布或無新內容' }
@@ -54,7 +58,7 @@ export async function triggerSocialPublish(
   const results: SocialPublishOutcome['results'] = []
   for (const { platform } of unresolved) {
     const content = platform === 'instagram' ? captions.instagram : captions.threads
-    const res = await publishSocialPost(platform, editionKey!, content, imageUrl, dryRun)
+    const res = await publishSocialPost(platform, editionKey!, content, imageUrl, dryRun, force)
     results.push({ platform, status: res.status, error: res.error })
   }
 

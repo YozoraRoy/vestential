@@ -96,7 +96,8 @@ jobs:
               THREADS_USER_ID="${{ secrets.THREADS_USER_ID }}" \
               THREADS_APP_ID="${{ secrets.THREADS_APP_ID }}" \
               THREADS_APP_SECRET="${{ secrets.THREADS_APP_SECRET }}" \
-              ADMIN_LINE_USER_IDS=U992bf6b74efcd58e3dc5d3f8d356e880
+              ADMIN_LINE_USER_IDS=U992bf6b74efcd58e3dc5d3f8d356e880 \
+              ADMIN_EMAILS=yuzora_roy@hotmail.com
 
       - name: Set startup command
         run: |

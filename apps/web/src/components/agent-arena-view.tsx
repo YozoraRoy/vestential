@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { useI18n } from '@/i18n/LanguageProvider'
 import type { Dict } from '@/i18n/dictionaries'
+import { MarkdownText } from '@/components/markdown-text'
 
 type Division = 'season' | 'open'
 type Tone = 'aggressive' | 'neutral' | 'conservative'
@@ -846,8 +847,8 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   {briefingOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
                 {briefingOpen && (
-                  <div className="mt-3 text-xs sm:text-sm text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed border-t border-white/5 pt-2.5 max-h-80 overflow-y-auto">
-                    {data.latestRound.briefing.content}
+                  <div className="mt-3 text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed border-t border-white/5 pt-2.5 max-h-80 overflow-y-auto">
+                    <MarkdownText text={data.latestRound.briefing.content} />
                   </div>
                 )}
               </div>
@@ -866,8 +867,8 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   {discussionOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
                 {discussionOpen && (
-                  <div className="mt-3 text-xs sm:text-sm text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed border-t border-white/5 pt-2.5 max-h-80 overflow-y-auto">
-                    {data.latestRound.discussion.content}
+                  <div className="mt-3 text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed border-t border-white/5 pt-2.5 max-h-80 overflow-y-auto">
+                    <MarkdownText text={data.latestRound.discussion.content} />
                   </div>
                 )}
               </div>

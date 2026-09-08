@@ -3,7 +3,7 @@ import Script from 'next/script'
 import './globals.css'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
-import { getCurrentUserFromCookies } from '@/lib/auth'
+import { getCurrentUserFromCookies, isAdminUser } from '@/lib/auth'
 import { LanguageProvider } from '@/i18n/LanguageProvider'
 import { getLocale } from '@/i18n/server'
 
@@ -21,12 +21,14 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUserFromCookies()
+  const isAdmin = user ? await isAdminUser(user) : false
   const initialUser = user
     ? {
         id: user.id,
         displayName: user.display_name,
         email: user.email,
         avatarUrl: user.avatar_url,
+        isAdmin,
       }
     : null
   const locale = await getLocale()

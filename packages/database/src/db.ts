@@ -3755,3 +3755,104 @@ export function listSocialPosts(platform?: string, limit = 20): Promise<SocialPo
     'SELECT * FROM social_posts ORDER BY id DESC LIMIT ' + Math.max(1, limit),
   )
 }
+
+/** 清除該平台該 edition 的發文紀錄（force 重發用）。 */
+export async function deleteSocialPostByEdition(platform: string, editionKey: string): Promise<void> {
+  await dbExecute(
+    'DELETE FROM social_posts WHERE platform = @platform AND edition_key = @editionKey',
+    { platform, editionKey },
+  )
+}
+
+// ─── 後台 Agent 設定 (agent_settings) ──────────────────────────────
+
+export interface AgentSettingRow {
+  key: string
+  value: string | null
+  category: string | null
+  label: string | null
+  updated_at: string | null
+}
+
+/** 讀取單一 Agent 設定值；無設定時回傳 null。 */
+export async function getAgentSetting(key: string): Promise<string | null> {
+  const row = await dbQueryFirst<{ value: string | null }>(
+    'SELECT value FROM agent_settings WHERE key = @key',
+    { key },
+  )
+  return row?.value ?? null
+}
+
+/** 列出全部 Agent 設定（依 class 排序）。 */
+export function listAgentSettings(category?: string): Promise<AgentSettingRow[]> {
+  if (category) {
+    return dbQueryAll<AgentSettingRow>(
+      'SELECT * FROM agent_settings WHERE category = @category ORDER BY key',
+      { category },
+    )
+  }
+  return dbQueryAll<AgentSettingRow>('SELECT * FROM agent_settings ORDER BY category, key')
+}
+
+/** 寫入或更新 Agent 設定；回傳是否為新增。 */
+export async function setAgentSetting(input: {
+  key: string
+  value: string
+  category?: string
+  label?: string
+}): Promise<boolean> {
+  const existing = await dbQueryFirst<{ key: string }>(
+    'SELECT key FROM agent_settings WHERE key = @key',
+    { key: input.key },
+  )
+  if (existing) {
+    await dbExecute(
+      'UPDATE agent_settings SET value = @value, updated_at = datetime(\'now\',\'localtime\') WHERE key = @key',
+      { key: input.key, value: input.value },
+    )
+    return false
+  }
+  await dbExecute(
+    `INSERT INTO agent_settings (key, value, category, label)
+     VALUES (@key, @value, @category, @label)`,
+    { key: input.key, value: input.value, category: input.category ?? null, label: input.label ?? null },
+  )
+  return true
+}
+
+// ─── 後台使用者用量報表 ──────────────────────────────────────────
+
+export interface UserUsageReportRow {
+  userId: number
+  displayName: string | null
+  email: string | null
+  createdAt: string | null
+  apiUsageCount: number
+  recognitionCount: number
+  arenaAgentCount: number
+}
+
+/** 彙總每位使用者的 API / 辨識 / 競技場用量報表。 */
+export async function getUserUsageReport(): Promise<UserUsageReportRow[]> {
+  const rows = await dbQueryAll<any>(
+    `SELECT
+       u.id AS userId,
+       u.display_name AS displayName,
+       u.email AS email,
+       u.created_at AS createdAt,
+       (SELECT COUNT(*) FROM api_usage a WHERE a.user_id = u.id) AS apiUsageCount,
+       (SELECT COUNT(*) FROM recognition_usage r WHERE r.user_id = u.id) AS recognitionCount,
+       (SELECT COUNT(*) FROM arena_agents aa WHERE aa.owner_user_id = u.id) AS arenaAgentCount
+     FROM users u
+     ORDER BY u.id DESC`,
+  )
+  return (rows ?? []).map((r) => ({
+    userId: Number(r.userId),
+    displayName: r.displayName ?? null,
+    email: r.email ?? null,
+    createdAt: r.createdAt ?? null,
+    apiUsageCount: Number(r.apiUsageCount ?? 0),
+    recognitionCount: Number(r.recognitionCount ?? 0),
+    arenaAgentCount: Number(r.arenaAgentCount ?? 0),
+  }))
+}
