@@ -83,7 +83,7 @@ jobs:
               GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \
               LINE_CLIENT_ID="${{ secrets.LINE_CLIENT_ID }}" \
               LINE_CLIENT_SECRET="${{ secrets.LINE_CLIENT_SECRET }}" \
-SYNC_TOKEN="${{ secrets.SYNC_TOKEN }}" \
+              SYNC_TOKEN="${{ secrets.SYNC_TOKEN }}" \
               SMTP_HOST=smtp.gmail.com \
               SMTP_PORT=587 \
               SMTP_USER="${{ secrets.SMTP_USER }}" \
