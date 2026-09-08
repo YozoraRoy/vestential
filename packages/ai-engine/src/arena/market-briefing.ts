@@ -77,7 +77,7 @@ async function fundamentalsText(prices: Record<string, ArenaPrice>, topN: number
   for (const m of sel) {
     const resolved = /^\d{4,6}/.test(m.symbol) ? `${m.symbol}.TW` : m.symbol
     try {
-      const f = await provider.getFundamentals(resolved, 'tw')
+      const f = await provider.getFundamentals(resolved, 'TW')
       const cap = f.marketCap ? (f.marketCap / 1e8).toFixed(0) : '--'
       out.push(
         `${m.symbol} ${m.name}: PE=${f.peRatio == null ? '--' : f.peRatio.toFixed(1)} ` +
