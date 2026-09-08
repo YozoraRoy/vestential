@@ -26,7 +26,7 @@ jobs:
         run: |
           mkdir -p apps/web/.next/standalone/apps/web/.next
           cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
-          if [ -d apps/web/public ]; then cp -r apps/web/public apps/web/.next/standalone/apps/web/public; fi
+          if [ -d apps/web/public ]; then cp -r apps/web/public/. apps/web/.next/standalone/apps/web/public/; fi
           echo "Standalone entry:"
           ls apps/web/.next/standalone/apps/web/server.js
 
@@ -103,7 +103,7 @@ jobs:
           az webapp config set \
             --name stock-platform-roy \
             --resource-group rg-yuzora_roy_ai \
-            --startup-file "node /home/site/wwwroot/apps/web/.next/standalone/apps/web/server.js"
+            --startup-file "cd /home/site/wwwroot/apps/web/.next/standalone/apps/web && node server.js"
 
       - name: Deploy via Kudu zipdeploy (clean, small zip)
         run: |
