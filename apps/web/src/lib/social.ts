@@ -10,6 +10,11 @@ import type { MarketFocusItem, MarketFocusMeta } from '@stock/database'
 const THREADS_MAX_CHARS = 500
 const IG_MAX_CHARS = 2200
 
+// 導流 URL：兩平台內文結尾皆附上（Threads 會自動可點；IG 純文字可複製）
+export const MARKET_FOCUS_URL = 'https://vestential.com/market-focus'
+const DRIVE_CTA = `\n\n完整分析 → ${MARKET_FOCUS_URL}`
+const DRIVE_CTA_LEN = Array.from(DRIVE_CTA).length
+
 export interface SocialCaptions {
   instagram: string
   threads: string
@@ -61,12 +66,28 @@ export async function generateSocialCaptions(
     const instagram = typeof parsed?.instagram === 'string' ? parsed.instagram.trim() : ''
     const threads = typeof parsed?.threads === 'string' ? parsed.threads.trim() : ''
     if (instagram && threads) {
-      return { instagram: trimToChars(instagram, IG_MAX_CHARS), threads: trimToChars(threads, THREADS_MAX_CHARS) }
+      return appendDriveLink({
+        instagram: trimToChars(instagram, IG_MAX_CHARS),
+        threads: trimToChars(threads, THREADS_MAX_CHARS),
+      })
     }
   } catch (e) {
     console.error('[Social] captions generation failed, using fallback:', e)
   }
-  return buildFallbackCaptions(meta, items)
+  return appendDriveLink(buildFallbackCaptions(meta, items))
+}
+
+/** 內文結尾追加導流網址；已含網址時不重複附加，並保證總長度不超過平台上限。 */
+function appendDriveLink(captions: SocialCaptions): SocialCaptions {
+  const ship = (text: string, max: number): string => {
+    if (text.includes(MARKET_FOCUS_URL)) return trimToChars(text, max)
+    const body = trimToChars(text, Math.max(1, max - DRIVE_CTA_LEN))
+    return body + DRIVE_CTA
+  }
+  return {
+    instagram: ship(captions.instagram, IG_MAX_CHARS),
+    threads: ship(captions.threads, THREADS_MAX_CHARS),
+  }
 }
 
 /** LLM 失敗時的標題拼接兜底。 */

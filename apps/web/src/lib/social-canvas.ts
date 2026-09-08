@@ -83,17 +83,38 @@ export async function renderSocialCard(data: SocialCardData): Promise<Buffer> {
     y += lineH
   }
 
-  // ── 總覽摘要（auto-wrap，最多 ~9 行）─────────────────────────
+  // ── 總覽摘要（auto-wrap，最多 7 行，保留底部 CTA 空間）────────────
   const summary = data.meta.summary ?? ''
   ctx.font = `400 34px "${FONT_NAME}"`
   ctx.fillStyle = '#d1d5db'
-  const summaryLines = wrapText(ctx, summary, maxWidth, 10)
+  const summaryLines = wrapText(ctx, summary, maxWidth, 7)
   y += 24
   const summaryLineH = 52
   for (const line of summaryLines) {
     ctx.fillText(line, 72, y)
     y += summaryLineH
   }
+
+  // ── 梗圖式 CTA 底列：導流網址 ─────────────────────────────────
+  const ctaX = 72
+  const ctaY = CARD_H - 196
+  const ctaW = CARD_W - 144
+  const ctaH = 80
+  ctx.fillStyle = '#14532d'
+  roundRect(ctx, ctaX, ctaY, ctaW, ctaH, 18)
+  ctx.fill()
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  let ctaFontSize = 44
+  ctx.font = `700 ${ctaFontSize}px "${FONT_NAME}"`
+  while (ctx.measureText(`完整分析 → vestential.com/market-focus`).width > ctaW - 32 && ctaFontSize > 28) {
+    ctaFontSize -= 2
+    ctx.font = `700 ${ctaFontSize}px "${FONT_NAME}"`
+  }
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText('完整分析 → vestential.com/market-focus', CARD_W / 2, ctaY + ctaH / 2)
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
 
   // ── Footer ────────────────────────────────────────────────────
   ctx.font = `400 26px "${FONT_NAME}"`
@@ -127,4 +148,15 @@ function wrapText(ctx: { measureText: (t: string) => { width: number } }, text: 
   }
   if (line) lines.push(line)
   return lines
+}
+
+/** 繪製圓角矩形路徑（不 fill/stroke，需自行呼叫）。 */
+function roundRect(ctx: any, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
 }
