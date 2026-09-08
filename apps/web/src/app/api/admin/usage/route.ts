@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { getUserUsageReport } from '@stock/database'
+import { getUserUsageReport, migrate } from '@stock/database'
 import { isAdminUser, getCurrentUserFromReq } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  await migrate()
   const user = await getCurrentUserFromReq(req)
   if (!user || !(await isAdminUser(user))) {
     return NextResponse.json({ error: '未登入或無管理員權限' }, { status: 401 })

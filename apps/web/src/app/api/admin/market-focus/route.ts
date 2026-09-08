@@ -4,7 +4,7 @@ import { getCurrentUserFromReq, isAdminUser } from '@/lib/auth'
 import { previewMarketFocus, refreshMarketFocus } from '@/lib/market-focus'
 import { triggerSocialPublish } from '@/lib/social-trigger'
 import { sendMarketFocusAlert, sendMarketFocusSummary, isSummaryFallback } from '@/lib/email'
-import { getMarketFocusMeta } from '@stock/database'
+import { getMarketFocusMeta, migrate } from '@stock/database'
 import { revalidateTag } from 'next/cache'
 
 export const runtime = 'nodejs'
@@ -12,6 +12,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
+  await migrate()
   const user = await getCurrentUserFromReq(req)
   if (!user || !(await isAdminUser(user))) {
     return NextResponse.json({ error: '未登入或無管理員權限' }, { status: 401 })

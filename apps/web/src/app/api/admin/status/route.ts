@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { dbQueryFirst, listArenaRoundProgress, getUserUsageReport } from '@stock/database'
+import { dbQueryFirst, listArenaRoundProgress, getUserUsageReport, migrate } from '@stock/database'
 import { runHealthChecks } from '@/lib/health'
 import { isAdminUser, getCurrentUserFromReq } from '@/lib/auth'
 
@@ -29,6 +29,7 @@ async function counts() {
 }
 
 export async function GET(req: NextRequest) {
+  await migrate()
   const user = await getCurrentUserFromReq(req)
   if (!user || !(await isAdminUser(user))) {
     return NextResponse.json({ error: '未登入或無管理員權限' }, { status: 401 })

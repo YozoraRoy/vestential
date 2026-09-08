@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { listAgentSettings, setAgentSetting, getAgentSetting } from '@stock/database'
+import { listAgentSettings, setAgentSetting, getAgentSetting, migrate } from '@stock/database'
 import { isAdminUser, getCurrentUserFromReq } from '@/lib/auth'
 import { DEFAULT_AGENT_SETTINGS } from '@/lib/agent-settings'
 
@@ -8,6 +8,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  await migrate()
   const user = await getCurrentUserFromReq(req)
   if (!user || !(await isAdminUser(user))) {
     return NextResponse.json({ error: '未登入或無管理員權限' }, { status: 401 })
@@ -42,6 +43,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  await migrate()
   const user = await getCurrentUserFromReq(req)
   if (!user || !(await isAdminUser(user))) {
     return NextResponse.json({ error: '未登入或無管理員權限' }, { status: 401 })

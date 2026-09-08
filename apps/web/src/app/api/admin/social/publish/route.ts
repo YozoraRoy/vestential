@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { migrate } from '@stock/database'
 import { getCurrentUserFromReq, isAdminUser } from '@/lib/auth'
 import { triggerSocialPublish } from '@/lib/social-trigger'
 import type { SocialPostPlatform } from '@stock/database'
@@ -9,6 +10,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
+  await migrate()
   const user = await getCurrentUserFromReq(req)
   if (!user || !(await isAdminUser(user))) {
     return NextResponse.json({ error: '未登入或無管理員權限' }, { status: 401 })
