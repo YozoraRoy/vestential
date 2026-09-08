@@ -251,7 +251,7 @@ export async function sendMarketFocusSummary(): Promise<boolean> {
 export async function sendMarketFocusAlert(topic: string, message: string): Promise<boolean> {
   const ts = formatTwDateTime(new Date().toISOString())
   const env = process.env.NODE_ENV ?? 'development'
-  const text = `Vestential 市場焦點排程異常
+  const text = `Vestential 系統異常通知
 
 時間 : ${ts}
 類型 : ${topic}
@@ -263,7 +263,7 @@ export async function sendMarketFocusAlert(topic: string, message: string): Prom
   const html = `
     <div style="background:#fef2f2;padding:24px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;">
       <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #fecaca;border-radius:12px;overflow:hidden;">
-        <div style="background:#b91c1c;color:#ffffff;padding:16px 24px;font-weight:800;font-size:16px;">⚠️ Vestential 市場焦點異常</div>
+        <div style="background:#b91c1c;color:#ffffff;padding:16px 24px;font-weight:800;font-size:16px;">⚠️ Vestential 系統異常通知</div>
         <div style="padding:20px 24px;font-size:14px;color:#374151;line-height:1.8;">
           <div><b>時間</b>: ${escapeHtml(ts)}</div>
           <div><b>類型</b>: ${escapeHtml(topic)}</div>
@@ -273,7 +273,7 @@ export async function sendMarketFocusAlert(topic: string, message: string): Prom
         </div>
       </div>
     </div>`
-  return sendMailCore(`⚠️ Vestential 市場焦點異常 — ${topic}`, text, html)
+  return sendMailCore(`⚠️ Vestential 系統異常通知 — ${topic}`, text, html)
 }
 
 // ─── ③ 健康覆盤告警信 ───────────────────────────────────────────
