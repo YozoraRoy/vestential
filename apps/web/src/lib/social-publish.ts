@@ -212,11 +212,13 @@ async function waitForContainer(
   timeoutMs = 60_000,
 ): Promise<void> {
   const base = platform === 'instagram' ? IG_API : THREADS_API
+  // IG 用 status_code / Threads 用 status（Threads 沒有 status_code 欄位）
+  const fields = platform === 'instagram' ? 'status_code,error_message' : 'status,error_message'
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     await sleep(3000)
     const res = await fetch(
-      `${base}/${containerId}?fields=status_code,status,error_message&access_token=${encodeURIComponent(accessToken)}`,
+      `${base}/${containerId}?fields=${fields}&access_token=${encodeURIComponent(accessToken)}`,
     )
     const json = await res.json()
     if (!res.ok) {

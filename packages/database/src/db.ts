@@ -3374,9 +3374,13 @@ export interface SocialPostInput {
 }
 
 /** 這期 edition 是否已對該平台發布過任何紀錄（含失敗），用於去重。 */
+/**
+ * 該平台該 edition 是否「已發布成功」。只認 status='published'；
+ * failed / container_created 等未完成狀態允許重試。
+ */
 export async function hasSocialPosted(platform: string, editionKey: string): Promise<boolean> {
   const row = await dbQueryFirst<{ n: number }>(
-    'SELECT COUNT(*) AS n FROM social_posts WHERE platform = @platform AND edition_key = @editionKey LIMIT 1',
+    `SELECT COUNT(*) AS n FROM social_posts WHERE platform = @platform AND edition_key = @editionKey AND status = 'published' LIMIT 1`,
     { platform, editionKey },
   )
   return (row?.n ?? 0) > 0
