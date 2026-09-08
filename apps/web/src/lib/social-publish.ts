@@ -148,6 +148,7 @@ async function publishInstagram(
   await updateSocialPost(row.id, {
     status: 'published',
     external_id: externalId,
+    error: null,
     published_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
   })
   return { platform: 'instagram', status: 'published', containerId, externalId }
@@ -184,6 +185,7 @@ async function publishThreads(
   await updateSocialPost(row.id, {
     status: 'published',
     external_id: externalId,
+    error: null,
     published_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
   })
   return { platform: 'threads', status: 'published', containerId, externalId }
