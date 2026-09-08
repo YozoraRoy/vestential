@@ -567,6 +567,19 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
     `)
 
     await _pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'agent_settings')
+      BEGIN
+        CREATE TABLE agent_settings (
+          key        NVARCHAR(120) PRIMARY KEY,
+          value      NVARCHAR(MAX),
+          category   NVARCHAR(50),
+          label      NVARCHAR(200),
+          updated_at DATETIME DEFAULT GETDATE()
+        );
+      END
+    `)
+
+    await _pool.request().query(`
       IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'placement_events')
       BEGIN
         CREATE TABLE placement_events (
@@ -3801,21 +3814,28 @@ export async function setAgentSetting(input: {
   category?: string
   label?: string
 }): Promise<boolean> {
+  const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ')
   const existing = await dbQueryFirst<{ key: string }>(
     'SELECT key FROM agent_settings WHERE key = @key',
     { key: input.key },
   )
   if (existing) {
     await dbExecute(
-      'UPDATE agent_settings SET value = @value, updated_at = datetime(\'now\',\'localtime\') WHERE key = @key',
-      { key: input.key, value: input.value },
+      'UPDATE agent_settings SET value = @value, updated_at = @updatedAt WHERE key = @key',
+      { key: input.key, value: input.value, updatedAt: nowIso() },
     )
     return false
   }
   await dbExecute(
-    `INSERT INTO agent_settings (key, value, category, label)
-     VALUES (@key, @value, @category, @label)`,
-    { key: input.key, value: input.value, category: input.category ?? null, label: input.label ?? null },
+    `INSERT INTO agent_settings (key, value, category, label, updated_at)
+     VALUES (@key, @value, @category, @label, @updatedAt)`,
+    {
+      key: input.key,
+      value: input.value,
+      category: input.category ?? null,
+      label: input.label ?? null,
+      updatedAt: nowIso(),
+    },
   )
   return true
 }
