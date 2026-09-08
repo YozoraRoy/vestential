@@ -384,6 +384,21 @@ function getSqliteDb(): Database.Database | null {
         created_at TEXT DEFAULT (datetime('now','localtime'))
       );
 
+      CREATE TABLE IF NOT EXISTS arena_round_progress (
+        round_date TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        note TEXT,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        PRIMARY KEY (round_date, phase)
+      );
+
+      CREATE TABLE IF NOT EXISTS arena_round_universe (
+        round_date TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        name TEXT,
+        PRIMARY KEY (round_date, symbol)
+      );
+
       CREATE TABLE IF NOT EXISTS social_posts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         platform TEXT NOT NULL,
@@ -830,6 +845,27 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           model NVARCHAR(100),
           fallback_used INT DEFAULT 0,
           created_at DATETIME2 DEFAULT GETDATE()
+        );
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_round_progress')
+      BEGIN
+        CREATE TABLE arena_round_progress (
+          round_date NVARCHAR(20) NOT NULL,
+          phase NVARCHAR(40) NOT NULL,
+          note NVARCHAR(500),
+          created_at DATETIME2 DEFAULT GETDATE(),
+          CONSTRAINT pk_arena_round_progress PRIMARY KEY (round_date, phase)
+        );
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_round_universe')
+      BEGIN
+        CREATE TABLE arena_round_universe (
+          round_date NVARCHAR(20) NOT NULL,
+          symbol NVARCHAR(20) NOT NULL,
+          name NVARCHAR(100),
+          CONSTRAINT pk_arena_round_universe PRIMARY KEY (round_date, symbol)
         );
       END
 
@@ -3226,6 +3262,254 @@ export function getArenaMarketBriefing(roundDate: string): Promise<ArenaMarketBr
   return dbQueryFirst<ArenaMarketBriefingRow>(
     'SELECT * FROM arena_market_briefings WHERE round_date = @roundDate LIMIT 1',
     { roundDate },
+  )
+}
+
+// ── 分段 tick 進度 (arena_round_progress) ──────────────────────
+export async function getArenaRoundProgress(roundDate: string, phase: string): Promise<boolean> {
+  const row = await dbQueryFirst<{ cnt: number }>(
+    'SELECT COUNT(*) AS cnt FROM arena_round_progress WHERE round_date = @roundDate AND phase = @phase',
+    { roundDate, phase },
+  )
+  return (row?.cnt ?? 0) > 0
+}
+
+export async function listArenaRoundProgress(roundDate: string): Promise<Array<{ phase: string; note: string | null; created_at: string | null }>> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return []
+    try {
+      const rs = await pool.request()
+        .input('round', sql.NVarChar(20), roundDate)
+        .query('SELECT phase, note, created_at FROM arena_round_progress WHERE round_date = @round')
+      return (rs.recordset ?? []).map((r: any) => ({
+        phase: r.phase,
+        note: r.note,
+        created_at: r.created_at,
+      }))
+    } catch (e) {
+      console.error('[AzureSQL] listArenaRoundProgress error:', e)
+      return []
+    }
+  }
+  const db = getSqliteDb()
+  if (!db) return []
+  try {
+    const rows = db.prepare(
+      'SELECT phase, note, created_at FROM arena_round_progress WHERE round_date = ?',
+    ).all(roundDate) as Array<{ phase: string; note: string | null; created_at: string | null }>
+    return rows
+  } catch (e) {
+    console.error('[SQLite] listArenaRoundProgress error:', e)
+    return []
+  }
+}
+
+export async function markArenaRoundProgress(roundDate: string, phase: string, note?: string | null): Promise<void> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      await pool.request()
+        .input('round', sql.NVarChar(20), roundDate)
+        .input('phase', sql.NVarChar(40), phase)
+        .input('note', sql.NVarChar(500), note ?? null)
+        .query(`
+          IF NOT EXISTS (SELECT 1 FROM arena_round_progress WHERE round_date = @round AND phase = @phase)
+            INSERT INTO arena_round_progress (round_date, phase, note) VALUES (@round, @phase, @note)
+        `)
+    } catch (e) {
+      console.error('[AzureSQL] markArenaRoundProgress error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    db.prepare(`
+      INSERT INTO arena_round_progress (round_date, phase, note)
+      VALUES (?, ?, ?)
+      ON CONFLICT(round_date, phase) DO NOTHING
+    `).run(roundDate, phase, note ?? null)
+  } catch (e) {
+    console.error('[SQLite] markArenaRoundProgress error:', e)
+  }
+}
+
+export async function clearArenaRoundProgress(roundDate: string, phase: string): Promise<void> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      await pool.request()
+        .input('round', sql.NVarChar(20), roundDate)
+        .input('phase', sql.NVarChar(40), phase)
+        .query('DELETE FROM arena_round_progress WHERE round_date = @round AND phase = @phase')
+    } catch (e) {
+      console.error('[AzureSQL] clearArenaRoundProgress error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    db.prepare('DELETE FROM arena_round_progress WHERE round_date = ? AND phase = ?').run(roundDate, phase)
+  } catch (e) {
+    console.error('[SQLite] clearArenaRoundProgress error:', e)
+  }
+}
+
+// ── 每日股票池固化 (arena_round_universe) ───────────────────────
+export async function replaceArenaRoundUniverse(
+  roundDate: string,
+  items: Array<{ symbol: string; name?: string | null }>,
+): Promise<void> {
+  if (items.length === 0) return
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      const tx = new sql.Transaction(pool)
+      await tx.begin()
+      try {
+        await tx.request()
+          .input('round', sql.NVarChar(20), roundDate)
+          .query('DELETE FROM arena_round_universe WHERE round_date = @round')
+        if (items.length > 0) {
+          const rows = items
+            .map((i) => `(@round, N'${i.symbol.replace(/'/g, "''")}', ${i.name ? `N'${i.name.replace(/'/g, "''")}'` : 'NULL'})`)
+            .join(',\n')
+          await tx.request()
+            .input('round', sql.NVarChar(20), roundDate)
+            .query(`INSERT INTO arena_round_universe (round_date, symbol, name) VALUES ${rows}`)
+        }
+        await tx.commit()
+      } catch (e) {
+        await tx.rollback()
+        throw e
+      }
+    } catch (e) {
+      console.error('[AzureSQL] replaceArenaRoundUniverse error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    const del = db.prepare('DELETE FROM arena_round_universe WHERE round_date = ?')
+    const ins = db.prepare('INSERT INTO arena_round_universe (round_date, symbol, name) VALUES (?, ?, ?)')
+    const tx = db.transaction((rowsItems: typeof items) => {
+      del.run(roundDate)
+      for (const i of rowsItems) ins.run(roundDate, i.symbol, i.name ?? null)
+    })
+    tx(items)
+  } catch (e) {
+    console.error('[SQLite] replaceArenaRoundUniverse error:', e)
+  }
+}
+
+export async function getArenaRoundUniverse(roundDate: string): Promise<Array<{ symbol: string; name: string | null }>> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return []
+    try {
+      const rs = await pool.request()
+        .input('round', sql.NVarChar(20), roundDate)
+        .query('SELECT symbol, name FROM arena_round_universe WHERE round_date = @round ORDER BY symbol ASC')
+      return (rs.recordset ?? []).map((r: any) => ({ symbol: r.symbol, name: r.name }))
+    } catch (e) {
+      console.error('[AzureSQL] getArenaRoundUniverse error:', e)
+      return []
+    }
+  }
+  const db = getSqliteDb()
+  if (!db) return []
+  try {
+    const rows = db.prepare('SELECT symbol, name FROM arena_round_universe WHERE round_date = ? ORDER BY symbol ASC')
+      .all(roundDate) as Array<{ symbol: string; name: string | null }>
+    return rows
+  } catch (e) {
+    console.error('[SQLite] getArenaRoundUniverse error:', e)
+    return []
+  }
+}
+
+// ── 分段重跑清理（force）──────────────────────────────────────
+export async function clearArenaPhaseArtifacts(roundDate: string, phase: string, slot?: number | null): Promise<void> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return
+    try {
+      if (phase === 'premarket') {
+        await pool.request()
+          .input('round', sql.NVarChar(20), roundDate)
+          .query('DELETE FROM arena_decision_logs WHERE round_date = @round AND phase = \'premarket\'')
+        await pool.request()
+          .input('round', sql.NVarChar(20), roundDate)
+          .query('DELETE FROM arena_market_briefings WHERE round_date = @round')
+        return
+      }
+      if (phase === 'close') {
+        await pool.request()
+          .input('round', sql.NVarChar(20), roundDate)
+          .query('DELETE FROM arena_equity_snapshots WHERE round_date = @round')
+        await pool.request()
+          .input('round', sql.NVarChar(20), roundDate)
+          .query('DELETE FROM arena_decision_logs WHERE round_date = @round AND phase = \'postclose\'')
+        await pool.request()
+          .input('round', sql.NVarChar(20), roundDate)
+          .query('DELETE FROM arena_discussions WHERE round_date = @round')
+        return
+      }
+      if (phase === 'slot' && slot !== undefined && slot !== null) {
+        await pool.request()
+          .input('round', sql.NVarChar(20), roundDate)
+          .input('slot', sql.Int, slot)
+          .query('DELETE FROM arena_trades WHERE round_date = @round AND slot = @slot')
+        await pool.request()
+          .input('round', sql.NVarChar(20), roundDate)
+          .input('slot', sql.Int, slot)
+          .query('DELETE FROM arena_decision_logs WHERE round_date = @round AND phase = \'trade\' AND slot = @slot')
+        await pool.request()
+          .input('round', sql.NVarChar(20), roundDate)
+          .input('slot', sql.Int, slot)
+          .query('DELETE FROM arena_intraday_prices WHERE round_date = @round AND slot = @slot')
+        return
+      }
+    } catch (e) {
+      console.error('[AzureSQL] clearArenaPhaseArtifacts error:', e)
+    }
+    return
+  }
+  const db = getSqliteDb()
+  if (!db) return
+  try {
+    if (phase === 'premarket') {
+      db.prepare('DELETE FROM arena_decision_logs WHERE round_date = ? AND phase = ?').run(roundDate, 'premarket')
+      db.prepare('DELETE FROM arena_market_briefings WHERE round_date = ?').run(roundDate)
+      return
+    }
+    if (phase === 'close') {
+      db.prepare('DELETE FROM arena_equity_snapshots WHERE round_date = ?').run(roundDate)
+      db.prepare('DELETE FROM arena_decision_logs WHERE round_date = ? AND phase = ?').run(roundDate, 'postclose')
+      db.prepare('DELETE FROM arena_discussions WHERE round_date = ?').run(roundDate)
+      return
+    }
+    if (phase === 'slot' && slot !== undefined && slot !== null) {
+      db.prepare('DELETE FROM arena_trades WHERE round_date = ? AND slot = ?').run(roundDate, slot)
+      db.prepare('DELETE FROM arena_decision_logs WHERE round_date = ? AND phase = ? AND slot = ?').run(roundDate, 'trade', slot)
+      db.prepare('DELETE FROM arena_intraday_prices WHERE round_date = ? AND slot = ?').run(roundDate, slot)
+      return
+    }
+  } catch (e) {
+    console.error('[SQLite] clearArenaPhaseArtifacts error:', e)
+  }
+}
+
+export function getArenaTradesByRound(agentId: number, roundDate: string): Promise<ArenaTradeRow[]> {
+  return dbQueryAll<ArenaTradeRow>(
+    'SELECT * FROM arena_trades WHERE agent_id = @agentId AND round_date = @roundDate ORDER BY slot ASC, id ASC',
+    { agentId, roundDate },
   )
 }
 

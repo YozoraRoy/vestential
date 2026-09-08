@@ -1,10 +1,26 @@
-name: Arena tick (AI Agent 競技場每日收官)
+name: Arena tick (AI Agent 競技場分段收官)
 
 on:
   schedule:
-    # 每週一至五 台灣時間 15:30 (UTC 07:30)，收盤後數據齊全後驅動每日競技場收官
+    # 盤前簡報（台灣 09:00）
+    - cron: '0 1 * * 1-5'
+    # 盤中決策窗 slot0..3（台灣 09:35 / 10:35 / 11:35 / 13:05）
+    - cron: '35 1 * * 1-5'
+    - cron: '35 2 * * 1-5'
+    - cron: '35 3 * * 1-5'
+    - cron: '5 5 * * 1-5'
+    # 收盤結算（台灣 15:30）
     - cron: '30 7 * * 1-5'
   workflow_dispatch:
+    inputs:
+      phase:
+        description: '分段階段: premarket | slot:N | close | full'
+        required: false
+        default: 'full'
+      force:
+        description: '強制重跑該階段 (true)'
+        required: false
+        default: 'false'
 
 jobs:
   tick:
@@ -16,7 +32,6 @@ jobs:
       - name: Compute Taiwan trading date (Asia/Taipei)
         id: date
         run: |
-          # 以 Asia/Taipei 時區計算「今天」；若為六日則回推到最近交易日。
           TODAY=$(TZ='Asia/Taipei' date +%Y-%m-%d)
           DOW=$(TZ='Asia/Taipei' date +%u)
           if [ "$DOW" = "6" ]; then
@@ -29,15 +44,56 @@ jobs:
           echo "target=$TARGET"
           echo "target=$TARGET" >> "$GITHUB_OUTPUT"
 
+      - name: Determine phase params
+        id: phase
+        run: |
+          PHASE_INPUT="${{ github.event.inputs.phase }}"
+          if [ -n "$PHASE_INPUT" ] && [ "$PHASE_INPUT" != "full" ]; then
+            echo "phase=$PHASE_INPUT" >> "$GITHUB_OUTPUT"
+          fi
+          FORCE_INPUT="${{ github.event.inputs.force }}"
+          if [ "$FORCE_INPUT" = "true" ]; then
+            echo "force=1" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Trigger arena tick on Azure
         run: |
-          echo "Running arena tick for ${{ steps.date.outputs.target }}"
+          TARGET=${{ steps.date.outputs.target }}
+          QUERY="date=${TARGET}"
+          PHASE="${{ steps.phase.outputs.phase }}"
+          FORCE="${{ steps.phase.outputs.force }}"
+          # 盤中 cron：依觸發的 cron slot 決定 (無 dispatch phase 時)
+          if [ -z "$PHASE" ]; then
+            CRON_NAME="${{ github.event.schedule }}"
+            case "$CRON_NAME" in
+              "0 1 * * 1-5") PHASE="premarket" ;;
+              "35 1 * * 1-5") PHASE="slot0" ;;
+              "35 2 * * 1-5") PHASE="slot1" ;;
+              "35 3 * * 1-5") PHASE="slot2" ;;
+              "5 5 * * 1-5") PHASE="slot3" ;;
+              "30 7 * * 1-5") PHASE="close" ;;
+            esac
+          fi
+          if [ -n "$PHASE" ]; then
+            case "$PHASE" in
+              slot0) QUERY="${QUERY}&phase=slot&slot=0" ;;
+              slot1) QUERY="${QUERY}&phase=slot&slot=1" ;;
+              slot2) QUERY="${QUERY}&phase=slot&slot=2" ;;
+              slot3) QUERY="${QUERY}&phase=slot&slot=3" ;;
+              slot4) QUERY="${QUERY}&phase=slot&slot=4" ;;
+              slot5) QUERY="${QUERY}&phase=slot&slot=5" ;;
+              premarket|close) QUERY="${QUERY}&phase=${PHASE}" ;;
+              full|"") : ;;
+            esac
+          fi
+          if [ -n "$FORCE" ]; then QUERY="${QUERY}&force=${FORCE}"; fi
+          echo "Ticking: $QUERY"
           CODE=$(curl -s -o /tmp/arena_tick.json -w "%{http_code}" \
             --max-time 300 \
             -X POST \
             -H "Authorization: Bearer ${{ secrets.SYNC_TOKEN }}" \
             -H "Content-Type: application/json" \
-            "https://stock-platform-roy.azurewebsites.net/api/agent-arena/tick?date=${{ steps.date.outputs.target }}")
+            "https://stock-platform-roy.azurewebsites.net/api/agent-arena/tick?${QUERY}")
           echo "HTTP $CODE"
           cat /tmp/arena_tick.json
           echo ""

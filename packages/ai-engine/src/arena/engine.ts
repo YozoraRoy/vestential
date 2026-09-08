@@ -29,6 +29,20 @@ export interface RunArenaRoundParams {
   slippage?: number
   /** 盤中決策時點數；預設取 ARENA_INTRADAY_SLOTS env（缺省 = 全部時點）。0 = 停用盤中、退回單次收盤決策。 */
   intradaySlots?: number
+  /**
+   * 分段執行模式（可省略，省略 = 原有完整流程）。
+   * - `premarket`：僅產出盤前簡報與各 agent 盤前計畫。
+   * - `slot`：僅執行指定 slotIndex 的盤中決策（使用 liveMark 即時價格）。
+   * - `close`：僅做收盤結算（equity snapshot）與圓桌討論。
+   */
+  phase?: 'premarket' | 'slot' | 'close'
+  /** 目標 slot index（phase=slot 時必須）。 */
+  slotIndex?: number
+  /**
+   * phase=slot 時的即時報價（bare symbol → price），作為交易時點的 mark / closes。
+   * 缺失 symbol 回退到 prices（日線收盤）。
+   */
+  liveMark?: Record<string, number>
 }
 
 export interface RunArenaRoundResult {
@@ -43,13 +57,17 @@ export interface RunArenaRoundResult {
   premarket: boolean
   /** 是否產出收後自評與圓桌討論。 */
   discussion: boolean
+  /** 實際執行的 phase（undefined 表示完整流程）。 */
+  phase?: string
+  /** slotPhase 時的 slot index（供上層寫入進度 marker）。 */
+  executedSlot?: number
 }
 
 interface AgentState {
   cash: number
   holdings: import('./types.js').ArenaHolding[]
   initialCapital: number
-  trades: Array<{ slot: number | null; timeLabel: string; log: ArenaLedgerEntry }>
+  trades: Array<{ slot: number | null; timeLabel: string; log: ArenaLedgerEntry; tradeError?: string | null }>
   refusals: number
   placed: number
 }
@@ -69,7 +87,7 @@ function entryText(e: ArenaLedgerEntry): string {
 }
 
 export async function runArenaRound(params: RunArenaRoundParams): Promise<RunArenaRoundResult> {
-  const { store, strategist, prices, history, universe, roundDate, agentIds, slippage } = params
+  const { store, strategist, prices, history, universe, roundDate, agentIds, slippage, phase, slotIndex, liveMark } = params
   const errors: string[] = []
   let trades = 0
   let modelCalls = 0
@@ -83,6 +101,7 @@ export async function runArenaRound(params: RunArenaRoundParams): Promise<RunAre
   const premarketEnabled = envBool('ARENA_ENABLE_PREMARKET', true)
   const discussionEnabled = envBool('ARENA_ENABLE_DISCUSSION', true)
 
+  // closes: fallback mark（日線收盤），供 stop-loss / missing-symbol 使用
   const closes: Record<string, number> = {}
   const symbolNames: Record<string, string> = {}
   const days: Record<string, ArenaDayOhlc> = {}
@@ -143,75 +162,350 @@ export async function runArenaRound(params: RunArenaRoundParams): Promise<RunAre
     })
   }
 
-  // ── 階段 1：盤前情報與計畫 ────────────────────────────────
+  // ── 簡報：premarket 段落產生；其餘段落從 DB 讀取 ──────────────
   let briefingText: string | null = null
-  if (premarketEnabled) {
-    const briefing = await buildMarketBriefing({ roundDate, universe, prices, history, days, maxTokens: 900 })
-    modelCalls++
-    briefingText = briefing.content
-    try {
-      await store.saveMarketBriefing(roundDate, briefing.content, briefing.model ?? null, briefing.fallbackUsed)
-    } catch (err) {
-      errors.push(`saveMarketBriefing failed: ${(err as Error).message}`)
-    }
-    for (const agent of agents) {
-      const res = await buildPreMarketPlan({
-        agentName: agent.name,
+  if (premarketEnabled && phase !== 'close') {
+    if (phase === 'premarket' || !phase) {
+      const briefing = await buildMarketBriefing({ roundDate, universe, prices, history, days, maxTokens: 900 })
+      modelCalls++
+      briefingText = briefing.content
+      try {
+        await store.saveMarketBriefing(roundDate, briefing.content, briefing.model ?? null, briefing.fallbackUsed)
+      } catch (err) {
+        errors.push(`saveMarketBriefing failed: ${(err as Error).message}`)
+      }
+      for (const agent of agents) {
+        const res = await buildPreMarketPlan({
+          agentName: agent.name,
+          roundDate,
+          briefing: briefingText,
+          cash: states.get(agent.id)!.cash,
+          holdings: states.get(agent.id)!.holdings,
+          personality: agent.personality,
+          strategyParams: agent.strategyParams,
+          initialCapital: agent.initialCapital,
+        })
+        modelCalls++
+        const content = res.content || fallbackPlan(agent.name)
+        if (res.error) errors.push(`agent#${agent.id} premarket plan failed: ${res.error}`)
+        try {
+          await store.insertDecisionLog({
+            agentId: agent.id,
+            seasonId: agent.seasonId,
+            roundDate,
+            phase: 'premarket',
+            content,
+            model: res.model ?? null,
+            fallbackUsed: res.fallbackUsed ?? false,
+          })
+        } catch (err) {
+          errors.push(`insertDecisionLog(premarket, agent#${agent.id}) failed: ${(err as Error).message}`)
+        }
+      }
+      return {
+        processed: agents.length,
+        trades: 0,
+        errors,
+        modelCalls,
         roundDate,
-        briefing: briefingText,
+        slots: 0,
+        premarket: true,
+        discussion: false,
+        phase: 'premarket',
+      }
+    } else {
+      try {
+        const cached = await store.getMarketBriefing(roundDate)
+        briefingText = cached?.content ?? null
+      } catch {}
+    }
+  }
+
+  // ── 即時盤中決策（phase=slot）────────────────────────────────
+  if (phase === 'slot') {
+    if (slotIndex === undefined || slotIndex < 0 || slotIndex >= slotTimes.length) {
+      errors.push(`slotIndex ${slotIndex} invalid (0..${slotTimes.length - 1})`)
+      return { processed: 0, trades: 0, errors, modelCalls, roundDate, slots: 0, premarket: false, discussion: false, phase: 'slot', executedSlot: slotIndex }
+    }
+    const mark = { ...liveMark }
+    for (const u of universe) if (mark[u.symbol] === undefined) mark[u.symbol] = closes[u.symbol]
+
+    // 記錄盤中時點價格（即時）
+    try {
+      await store.saveIntradayPrices(
+        universe
+          .filter((u) => mark[u.symbol] > 0)
+          .map((u) => ({
+            roundDate,
+            symbol: u.symbol,
+            slot: slotIndex,
+            timeLabel: slotTimes[slotIndex] ?? `${slotIndex + 1}`,
+            price: mark[u.symbol],
+            changePct: null,
+          })),
+      )
+    } catch (err) {
+      errors.push(`saveIntradayPrices(slot${slotIndex}) failed: ${(err as Error).message}`)
+    }
+
+    for (const agent of agents) {
+      const ctx: ArenaDecisionContext = {
+        agent: { id: agent.id, name: agent.name, strategyId: agent.strategyId, tone: agent.tone },
+        strategyName: agent.strategyId,
+        toneDescription: ARENA_TONE_DESCRIPTIONS[agent.tone],
+        roundDate,
         cash: states.get(agent.id)!.cash,
+        initialCapital: agent.initialCapital,
         holdings: states.get(agent.id)!.holdings,
+        prices,
+        history,
+        universe,
+        phase: 'trade',
+        slot: slotIndex,
+        slotTimeLabel: slotTimes[slotIndex],
+        slotPrices: mark,
+        briefing: briefingText ?? undefined,
         personality: agent.personality,
         strategyParams: agent.strategyParams,
+      }
+      let decision: import('./types.js').ArenaDecision
+      let model: string | undefined
+      let fallbackUsed = false
+      let decisionError: string | undefined
+      try {
+        const res = await strategist.decide(ctx)
+        model = res.model
+        fallbackUsed = res.fallbackUsed ?? false
+        decisionError = res.error
+        decision = res.decision
+        modelCalls++
+      } catch (err) {
+        errors.push(`agent#${agent.id} slot${slotIndex} decide failed: ${(err as Error).message}`)
+        decision = { actions: [] }
+      }
+      await persistSlot(agent, slotIndex, slotTimes[slotIndex] ?? `${slotIndex + 1}`, decision, model, fallbackUsed, decisionError, mark)
+    }
+
+    return {
+      processed: agents.length,
+      trades,
+      errors,
+      modelCalls,
+      roundDate,
+      slots: 1,
+      premarket: false,
+      discussion: false,
+      phase: 'slot',
+      executedSlot: slotIndex,
+    }
+  }
+
+  // ── 收盤結算（phase=close 或完整流程的收盤）────────────────
+  if (phase === 'close') {
+    // 從 DB 回填各 agent 當日交易紀錄
+    for (const agent of agents) {
+      const st = states.get(agent.id)!
+      const dbTrades = await store.getRoundTrades(agent.id, roundDate)
+      for (const t of dbTrades) {
+        const timeLabel = t.slot !== null && t.slot !== undefined ? (slotTimes[t.slot] ?? `slot${t.slot}`) : '收盤'
+        st.trades.push({
+          slot: t.slot,
+          timeLabel,
+          log: { action: t.action as ArenaLedgerEntry['action'] },
+          tradeError: t.error,
+        })
+      }
+      st.placed = dbTrades.filter((t) => t.error !== 'REJECTED').length
+      st.refusals = dbTrades.filter((t) => t.error === 'REJECTED').length
+    }
+  }
+
+  // 舊有完整模式中的 slot 決策（phase 未指定時）
+  if (!phase && numSlots > 0) {
+    const baseCtx = (agent: (typeof agents)[number], slot: number | null, pricesAt: Record<string, number>): ArenaDecisionContext => ({
+      agent: { id: agent.id, name: agent.name, strategyId: agent.strategyId, tone: agent.tone },
+      strategyName: agent.strategyId,
+      toneDescription: ARENA_TONE_DESCRIPTIONS[agent.tone],
+      roundDate,
+      cash: states.get(agent.id)!.cash,
+      initialCapital: agent.initialCapital,
+      holdings: states.get(agent.id)!.holdings,
+      prices,
+      history,
+      universe,
+      phase: 'trade' as const,
+      slot: slot ?? undefined,
+      slotTimeLabel: slot != null ? slotTimes[slot] : undefined,
+      slotPrices: pricesAt,
+      heldDayPaths: undefined,
+      briefing: briefingText ?? undefined,
+      personality: agent.personality,
+      strategyParams: agent.strategyParams,
+    })
+
+    for (let slot = 0; slot < numSlots; slot++) {
+      const mark = slotPrices[slot] ?? {}
+      const markWithFallback = { ...mark }
+      for (const u of universe) if (markWithFallback[u.symbol] === undefined) markWithFallback[u.symbol] = closes[u.symbol]
+
+      for (const agent of agents) {
+        const st = states.get(agent.id)!
+        const heldDayPaths: Record<string, import('./types.js').ArenaSlotPrice[]> = {}
+        for (const s of st.holdings.map((h) => h.symbol)) {
+          const p = dayPaths[s]
+          if (p && p.length > 0) heldDayPaths[s] = p
+        }
+        const ctx = baseCtx(agent, slot, markWithFallback)
+        ctx.heldDayPaths = heldDayPaths
+
+        let decision: import('./types.js').ArenaDecision
+        let model: string | undefined
+        let fallbackUsed = false
+        let decisionError: string | undefined
+        try {
+          const res = await strategist.decide(ctx)
+          model = res.model
+          fallbackUsed = res.fallbackUsed ?? false
+          decisionError = res.error
+          decision = res.decision
+          modelCalls++
+        } catch (err) {
+          errors.push(`agent#${agent.id} slot ${slot} decide failed: ${(err as Error).message}`)
+          decision = { actions: [] }
+        }
+        await persistSlot(agent, slot, slotTimes[slot] ?? `${slot + 1}`, decision, model, fallbackUsed, decisionError, markWithFallback)
+      }
+    }
+  } else if (!phase) {
+    // 完整模式、停用盤中：收盤一次決策
+    for (const agent of agents) {
+      const ctx: ArenaDecisionContext = {
+        agent: { id: agent.id, name: agent.name, strategyId: agent.strategyId, tone: agent.tone },
+        strategyName: agent.strategyId,
+        toneDescription: ARENA_TONE_DESCRIPTIONS[agent.tone],
+        roundDate,
+        cash: states.get(agent.id)!.cash,
         initialCapital: agent.initialCapital,
+        holdings: states.get(agent.id)!.holdings,
+        prices,
+        history,
+        universe,
+        phase: 'trade' as const,
+        slotPrices: closes,
+        briefing: briefingText ?? undefined,
+        personality: agent.personality,
+        strategyParams: agent.strategyParams,
+      }
+      let decision: import('./types.js').ArenaDecision
+      let model: string | undefined
+      let fallbackUsed = false
+      let decisionError: string | undefined
+      try {
+        const res = await strategist.decide(ctx)
+        model = res.model
+        fallbackUsed = res.fallbackUsed ?? false
+        decisionError = res.error
+        decision = res.decision
+        modelCalls++
+      } catch (err) {
+        errors.push(`agent#${agent.id} decide failed: ${(err as Error).message}`)
+        decision = { actions: [] }
+      }
+      await persistSlot(agent, null, '收盤', decision, model, fallbackUsed, decisionError, closes)
+    }
+  }
+
+  // ── 收盤 equity snapshot（close / full 模式）──────────────────
+  if (!phase || phase === 'close') {
+    for (const agent of agents) {
+      const st = states.get(agent.id)!
+      const equity = computeArenaEquity(st.cash, st.holdings, closes)
+      await store.insertSnapshot({
+        agentId: agent.id,
+        seasonId: agent.seasonId,
+        roundDate,
+        cash: st.cash,
+        equity,
+        returnPct: Math.round(((equity - st.initialCapital) / st.initialCapital) * 10000) / 100,
+      })
+    }
+  }
+
+  // ── 收後總結 + 圓桌討論（close / full 模式）─────────────────
+  let discussionDone = false
+  if (discussionEnabled && states.size > 0 && (!phase || phase === 'close')) {
+    const participants: DiscussionParticipant[] = []
+    for (const agent of agents) {
+      const st = states.get(agent.id)!
+      const equity = computeArenaEquity(st.cash, st.holdings, closes)
+      const returnPct = Math.round(((equity - st.initialCapital) / st.initialCapital) * 10000) / 100
+      const res = await buildPostCloseReflection({
+        agentName: agent.name,
+        roundDate,
+        trades: st.trades.map((t) => ({
+          slot: t.slot,
+          timeLabel: t.timeLabel,
+          action: t.log.action,
+          symbol: t.log.symbol ?? null,
+          symbolName: t.log.symbolName ?? null,
+          shares: t.log.shares ?? null,
+          price: t.log.price ?? null,
+          reason: t.log.reason ?? null,
+        })),
+        cash: st.cash,
+        equity,
+        returnPct,
+        holdings: st.holdings,
+        initialCapital: agent.initialCapital,
+        personality: agent.personality,
       })
       modelCalls++
-      const content = res.content || fallbackPlan(agent.name)
-      if (res.error) errors.push(`agent#${agent.id} premarket plan failed: ${res.error}`)
+      const content = res.content || fallbackReflection(agent.name, roundDate)
+      if (res.error) errors.push(`agent#${agent.id} reflection failed: ${res.error}`)
       try {
         await store.insertDecisionLog({
           agentId: agent.id,
           seasonId: agent.seasonId,
           roundDate,
-          phase: 'premarket',
+          phase: 'postclose',
           content,
           model: res.model ?? null,
           fallbackUsed: res.fallbackUsed ?? false,
         })
       } catch (err) {
-        errors.push(`insertDecisionLog(premarket, agent#${agent.id}) failed: ${(err as Error).message}`)
+        errors.push(`insertDecisionLog(postclose, agent#${agent.id}) failed: ${(err as Error).message}`)
       }
+      participants.push({ agentName: agent.name, recovery: { placed: st.placed, rejected: st.refusals }, equity, returnPct, reflection: content })
+    }
+
+    const sum = await buildDiscussionSummary({
+      roundDate,
+      participants: [...participants].sort((a, b) => b.returnPct - a.returnPct),
+    })
+    modelCalls++
+    const content = sum.content || fallbackDiscussion(roundDate, participants.length)
+    if (sum.error) errors.push(`discussion failed: ${sum.error}`)
+    try {
+      await store.saveDiscussion(roundDate, content, sum.model ?? null, sum.fallbackUsed ?? false)
+      discussionDone = true
+    } catch (err) {
+      errors.push(`saveDiscussion failed: ${(err as Error).message}`)
     }
   }
 
-  // ── 階段 2-5：盤中決策 + 收盤結算 ─────────────────────────
-  const baseCtx = (agent: (typeof agents)[number], slot: number | null, pricesAt: Record<string, number>): ArenaDecisionContext => ({
-    agent: {
-      id: agent.id,
-      name: agent.name,
-      strategyId: agent.strategyId,
-      tone: agent.tone,
-    },
-    strategyName: agent.strategyId,
-    toneDescription: ARENA_TONE_DESCRIPTIONS[agent.tone],
+  return {
+    processed: agents.length,
+    trades,
+    errors,
+    modelCalls,
     roundDate,
-    cash: states.get(agent.id)!.cash,
-    initialCapital: agent.initialCapital,
-    holdings: states.get(agent.id)!.holdings,
-    prices,
-    history,
-    universe,
-    phase: 'trade' as const,
-    slot: slot ?? undefined,
-    slotTimeLabel: slot != null ? slotTimes[slot] : undefined,
-    slotPrices: pricesAt,
-    heldDayPaths: undefined,
-    briefing: briefingText ?? undefined,
-    personality: agent.personality,
-    strategyParams: agent.strategyParams,
-  })
+    slots: phase === 'close' ? 0 : numSlots,
+    premarket: false,
+    discussion: discussionDone,
+    phase,
+  }
 
-  const persistSlot = async (
+  async function persistSlot(
     agent: (typeof agents)[number],
     slot: number | null,
     timeLabel: string,
@@ -220,7 +514,7 @@ export async function runArenaRound(params: RunArenaRoundParams): Promise<RunAre
     fallbackUsed: boolean,
     decisionError: string | undefined,
     mark: Record<string, number>,
-  ): Promise<void> => {
+  ): Promise<void> {
     const st = states.get(agent.id)!
     const ledger = applyArenaDecision({
       cash: st.cash,
@@ -288,151 +582,5 @@ export async function runArenaRound(params: RunArenaRoundParams): Promise<RunAre
       model: model ?? null,
       fallbackUsed: fallbackUsed || null,
     })
-  }
-
-  try {
-    if (numSlots > 0) {
-      for (let slot = 0; slot < numSlots; slot++) {
-        const mark = slotPrices[slot] ?? {}
-        const markWithFallback = { ...mark }
-        for (const u of universe) if (markWithFallback[u.symbol] === undefined) markWithFallback[u.symbol] = closes[u.symbol]
-
-        for (const agent of agents) {
-          const st = states.get(agent.id)!
-          const heldDayPaths: Record<string, import('./types.js').ArenaSlotPrice[]> = {}
-          for (const s of st.holdings.map((h) => h.symbol)) {
-            const p = dayPaths[s]
-            if (p && p.length > 0) heldDayPaths[s] = p
-          }
-          const ctx = baseCtx(agent, slot, markWithFallback)
-          ctx.heldDayPaths = heldDayPaths
-
-          let decision: import('./types.js').ArenaDecision
-          let model: string | undefined
-          let fallbackUsed = false
-          let decisionError: string | undefined
-          try {
-            const res = await strategist.decide(ctx)
-            model = res.model
-            fallbackUsed = res.fallbackUsed ?? false
-            decisionError = res.error
-            decision = res.decision
-            modelCalls++
-          } catch (err) {
-            errors.push(`agent#${agent.id} slot ${slot} decide failed: ${(err as Error).message}`)
-            decision = { actions: [] }
-          }
-          await persistSlot(agent, slot, slotTimes[slot] ?? `${slot + 1}`, decision, model, fallbackUsed, decisionError, markWithFallback)
-        }
-      }
-    } else {
-      for (const agent of agents) {
-        const ctx = baseCtx(agent, null, closes)
-        let decision: import('./types.js').ArenaDecision
-        let model: string | undefined
-        let fallbackUsed = false
-        let decisionError: string | undefined
-        try {
-          const res = await strategist.decide(ctx)
-          model = res.model
-          fallbackUsed = res.fallbackUsed ?? false
-          decisionError = res.error
-          decision = res.decision
-          modelCalls++
-        } catch (err) {
-          errors.push(`agent#${agent.id} decide failed: ${(err as Error).message}`)
-          decision = { actions: [] }
-        }
-        await persistSlot(agent, null, '收盤', decision, model, fallbackUsed, decisionError, closes)
-      }
-    }
-
-    for (const agent of agents) {
-      const st = states.get(agent.id)!
-      const equity = computeArenaEquity(st.cash, st.holdings, closes)
-      await store.insertSnapshot({
-        agentId: agent.id,
-        seasonId: agent.seasonId,
-        roundDate,
-        cash: st.cash,
-        equity,
-        returnPct: Math.round(((equity - st.initialCapital) / st.initialCapital) * 10000) / 100,
-      })
-    }
-  } catch (err) {
-    errors.push(`arena pipeline failed: ${(err as Error).message}`)
-  }
-
-  // ── 收後總結 + 圓桌討論 ──────────────────────────────────
-  let discussionDone = false
-  if (discussionEnabled && states.size > 0) {
-    const participants: DiscussionParticipant[] = []
-    for (const agent of agents) {
-      const st = states.get(agent.id)!
-      const equity = computeArenaEquity(st.cash, st.holdings, closes)
-      const returnPct = Math.round(((equity - st.initialCapital) / st.initialCapital) * 10000) / 100
-      const res = await buildPostCloseReflection({
-        agentName: agent.name,
-        roundDate,
-        trades: st.trades.map((t) => ({
-          slot: t.slot,
-          timeLabel: t.timeLabel,
-          action: t.log.action,
-          symbol: t.log.symbol ?? null,
-          symbolName: t.log.symbolName ?? null,
-          shares: t.log.shares ?? null,
-          price: t.log.price ?? null,
-          reason: t.log.reason ?? null,
-        })),
-        cash: st.cash,
-        equity,
-        returnPct,
-        holdings: st.holdings,
-        initialCapital: agent.initialCapital,
-        personality: agent.personality,
-      })
-      modelCalls++
-      const content = res.content || fallbackReflection(agent.name, roundDate)
-      if (res.error) errors.push(`agent#${agent.id} reflection failed: ${res.error}`)
-      try {
-        await store.insertDecisionLog({
-          agentId: agent.id,
-          seasonId: agent.seasonId,
-          roundDate,
-          phase: 'postclose',
-          content,
-          model: res.model ?? null,
-          fallbackUsed: res.fallbackUsed ?? false,
-        })
-      } catch (err) {
-        errors.push(`insertDecisionLog(postclose, agent#${agent.id}) failed: ${(err as Error).message}`)
-      }
-      participants.push({ agentName: agent.name, recovery: { placed: st.placed, rejected: st.refusals }, equity, returnPct, reflection: content })
-    }
-
-    const sum = await buildDiscussionSummary({
-      roundDate,
-      participants: [...participants].sort((a, b) => b.returnPct - a.returnPct),
-    })
-    modelCalls++
-    const content = sum.content || fallbackDiscussion(roundDate, participants.length)
-    if (sum.error) errors.push(`discussion failed: ${sum.error}`)
-    try {
-      await store.saveDiscussion(roundDate, content, sum.model ?? null, sum.fallbackUsed ?? false)
-      discussionDone = true
-    } catch (err) {
-      errors.push(`saveDiscussion failed: ${(err as Error).message}`)
-    }
-  }
-
-  return {
-    processed: agents.length,
-    trades,
-    errors,
-    modelCalls,
-    roundDate,
-    slots: numSlots,
-    premarket: premarketEnabled,
-    discussion: discussionDone,
   }
 }

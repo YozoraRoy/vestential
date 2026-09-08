@@ -36,11 +36,17 @@ export async function POST(req: NextRequest) {
     ? twDateStr(todayTw)
     : twDateStr(getLastMarketTradingDay(todayTw)))
 
+  const phaseRaw = (searchParams.get('phase') ?? '').trim().toLowerCase()
+  const phase: 'premarket' | 'slot' | 'close' | undefined = phaseRaw === 'premarket' || phaseRaw === 'slot' || phaseRaw === 'close' ? phaseRaw : undefined
+  const slotParam = searchParams.get('slot')
+  const slot = phase === 'slot' && slotParam ? Number(slotParam) : undefined
+  const force = searchParams.get('force') === '1' || searchParams.get('force') === 'true'
+
   try {
-    const result = await runArenaTick(roundDate)
+    const result = await runArenaTick(roundDate, { phase, slot, force })
     return NextResponse.json({ success: true, ...result }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (e: any) {
     console.error('[Arena/Tick] failed:', e)
-    return NextResponse.json({ success: false, error: e.message ?? '收官失敗' }, { status: 500 })
+    return NextResponse.json({ success: false, error: e.message ?? 'tick 失敗' }, { status: 500 })
   }
 }

@@ -156,6 +156,49 @@ export function parseArenaUniverse(raw: string | undefined): ArenaUniverseItem[]
   return items.length > 0 ? items : DEFAULT_ARENA_UNIVERSE
 }
 
+export interface LiveQuoteMap {
+  bySymbol: Record<string, number>
+  byResolved: Record<string, string>
+}
+
+/**
+ * 抓取每個股票池符號的 Yahoo 即時報價（含尾綴解析），供「盤中真實決策窗」使用。
+ * @param universe 股票池（symbol 為無後綴代號，如 2330）
+ * @returns bySymbol: 無後綴代號 → 即時價；byResolved: 無後綴代號 → 已解析 Yahoo 尾綴。
+ */
+export async function fetchArenaLivePrices(universe: ArenaUniverseItem[]): Promise<LiveQuoteMap> {
+  const provider = registry.get('yahoo-finance')
+  if (!provider.getBatchQuotes || universe.length === 0) return { bySymbol: {}, byResolved: {} }
+
+  const resolvedList: Array<{ bare: string; yahoo: string }> = []
+  for (const item of universe) {
+    const bare = item.symbol.trim()
+    if (/^\d{4,6}/.test(bare)) resolvedList.push({ bare, yahoo: `${bare}.TW` })
+    else resolvedList.push({ bare, yahoo: bare })
+  }
+
+  const bySymbol: Record<string, number> = {}
+  const byResolved: Record<string, string> = {}
+  try {
+    const quotes = await provider.getBatchQuotes(resolvedList.map((r) => r.yahoo))
+    const priceBySym = new Map(quotes.map((q) => [q.symbol, q.price]))
+    const bareByYahoo = new Map<string, string>()
+    for (const r of resolvedList) {
+      if (!bareByYahoo.has(r.yahoo)) bareByYahoo.set(r.yahoo, r.bare)
+    }
+    for (const y of bareByYahoo.keys()) {
+      const px = priceBySym.get(y)
+      if (px && px > 0) {
+        bySymbol[bareByYahoo.get(y)!] = Math.round(px * 100) / 100
+        byResolved[bareByYahoo.get(y)!] = y
+      }
+    }
+  } catch (err) {
+    console.warn('[Arena] fetchArenaLivePrices failed:', (err as Error).message)
+  }
+  return { bySymbol, byResolved }
+}
+
 export function loadArenaConfig() {
   return loadConfig()
 }

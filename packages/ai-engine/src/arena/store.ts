@@ -72,10 +72,12 @@ export interface ArenaStore {
   getHoldings(agentId: number): Promise<ArenaHolding[]>
   replaceHoldings(agentId: number, holdings: ArenaHolding[], roundDate: string): Promise<void>
   insertTrade(record: ArenaTradeRecord): Promise<void>
+  getRoundTrades(agentId: number, roundDate: string): Promise<Array<{ slot: number | null; action: string; error?: string | null }>>
   insertSnapshot(snapshot: ArenaSnapshotRecord): Promise<void>
   advanceRound(agentId: number, roundDate: string, cash: number): Promise<void>
   saveIntradayPrices(rows: ArenaIntradayPriceRecord[]): Promise<void>
   saveMarketBriefing(roundDate: string, content: string, model?: string | null, fallbackUsed?: boolean | null): Promise<void>
+  getMarketBriefing(roundDate: string): Promise<{ content: string; fallbackUsed?: boolean | null } | null>
   insertDecisionLog(record: ArenaDecisionLogRecord): Promise<void>
   saveDiscussion(roundDate: string, content: string, model?: string | null, fallbackUsed?: boolean | null): Promise<void>
 }

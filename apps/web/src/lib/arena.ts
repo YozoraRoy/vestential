@@ -3,6 +3,7 @@ import {
   LightweightStrategist,
   buildDefaultDailyUniverse,
   fetchArenaMarket,
+  fetchArenaLivePrices,
   normalizeArenaStrategyParams,
   type ArenaHolding,
   type ArenaStore,
@@ -10,6 +11,7 @@ import {
   type ArenaUniverseItem,
   type ArenaIntradayPriceRecord,
   type ArenaDecisionLogRecord,
+  type ArenaLedgerEntry,
 } from '@stock/ai-engine'
 import {
   listActiveArenaAgents,
@@ -25,6 +27,14 @@ import {
   saveArenaDiscussion,
   ensureActiveArenaSeason,
   dbQueryFirst,
+  getArenaMarketBriefing,
+  getArenaTradesByRound,
+  getArenaRoundProgress,
+  markArenaRoundProgress,
+  clearArenaRoundProgress,
+  clearArenaPhaseArtifacts,
+  replaceArenaRoundUniverse,
+  getArenaRoundUniverse,
 } from '@stock/database'
 import type { ArenaAgentRecord, ArenaTradeRecord, ArenaSnapshotRecord } from '@stock/ai-engine'
 
@@ -101,6 +111,15 @@ export function dbArenaStore(): ArenaStore {
       })
     },
 
+    async getRoundTrades(agentId: number, roundDate: string) {
+      const rows = await getArenaTradesByRound(agentId, roundDate)
+      return rows.map((r) => ({
+        slot: r.slot ?? null,
+        action: String(r.action),
+        error: r.error ?? null,
+      }))
+    },
+
     async insertSnapshot(snapshot: ArenaSnapshotRecord): Promise<void> {
       await upsertArenaSnapshot({
         agentId: snapshot.agentId,
@@ -123,6 +142,12 @@ export function dbArenaStore(): ArenaStore {
 
     async saveMarketBriefing(roundDate: string, content: string, model?: string | null, fallbackUsed?: boolean | null): Promise<void> {
       await saveArenaMarketBriefing(roundDate, content, model, fallbackUsed)
+    },
+
+    async getMarketBriefing(roundDate: string) {
+      const row = await getArenaMarketBriefing(roundDate)
+      if (!row) return null
+      return { content: row.content, fallbackUsed: !!row.fallback_used }
     },
 
     async insertDecisionLog(record: ArenaDecisionLogRecord): Promise<void> {
@@ -169,25 +194,73 @@ export interface ArenaTickResult {
   slots?: number
   premarket?: boolean
   discussion?: boolean
+  phase?: string
+  executedSlot?: number
 }
 
 let tickGate: Promise<ArenaTickResult> | null = null
 
-/** 執行單日競技場收官（idempotent per roundDate，並發時共用同一 Promise）。 */
-export async function runArenaTick(roundDate: string): Promise<ArenaTickResult> {
-  const cached = await dbQueryFirst<{ cnt: number }>(
-    'SELECT COUNT(*) AS cnt FROM arena_equity_snapshots WHERE round_date = @roundDate',
-    { roundDate },
-  )
-  if ((cached?.cnt ?? 0) > 0) {
-    return { roundDate, alreadyRun: true, universeSize: 0, processed: 0, trades: 0, errors: [], modelCalls: 0 }
+const SLOT_MAP: Record<number, string> = { 0: 'slot0', 1: 'slot1', 2: 'slot2', 3: 'slot3', 4: 'slot4', 5: 'slot5' }
+
+/** 執行單日競技場 tick（支援分段 phase 與完整流程）。 */
+export async function runArenaTick(
+  roundDate: string,
+  opts?: { phase?: 'premarket' | 'slot' | 'close'; slot?: number; force?: boolean },
+): Promise<ArenaTickResult> {
+  const phase = opts?.phase
+  const slot = opts?.slot
+  const force = opts?.force ?? false
+
+  // ── 冪等檢查 ─────────────────────────────────────────────────
+  if (phase) {
+    const phaseKey = phase === 'slot' ? SLOT_MAP[slot ?? 0] : phase
+    if (!phaseKey) return { roundDate, alreadyRun: true, universeSize: 0, processed: 0, trades: 0, errors: ['slot index missing'], modelCalls: 0 }
+    const done = await getArenaRoundProgress(roundDate, phaseKey)
+    if (done && !force) return { roundDate, alreadyRun: true, universeSize: 0, processed: 0, trades: 0, errors: [], modelCalls: 0, phase }
+    if (force) {
+      await clearArenaPhaseArtifacts(roundDate, phase, slot)
+      await clearArenaRoundProgress(roundDate, phaseKey)
+    }
+  } else {
+    const cached = await dbQueryFirst<{ cnt: number }>(
+      'SELECT COUNT(*) AS cnt FROM arena_equity_snapshots WHERE round_date = @roundDate',
+      { roundDate },
+    )
+    if ((cached?.cnt ?? 0) > 0 && !force) return { roundDate, alreadyRun: true, universeSize: 0, processed: 0, trades: 0, errors: [], modelCalls: 0 }
   }
 
   if (tickGate) return tickGate
   tickGate = (async (): Promise<ArenaTickResult> => {
     await ensureActiveArenaSeason()
-    const universe: ArenaUniverseItem[] = await buildDefaultDailyUniverse(roundDate)
+
+    // ── 股票池：premarket 寫入，其餘讀取；fallback 動態抓取 ─────
+    let universe: ArenaUniverseItem[]
+    if (phase === 'premarket' || (!phase)) {
+      try {
+        universe = await buildDefaultDailyUniverse(roundDate)
+        await replaceArenaRoundUniverse(roundDate, universe)
+      } catch (err) {
+        universe = await buildDefaultDailyUniverse(roundDate)
+      }
+    } else {
+      const persisted = await getArenaRoundUniverse(roundDate)
+      universe = persisted.length > 0
+        ? persisted.map((r) => ({ symbol: r.symbol, name: r.name ?? r.symbol }))
+        : await buildDefaultDailyUniverse(roundDate)
+    }
+
     const { prices, history } = await fetchArenaMarket(universe, roundDate)
+
+    let liveMark: Record<string, number> | undefined
+    if (phase === 'slot') {
+      try {
+        const live = await fetchArenaLivePrices(universe)
+        liveMark = live.bySymbol
+      } catch (err) {
+        console.warn('[ArenaTick] fetchArenaLivePrices failed, fallback closes:', (err as Error).message)
+      }
+    }
+
     const result = await runArenaRound({
       store: dbArenaStore(),
       strategist: getArenaStrategist(),
@@ -196,7 +269,19 @@ export async function runArenaTick(roundDate: string): Promise<ArenaTickResult> 
       universe,
       roundDate,
       slippage: Number(process.env.ARENA_SLIPPAGE) || undefined,
+      phase,
+      slotIndex: slot,
+      liveMark,
     })
+
+    // ── 標記進度（僅分段模式）──────────────────────────────────
+    if (phase) {
+      const phaseKey = phase === 'slot' ? SLOT_MAP[slot ?? 0] : phase
+      if (phaseKey && result.errors.length === 0) {
+        await markArenaRoundProgress(roundDate, phaseKey, `processed=${result.processed} trades=${result.trades}`)
+      }
+    }
+
     return {
       alreadyRun: false,
       universeSize: universe.length,
