@@ -19,7 +19,9 @@ export async function POST(req: Request) {
 
   const kind = new URL(req.url).searchParams.get('kind') ?? 'repair'
   const before = await runHealthChecks()
-  if (before.ok) {
+  const hasRepairable =
+    before.issues.some((i) => MARKET_FOCUS_ISSUES.includes(i.code)) || shouldRepairOddLot(before)
+  if (before.ok && !hasRepairable) {
     return NextResponse.json({ success: true, needed: false, repairs: [], issues: [] })
   }
 

@@ -84,7 +84,11 @@ export async function runHealthChecks(): Promise<HealthReport> {
     if (!meta?.summary) {
       issues.push({ code: 'mf_meta_missing', severity: 'error', message: 'market_focus_meta 沒有內容(從未成功產生?每日總覽會寄信失敗)' })
     } else if (Number.isNaN(ts) || now - ts > MARKET_FOCUS_STALE_MS) {
-      issues.push({ code: 'mf_stale', severity: 'error', message: `market_focus 最後更新已超過 5 小時: ${meta.generated_at}` })
+      issues.push({
+        code: 'mf_stale',
+        severity: 'warn',
+        message: `market_focus 資料更新於 ${meta.generated_at}（已超過 5 小時未刷新；夜間或非交易時段屬正常現象，可手動刷新或等待定期排程）`,
+      })
     } else if (meta.summary.startsWith(FALLBACK_SUMMARY_PREFIX)) {
       issues.push({ code: 'mf_fallback', severity: 'warn', message: '每日總覽正在使用標題拼接 fallback(LLM 主/備援皆失敗)' })
     }

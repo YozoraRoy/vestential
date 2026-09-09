@@ -32,6 +32,16 @@ export function OverviewClient() {
   }, [])
 
   const health = status?.health
+  const hasError = health?.issues?.some((i) => i.severity === 'error') ?? false
+  const hasWarn = health?.issues?.some((i) => i.severity === 'warn') ?? false
+  const healthStatus: 'ok' | 'warn' | 'fail' | undefined = !health
+    ? undefined
+    : hasError
+      ? 'fail'
+      : hasWarn
+        ? 'warn'
+        : 'ok'
+
   return (
     <SectionPageWrapper title="後台總覽" subtitle="系統狀態・統計・今日競技場進度">
       <Card title="系統狀態">
@@ -42,7 +52,7 @@ export function OverviewClient() {
         ) : (
           <div className="space-y-4">
             <div className="flex flex-wrap gap-3 text-sm">
-              <Badge label="Health" ok={health?.ok} />
+              <Badge label="Health" status={healthStatus} />
               <Stat label="使用者" value={status.summary?.users} />
               <Stat label="競技場 Agent" value={status.summary?.agents} />
               <Stat label="市場焦點" value={status.summary?.marketFocus} />
@@ -53,8 +63,8 @@ export function OverviewClient() {
             {(health?.issues?.length ?? 0) > 0 ? (
               <ul className="text-sm space-y-1.5">
                 {health!.issues.map((i) => (
-                  <li key={i.code} className={i.severity === 'error' ? 'text-[var(--accent-red)]' : 'text-[var(--accent-violet)]'}>
-                    {i.severity === 'error' ? '⚠' : '◆'} <code>{i.code}</code> {i.message}
+                  <li key={i.code} className={i.severity === 'error' ? 'text-[var(--accent-red)]' : 'text-amber-400'}>
+                    {i.severity === 'error' ? '⚠' : '⚡'} <code>{i.code}</code> {i.message}
                   </li>
                 ))}
               </ul>
@@ -85,14 +95,29 @@ export function OverviewClient() {
   )
 }
 
-function Badge({ label, ok }: { label: string; ok?: boolean }) {
+function Badge({ label, status, ok }: { label: string; status?: 'ok' | 'warn' | 'fail'; ok?: boolean }) {
+  const actualStatus = status ?? (ok === true ? 'ok' : ok === false ? 'fail' : undefined)
+  const colorClass =
+    actualStatus === 'ok'
+      ? 'bg-[var(--accent-green)]/15 text-[var(--accent-green)]'
+      : actualStatus === 'warn'
+        ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+        : actualStatus === 'fail'
+          ? 'bg-[var(--accent-red)]/15 text-[var(--accent-red)]'
+          : 'bg-white/10 text-[var(--text-secondary)]'
+
+  const text =
+    actualStatus === 'ok'
+      ? 'OK'
+      : actualStatus === 'warn'
+        ? 'WARN'
+        : actualStatus === 'fail'
+          ? 'FAIL'
+          : '…'
+
   return (
-    <span
-      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-        ok === true ? 'bg-[var(--accent-green)]/15 text-[var(--accent-green)]' : ok === false ? 'bg-[var(--accent-red)]/15 text-[var(--accent-red)]' : 'bg-white/10 text-[var(--text-secondary)]'
-      }`}
-    >
-      {label}: {ok === true ? 'OK' : ok === false ? 'FAIL' : '…'}
+    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${colorClass}`}>
+      {label}: {text}
     </span>
   )
 }
