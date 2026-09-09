@@ -304,7 +304,7 @@ export async function fetchArticleContent(url: string): Promise<{ content: strin
 }
 
 // ─── 當日 AI 總覽 ────────────────────────────────────────────────
-const SUMMARY_SYSTEM_PROMPT = `你是 Vestential 的市場焦點主筆。請根據今日精選新聞，為投資人撰寫一份精簡、客觀、說人話的「當日市場總覽」（約 250~400 字）。
+export const SUMMARY_SYSTEM_PROMPT = `你是 Vestential 的市場焦點主筆。請根據今日精選新聞，為投資人撰寫一份精簡、客觀、說人話的「當日市場總覽」（約 250~400 字）。
 
 核心原則（參考 speak-human-tw 去 AI 味規範，嚴格執行）：
 1. 開門見山：第一句直接切入今日市場發生的核心事實或關鍵數據，嚴禁「今天的市場氛圍有點...的味道」、「在瞬息萬變的市場中」等公式化開場。
@@ -352,7 +352,7 @@ function toIsoDate(publishedAt: string): string {
   return Number.isNaN(dt.getTime()) ? '' : dt.toISOString()
 }
 
-const SYSTEM_PROMPT = `你是 Vestential(台灣股票投資資訊平台)的總編輯。Vestential 的精神是「價值投資」:重視基本面、長期累積、投資紀律、以及用簡單指標(如季線乖離)判斷市場位置。你負責為市場焦點挑選新聞。
+export const SYSTEM_PROMPT = `你是 Vestential(台灣股票投資資訊平台)的總編輯。Vestential 的精神是「價值投資」:重視基本面、長期累積、投資紀律、以及用簡單指標(如季線乖離)判斷市場位置。你負責為市場焦點挑選新聞。
 
 規則:
 1. 從候選清單中挑選「最符合價值投資精神」的 10 則。

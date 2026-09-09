@@ -3,9 +3,20 @@ import type { NextRequest } from 'next/server'
 import { listAgentSettings, setAgentSetting, getAgentSetting, migrate } from '@stock/database'
 import { isAdminUser, getCurrentUserFromReq } from '@/lib/auth'
 import { DEFAULT_AGENT_SETTINGS } from '@/lib/agent-settings'
+import { DEFAULT_SOCIAL_PROMPT, DEFAULT_MEME_PROMPT } from '@/lib/social'
+import { SYSTEM_PROMPT as MARKET_SELECT_PROMPT, SUMMARY_SYSTEM_PROMPT as MARKET_SUMMARY_PROMPT } from '@/lib/market-focus'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+/** 提供後台「看內建預設」參考：各 prompt 欄位的內建 system prompt 原文。 */
+const BUILTIN_PROMPTS: Record<string, string | undefined> = {
+  'market_focus.select_prompt': MARKET_SELECT_PROMPT,
+  'market_focus.summary_prompt': MARKET_SUMMARY_PROMPT,
+  'social.ig_prompt': DEFAULT_SOCIAL_PROMPT,
+  'social.threads_prompt': DEFAULT_SOCIAL_PROMPT,
+  'social.meme_prompt': DEFAULT_MEME_PROMPT,
+}
 
 export async function GET(req: NextRequest) {
   await migrate()
@@ -27,6 +38,7 @@ export async function GET(req: NextRequest) {
       updatedAt: existing?.updated_at ?? null,
       editable: meta.editable !== false,
       help: meta.help ?? null,
+      builtinPrompt: BUILTIN_PROMPTS[key] ?? null,
     }
   })
   // 加上 DB 中使用者自行新增、不在預設清單內的設定
@@ -40,6 +52,7 @@ export async function GET(req: NextRequest) {
         updatedAt: row.updated_at ?? null,
         editable: true,
         help: null,
+        builtinPrompt: null,
       })
     }
   }

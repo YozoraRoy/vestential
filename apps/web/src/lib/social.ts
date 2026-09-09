@@ -80,13 +80,8 @@ function toInt(v: string | undefined, fallback: number): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
-function buildSocialSystemPrompt(
-  igMax: number,
-  threadsMax: number,
-  igPromptOverride: string,
-  threadsPromptOverride: string,
-): string {
-  const base = `你是 Vestential(台灣股票投資資訊平台)的社群小編，撰寫透過 API 自動發布到 Instagram 與 Threads 的市場焦點貼文。
+function socialPromptBase(igMax: number, threadsMax: number): string {
+  return `你是 Vestential(台灣股票投資資訊平台)的社群小編，撰寫透過 API 自動發布到 Instagram 與 Threads 的市場焦點貼文。
 ${injectionGuardNote()}
 嚴守以下規則：
 1. 用繁體中文（台灣用語），全形標點，清爽不囉嗦，符合金融投資人語感。
@@ -96,6 +91,18 @@ ${injectionGuardNote()}
 5. 不要引用資料來源網址；不得編造文中沒有的事實。
 6. 只輸出 JSON，格式如下，不要輸出其他任何文字：
 {"instagram":"...","threads":"..."}`
+}
+
+/** 後台設定可參考的內建 IG/Threads 文案 System Prompt（含平台字數上限）。 */
+export const DEFAULT_SOCIAL_PROMPT = socialPromptBase(IG_MAX_CHARS, THREADS_MAX_CHARS)
+
+function buildSocialSystemPrompt(
+  igMax: number,
+  threadsMax: number,
+  igPromptOverride: string,
+  threadsPromptOverride: string,
+): string {
+  const base = socialPromptBase(igMax, threadsMax)
   const override = `${igPromptOverride}\n${threadsPromptOverride}`.trim()
   return override ? `${base}\n\n【後台覆寫指示】\n${override}` : base
 }
@@ -130,6 +137,13 @@ export interface MemeConcept {
   punchline: string
 }
 
+/** 後台設定可參考的內建梗圖 System Prompt。 */
+export const DEFAULT_MEME_PROMPT = `你是台灣股市梗圖企劃，針對今日市場寫一個「經濟/科技梗」：
+1. 主標題：像 meme 大字標題的一句話（≤18 字），要有張力。
+2. punchline：一句吐槽／反轉（≤30 字），要看得懂、好笑、不引戰。
+3. 不得編造數據與新聞內容；只輸出合法 JSON，格式：
+{"title":"...","punchline":"..."}`
+
 /**
  * 生成「經濟/科技梗」文字版概念（主標題＋一句 punchline）。
  * v1 純文字梗（v2 AI 生圖排 backlog）：梗放入圖卡大字版式。
@@ -150,11 +164,7 @@ export async function generateMemeConcept(meta: MarketFocusMeta, items: MarketFo
       .filter(Boolean)
       .join('\n')
 
-    const base = `你是台灣股市梗圖企劃，針對今日市場寫一個「經濟/科技梗」：
-1. 主標題：像 meme 大字標題的一句話（≤18 字），要有張力。
-2. punchline：一句吐槽／反轉（≤30 字），要看得懂、好笑、不引戰。
-3. 不得編造數據與新聞內容；只輸出合法 JSON，格式：
-{"title":"...","punchline":"..."}`
+    const base = DEFAULT_MEME_PROMPT
     const override = promptOverride.trim()
     const system = override ? `${base}\n\n【後台覆寫指示】\n${override}` : base
 

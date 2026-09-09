@@ -1,5 +1,8 @@
 'use client'
 
+import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+
 export type Result = { ok: boolean; message: string } | null
 
 export const btn =
@@ -35,20 +38,48 @@ export function Card({ title, children, hint }: { title: string; children: React
   )
 }
 
-/** 「?」hover tooltip。 */
+/** 「?」hover tooltip。用 portal 掛到 body，避免被 overflow-x-auto 等容器裁切。 */
 export function Help({ text }: { text: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  const show = () => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const tipW = 264
+    const left = r.right + 10 + tipW > window.innerWidth ? Math.max(8, r.left - tipW - 10) : r.right + 10
+    setPos({ top: r.top - 2, left })
+    setOpen(true)
+  }
+  const hide = () => setOpen(false)
+
   return (
-    <span className="group relative inline-flex">
+    <>
       <span
+        ref={ref}
         aria-label="說明"
-        className="flex items-center justify-center w-4 h-4 rounded-full bg-white/10 text-[var(--text-secondary)] text-[10px] cursor-help select-none"
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/10 text-[var(--text-secondary)] text-[10px] cursor-help select-none align-middle"
       >
         ?
       </span>
-      <span className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 z-20 hidden group-hover:block w-64 rounded-lg border border-white/10 bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-secondary)] shadow-xl whitespace-normal">
-        {text}
-      </span>
-    </span>
+      {open && pos
+        ? createPortal(
+            <span
+              style={{ position: 'fixed', top: pos.top, left: pos.left, width: 264, maxHeight: 220, overflowY: 'auto' }}
+              className="z-[100] rounded-lg border border-white/10 bg-[var(--bg-primary)] px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)] shadow-xl whitespace-normal"
+            >
+              {text}
+            </span>,
+            document.body,
+          )
+        : null}
+    </>
   )
 }
 
@@ -74,14 +105,30 @@ export function SectionPageWrapper({ title, subtitle, children }: { title: strin
   )
 }
 
-export const post = (url: string, body?: unknown) =>
-  fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  }).then(async (r) => ({ ok: r.ok, body: await r.json().catch(() => ({})) }))
+async function fetchJson(url: string, init: RequestInit | undefined, timeoutMs: number) {
+  try {
+    const res = await Promise.race([
+      fetch(url, init),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('請求逾時')), timeoutMs)),
+    ])
+    return { ok: res.ok, body: await res.json().catch(() => ({})) }
+  } catch (e) {
+    return { ok: false, body: { error: e instanceof Error ? e.message : '請求失敗' } }
+  }
+}
 
-export const getJson = (url: string) => fetch(url).then(async (r) => ({ ok: r.ok, body: await r.json().catch(() => ({})) }))
+export const post = (url: string, body?: unknown, timeoutMs = 30000) =>
+  fetchJson(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    },
+    timeoutMs,
+  )
+
+export const getJson = (url: string, timeoutMs = 30000) => fetchJson(url, undefined, timeoutMs)
 
 export function pct(v: number | null | undefined): string {
   if (v == null || Number.isNaN(Number(v))) return '—'

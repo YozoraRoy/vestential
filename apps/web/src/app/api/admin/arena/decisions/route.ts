@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { getArenaRoundDecisionLogs, getArenaTradesAllByRound, migrate } from '@stock/database'
+import {
+  getArenaDecisionLogs,
+  getArenaRoundDecisionLogs,
+  getArenaTradesAllByRound,
+  getArenaTradesByRound,
+  migrate,
+} from '@stock/database'
 import { isAdminUser, getCurrentUserFromReq } from '@/lib/auth'
 
 export const runtime = 'nodejs'
@@ -28,8 +34,13 @@ export async function GET(req: NextRequest) {
   const agentId = Number(req.nextUrl.searchParams.get('agent_id') || '')
   const agentIdOrNull = Number.isFinite(agentId) && agentId > 0 ? agentId : null
   try {
-    const logs = await getArenaRoundDecisionLogs(roundDate).catch(() => [] as any[])
-    const trades = await getArenaTradesAllByRound(roundDate).catch(() => [] as any[])
+    // 有 agent_id 時只撈該 agent 的決策＋成交（後台「每 Agent 決策歷程」按需載入用）
+    const logs = agentIdOrNull != null
+      ? await getArenaDecisionLogs(agentIdOrNull, roundDate).catch(() => [] as any[])
+      : await getArenaRoundDecisionLogs(roundDate).catch(() => [] as any[])
+    const trades = agentIdOrNull != null
+      ? await getArenaTradesByRound(agentIdOrNull, roundDate).catch(() => [] as any[])
+      : await getArenaTradesAllByRound(roundDate).catch(() => [] as any[])
     const phaseOptions = [...new Set(logs.map((l: any) => l.phase))]
     const perAgent: Record<number, any[]> = {}
     for (const l of logs as any[]) {

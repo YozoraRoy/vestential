@@ -69,11 +69,9 @@ interface RoundDecision {
   createdAt: string | null
 }
 
-interface DecisionData {
-  success: boolean
+interface AgentHistoryDetail {
   roundDate: string
-  phases: string[]
-  perAgent: Record<number, RoundDecision[]>
+  logs: RoundDecision[]
   trades: Array<{
     id: number
     agentId: number
@@ -90,6 +88,8 @@ interface DecisionData {
     fallbackUsed: boolean
     error: string | null
   }>
+  loading: boolean
+  error: string | null
 }
 
 const PHASE_HELP: Record<string, string> = {
@@ -102,14 +102,15 @@ export function ArenaClient() {
   const [result, setResult] = useState<Result>(null)
   const [progress, setProgress] = useState<ProgressData | null>(null)
   const [agents, setAgents] = useState<ArenaAgent[]>([])
+  const [personalityPresets, setPersonalityPresets] = useState<Array<{ id: string; nameZh: string; trait: string }>>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [edits, setEdits] = useState<Record<number, { personality: string }>>({})
   const [saveId, setSaveId] = useState<number | null>(null)
 
   const [roundDate, setRoundDate] = useState<string>('')
   const [round, setRound] = useState<RoundData | null>(null)
-  const [decisions, setDecisions] = useState<DecisionData | null>(null)
-  const [tradesByAgent, setTradesByAgent] = useState<Record<number, DecisionData['trades']>>({})
+  const [agentDetail, setAgentDetail] = useState<Record<number, AgentHistoryDetail>>({})
+  const [openHistory, setOpenHistory] = useState<Record<number, boolean>>({})
 
 interface LeaderRow {
   agent_id: number
@@ -127,26 +128,46 @@ const lbById = useMemo(() => {
   return m
 }, [progress])
 
+  const activeDate = roundDate || progress?.roundDate || ''
+
+  const loadRound = async (rd: string) => {
+    const r = await getJson(`/api/admin/arena/round?round_date=${encodeURIComponent(rd)}`)
+    if (r.ok && r.body.success) setRound(r.body)
+  }
+
+  const loadAgentHistory = async (agentId: number) => {
+    const rd = activeDate
+    if (!rd) return
+    setAgentDetail((d) => ({ ...d, [agentId]: { roundDate: rd, logs: d[agentId]?.logs ?? [], trades: d[agentId]?.trades ?? [], loading: true, error: null } }))
+    const r = await getJson(`/api/admin/arena/decisions?round_date=${encodeURIComponent(rd)}&agent_id=${agentId}`)
+    if (r.ok && r.body.success) {
+      setAgentDetail((d) => ({
+        ...d,
+        [agentId]: { roundDate: rd, logs: r.body.perAgent?.[agentId] ?? [], trades: r.body.trades ?? [], loading: false, error: null },
+      }))
+    } else {
+      setAgentDetail((d) => ({
+        ...d,
+        [agentId]: { ...(d[agentId] ?? { roundDate: rd, logs: [], trades: [] }), loading: false, error: r.body?.error ?? '載入失敗' },
+      }))
+    }
+  }
+
   const load = async (rd?: string) => {
     const date = rd ?? roundDate
-    const [p, g, r, d] = await Promise.all([
+    const [p, g] = await Promise.all([
       getJson('/api/admin/arena/progress'),
       getJson('/api/admin/arena/agents'),
-      date ? getJson(`/api/admin/arena/round?round_date=${encodeURIComponent(date)}`) : null,
-      date ? getJson(`/api/admin/arena/decisions?round_date=${encodeURIComponent(date)}`) : null,
     ])
     if (p.ok && p.body.success) {
       setProgress(p.body)
       if (!date) setRoundDate(p.body.roundDate ?? '')
     }
-    if (g.ok && g.body.success) setAgents(g.body.agents ?? [])
-    if (r && r.ok && r.body.success) setRound(r.body)
-    if (d && d.ok && d.body.success) {
-      setDecisions(d.body)
-      const byAgent: Record<number, DecisionData['trades']> = {}
-      for (const t of d.body.trades ?? []) (byAgent[t.agentId] ??= []).push(t)
-      setTradesByAgent(byAgent)
+    if (g.ok && g.body.success) {
+      setAgents(g.body.agents ?? [])
+      if (Array.isArray(g.body.personalityPresets) && g.body.personalityPresets.length > 0) setPersonalityPresets(g.body.personalityPresets)
     }
+    if (date) loadRound(date)
   }
 
   useEffect(() => {
@@ -156,17 +177,10 @@ const lbById = useMemo(() => {
 
   const pickRound = async (rd: string) => {
     setRoundDate(rd)
-    const [r, d] = await Promise.all([
-      getJson(`/api/admin/arena/round?round_date=${encodeURIComponent(rd)}`),
-      getJson(`/api/admin/arena/decisions?round_date=${encodeURIComponent(rd)}`),
-    ])
-    if (r.ok && r.body.success) setRound(r.body)
-    if (d.ok && d.body.success) {
-      setDecisions(d.body)
-      const byAgent: Record<number, DecisionData['trades']> = {}
-      for (const t of d.body.trades ?? []) (byAgent[t.agentId] ??= []).push(t)
-      setTradesByAgent(byAgent)
-    }
+    setRound(null)
+    setOpenHistory({})
+    setAgentDetail({})
+    loadRound(rd)
   }
 
   const run = async (phase: 'premarket' | 'slot' | 'close', slot?: number, force = false) => {
@@ -183,6 +197,8 @@ const lbById = useMemo(() => {
           }
         : { ok: false, message: `${phase} 失敗：${r.body?.error ?? ''}` },
     )
+    setOpenHistory({})
+    setAgentDetail({})
     await load(roundDate || undefined)
   }
 
@@ -193,7 +209,10 @@ const lbById = useMemo(() => {
     setSaveId(null)
     setResult(r.ok && r.body.success ? { ok: true, message: `已更新 agent #${id}` } : { ok: false, message: `更新失敗：${r.body?.error ?? ''}` })
     const g = await getJson('/api/admin/arena/agents')
-    if (g.ok && g.body.success) setAgents(g.body.agents ?? [])
+    if (g.ok && g.body.success) {
+      setAgents(g.body.agents ?? [])
+      if (Array.isArray(g.body.personalityPresets) && g.body.personalityPresets.length > 0) setPersonalityPresets(g.body.personalityPresets)
+    }
   }
 
   return (
@@ -307,6 +326,16 @@ const lbById = useMemo(() => {
                         </button>
                       </div>
                       <p className="mt-1 text-xs text-[var(--text-secondary)]">strategy_params：{a.strategyParams ? JSON.stringify(a.strategyParams) : '—'}</p>
+                      <details className="mt-1 text-xs text-[var(--text-secondary)]">
+                        <summary className="cursor-pointer hover:text-[var(--accent)]">內建人格預設（可直接貼 id 或自行描述）</summary>
+                        <ul className="mt-2 space-y-1.5 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                          {personalityPresets.map((p) => (
+                            <li key={p.id}>
+                              <code className="text-[var(--accent)]">{p.id}</code>＝{p.nameZh}：{p.trait}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
                     </div>
                     {a.holdings.length > 0 && (
                       <div>
@@ -395,85 +424,49 @@ const lbById = useMemo(() => {
         )}
       </Card>
 
-      <Card title="每 Agent 決策歷程" hint="decision log → 每筆交易的買賣價／股數／理由／模型／是否 fallback">
-        {!decisions ? (
+      <Card title="每 Agent 決策歷程" hint="展開任一 agent 即按需載入該輪的決策與成交明細，避免一次撈全部資料卡住頁面。">
+        {agents.length === 0 ? (
           <p className="text-sm text-[var(--text-secondary)]">載入中…</p>
-        ) : agents.length === 0 ? (
-          <p className="text-sm text-[var(--text-secondary)]">暫無 agent</p>
+        ) : !activeDate ? (
+          <p className="text-sm text-[var(--text-secondary)]">尚未建立輪次（先跑 Pre-market）</p>
         ) : (
-          <div className="space-y-5">
+          <div className="space-y-3">
             {agents.map((a) => {
-              const logs = decisions.perAgent[a.id] ?? []
-              const trades = tradesByAgent[a.id] ?? []
-              if (logs.length === 0 && trades.length === 0) {
-                return (
-                  <div key={a.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                    <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-1">{a.name}</h3>
-                    <p className="text-sm text-[var(--text-secondary)]">此輪無決策／交易紀錄</p>
-                  </div>
-                )
-              }
+              const det = agentDetail[a.id]
               return (
-                <details key={a.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-4" open={logs.length > 0}>
-                  <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)]">
+                <details
+                  key={a.id}
+                  className="rounded-xl border border-white/10 bg-white/[0.03] p-4"
+                  open={!!openHistory[a.id]}
+                  onToggle={(e) => {
+                    const isOpen = (e.target as HTMLDetailsElement).open
+                    setOpenHistory((o) => ({ ...o, [a.id]: isOpen }))
+                    if (isOpen && (!det || det.roundDate !== activeDate)) loadAgentHistory(a.id)
+                  }}
+                >
+                  <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
                     {a.name}
-                    <span className="ml-2 text-xs font-normal text-[var(--text-secondary)]">
-                      {logs.length} 筆決策・{trades.length} 筆成交
-                    </span>
+                    {det?.loading ? (
+                      <span className="text-xs font-normal text-[var(--text-secondary)]">載入中…</span>
+                    ) : det && !det.error ? (
+                      <span className="ml-auto text-xs font-normal text-[var(--text-secondary)]">
+                        {det.logs.length} 筆決策・{det.trades.length} 筆成交
+                      </span>
+                    ) : null}
                   </summary>
-                  <div className="mt-3 space-y-4 text-sm">
-                    <div>
-                      <h4 className="text-xs font-semibold text-[var(--text-secondary)] mb-2 uppercase tracking-wide">決策紀錄</h4>
-                      {logs.length === 0 ? (
-                        <p className="text-[var(--text-secondary)]">無紀錄</p>
-                      ) : (
-                        <ul className="space-y-2">
-                          {logs.map((l) => (
-                            <li key={l.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
-                              <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
-                                <code className="text-[var(--accent)]">{l.phaseName}</code>
-                                {l.fallbackUsed && <span className="text-[var(--accent-violet)]">fallback</span>}
-                                <span className="text-[var(--text-secondary)]">{l.model ?? ''}{l.createdAt ? `・${l.createdAt}` : ''}</span>
-                              </div>
-                              <pre className="whitespace-pre-wrap text-[var(--text-secondary)]">{l.content}</pre>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-semibold text-[var(--text-secondary)] mb-2 uppercase tracking-wide">成交明細</h4>
-                      {trades.length === 0 ? (
-                        <p className="text-[var(--text-secondary)]">無成交</p>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="text-left text-xs text-[var(--text-secondary)] uppercase tracking-wide">
-                                <th className="py-1 pr-3">動作</th>
-                                <th className="py-1 pr-3">標的</th>
-                                <th className="py-1 pr-3 text-right">股數</th>
-                                <th className="py-1 pr-3 text-right">價格</th>
-                                <th className="py-1 pr-3">理由</th>
-                                <th className="py-1">模型</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {trades.map((t) => (
-                                <tr key={t.id} className="border-t border-white/5">
-                                  <td className={`py-1.5 pr-3 ${t.action === 'BUY' ? 'text-[var(--accent-green)]' : t.action === 'SELL' ? 'text-[var(--accent-red)]' : ''}`}>{t.action}</td>
-                                  <td className="py-1.5 pr-3 text-[var(--text-primary)]">{t.symbolName ?? t.symbol ?? '—'}（{t.symbol ?? '—'}）</td>
-                                  <td className="py-1.5 pr-3 text-right">{t.shares ?? '—'}</td>
-                                  <td className="py-1.5 pr-3 text-right">{t.price ?? '—'}</td>
-                                  <td className="py-1.5 pr-3 text-[var(--text-secondary)]">{t.reason ?? '—'}</td>
-                                  <td className="py-1.5 text-xs text-[var(--text-secondary)]">{t.model ?? ''}{t.error ? `（${t.error}）` : ''}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
+                  <div className="mt-3">
+                    {det?.loading ? (
+                      <p className="text-sm text-[var(--text-secondary)]">載入中…</p>
+                    ) : det?.error ? (
+                      <p className="text-sm text-[var(--accent-red)]">
+                        {det.error}
+                        <button className={btnGhost + ' ml-2 !py-1'} onClick={() => loadAgentHistory(a.id)}>重試</button>
+                      </p>
+                    ) : det ? (
+                      <AgentHistoryBody logs={det.logs} trades={det.trades} />
+                    ) : (
+                      <p className="text-sm text-[var(--text-secondary)]">尚未載入（展開後自動撈取）</p>
+                    )}
                   </div>
                 </details>
               )
@@ -482,6 +475,68 @@ const lbById = useMemo(() => {
         )}
       </Card>
     </SectionPageWrapper>
+  )
+}
+
+function AgentHistoryBody({ logs, trades }: { logs: RoundDecision[]; trades: AgentHistoryDetail['trades'] }) {
+  if (logs.length === 0 && trades.length === 0) {
+    return <p className="text-sm text-[var(--text-secondary)]">此輪無決策／交易紀錄</p>
+  }
+  return (
+    <div className="space-y-4 text-sm">
+      <div>
+        <h4 className="text-xs font-semibold text-[var(--text-secondary)] mb-2 uppercase tracking-wide">決策紀錄</h4>
+        {logs.length === 0 ? (
+          <p className="text-[var(--text-secondary)]">無紀錄</p>
+        ) : (
+          <ul className="space-y-2">
+            {logs.map((l) => (
+              <li key={l.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
+                <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
+                  <code className="text-[var(--accent)]">{l.phaseName}</code>
+                  {l.fallbackUsed && <span className="text-[var(--accent-violet)]">fallback</span>}
+                  <span className="text-[var(--text-secondary)]">{l.model ?? ''}{l.createdAt ? `・${l.createdAt}` : ''}</span>
+                </div>
+                <pre className="whitespace-pre-wrap text-[var(--text-secondary)]">{l.content}</pre>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div>
+        <h4 className="text-xs font-semibold text-[var(--text-secondary)] mb-2 uppercase tracking-wide">成交明細</h4>
+        {trades.length === 0 ? (
+          <p className="text-[var(--text-secondary)]">無成交</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-[var(--text-secondary)] uppercase tracking-wide">
+                  <th className="py-1 pr-3">動作</th>
+                  <th className="py-1 pr-3">標的</th>
+                  <th className="py-1 pr-3 text-right">股數</th>
+                  <th className="py-1 pr-3 text-right">價格</th>
+                  <th className="py-1 pr-3">理由</th>
+                  <th className="py-1">模型</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((t) => (
+                  <tr key={t.id} className="border-t border-white/5">
+                    <td className={`py-1.5 pr-3 ${t.action === 'BUY' ? 'text-[var(--accent-green)]' : t.action === 'SELL' ? 'text-[var(--accent-red)]' : ''}`}>{t.action}</td>
+                    <td className="py-1.5 pr-3 text-[var(--text-primary)]">{t.symbolName ?? t.symbol ?? '—'}（{t.symbol ?? '—'}）</td>
+                    <td className="py-1.5 pr-3 text-right">{t.shares ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-right">{t.price ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-[var(--text-secondary)]">{t.reason ?? '—'}</td>
+                    <td className="py-1.5 text-xs text-[var(--text-secondary)]">{t.model ?? ''}{t.error ? `（${t.error}）` : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

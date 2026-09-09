@@ -9,6 +9,7 @@ import {
   migrate,
 } from '@stock/database'
 import { isAdminUser, getCurrentUserFromReq } from '@/lib/auth'
+import { ARENA_PERSONALITY_PRESETS } from '@stock/ai-engine'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
       }),
     )
 
-    return NextResponse.json({ success: true, seasonId, agents: enriched })
+    return NextResponse.json({ success: true, seasonId, agents: enriched, personalityPresets: ARENA_PERSONALITY_PRESETS })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e?.message ?? 'agents 查詢失敗' }, { status: 500 })
   }
