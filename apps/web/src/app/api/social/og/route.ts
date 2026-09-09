@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server'
-import { getMarketFocus, getMarketFocusMeta } from '@stock/database'
+import { getMarketFocus, getMarketFocusMeta, getSocialCardImage } from '@stock/database'
 import { renderSocialCard } from '@/lib/social-canvas'
-import { generateMemeConcept } from '@/lib/social'
+import { getFallbackMemeConcept } from '@/lib/social'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /**
  * 圖卡公開端點：依 edition（market_focus_meta.generated_at）與 style（classic | meme）
- * 從 DB 重繪對應圖卡。IG/Threads 在發布時會即時下載本 URL。
+ * 回傳圖卡。優先讀取已預先快取的快照，若無則純 Canvas 即時繪製。
+ * 嚴禁在此 GET 端點中調用 LLM（Meta 爬蟲僅等待 5~10 秒，動態 LLM 耗時過長必導致 9004 逾時）。
  * 不需授權（對 Meta 伺服器公開）。
  */
 export async function GET(req: Request) {
@@ -18,17 +19,30 @@ export async function GET(req: Request) {
     const styleParam = searchParams.get('style')?.trim()
     const style: 'classic' | 'meme' = styleParam === 'meme' ? 'meme' : 'classic'
 
+    // 1. 若指定 edition，優先讀取 DB 已存的圖卡快照（毫秒級回傳）
+    if (edition) {
+      const cachedBuf = await getSocialCardImage(edition, style).catch(() => null)
+      if (cachedBuf && cachedBuf.length > 0) {
+        return new NextResponse(new Uint8Array(cachedBuf), {
+          status: 200,
+          headers: {
+            'Content-Type': 'image/jpeg',
+            'Cache-Control': 'public, max-age=3600, immutable',
+            'Content-Length': String(cachedBuf.length),
+            'X-Content-Type-Options': 'nosniff',
+          },
+        })
+      }
+    }
+
     const meta = await getMarketFocusMeta()
     if (!meta?.summary) {
       return new Response('no data', { status: 404 })
     }
 
-    // 若指定 edition 且與目前總覽不同（舊的），仍以目前資料重繪（保相容）
+    // 2. 快照未命中時以純 Canvas 重繪（meme 使用兜底標題概念，絕不 await LLM）
     const items = await getMarketFocus(6, 2)
-    let meme = null
-    if (style === 'meme') {
-      meme = await generateMemeConcept(meta, items)
-    }
+    const meme = style === 'meme' ? getFallbackMemeConcept(items) : null
     const buf = await renderSocialCard({ meta, items }, { style, meme })
 
     return new NextResponse(new Uint8Array(buf), {

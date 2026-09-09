@@ -179,6 +179,11 @@ export async function generateMemeConcept(meta: MarketFocusMeta, items: MarketFo
   } catch (e) {
     console.error('[Social] meme concept generation failed, using fallback:', e)
   }
+  return getFallbackMemeConcept(items)
+}
+
+/** 供 OG 端點或離線快速兜底使用的梗圖概念（不調用 LLM，零延遲）。 */
+export function getFallbackMemeConcept(items: MarketFocusItem[]): MemeConcept {
   const fallbackTitle = items[0]?.title ? trimToChars(items[0].title, 18) : '今日市場焦點'
   return { title: fallbackTitle, punchline: '數據會說話，詳情上 Vestential →' }
 }

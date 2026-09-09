@@ -1,4 +1,4 @@
-import { getMarketFocusMeta, getMarketFocus, getAgentSetting } from '@stock/database'
+import { getMarketFocusMeta, getMarketFocus, getAgentSetting, saveSocialCardImage, getSocialCardImage } from '@stock/database'
 import type { SocialPostPlatform } from '@stock/database'
 import { generateSocialCaptions, generateMemeConcept, type SocialCaptions } from '@/lib/social'
 import { renderSocialCard } from '@/lib/social-canvas'
@@ -92,6 +92,28 @@ export async function triggerSocialPublish(
   // 手動發布（乾跑後選定圖卡＋改文案）：直接用指定的圖與文字；自動發布則產出文案＋og 圖。
   const contentByPlatform = manual ? options.captions! : await generateSocialCaptions(meta, items)
 
+  // 確保自動發布所需的圖卡快照皆已預先繪製並快取至 DB，避免 Meta API 抓取時動態調用 LLM 導致逾時 (9004)
+  const stylesNeeded = new Set<'classic' | 'meme'>()
+  for (const { platform } of unresolved) {
+    if (!options.imageUrls?.[platform] && !options.imageUrl) {
+      stylesNeeded.add(platform === 'instagram' ? 'meme' : 'classic')
+    }
+  }
+
+  for (const style of stylesNeeded) {
+    const existing = await getSocialCardImage(editionKey!, style).catch(() => null)
+    if (!existing) {
+      let meme = null
+      if (style === 'meme') {
+        meme = await generateMemeConcept(meta, items)
+      }
+      const buf = await renderSocialCard({ meta, items }, { style, meme })
+      await saveSocialCardImage(editionKey!, style, buf).catch((e) => {
+        console.warn(`[Social] 預先快取 ${style} 圖卡失敗:`, e)
+      })
+    }
+  }
+
   const results: SocialPublishOutcome['results'] = []
   for (const { platform } of unresolved) {
     const content = platform === 'instagram' ? contentByPlatform.instagram : contentByPlatform.threads
@@ -100,7 +122,7 @@ export async function triggerSocialPublish(
     const imageUrl =
       options.imageUrls?.[platform] ??
       options.imageUrl ??
-      buildImageUrl(editionKey!, defaultStyle)
+      buildCardImageUrl(editionKey!, defaultStyle)
 
     const res = await publishSocialPost(platform, editionKey!, content, imageUrl, false, force)
     results.push({ platform, status: res.status, error: res.error })
