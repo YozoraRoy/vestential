@@ -1,7 +1,17 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { getCurrentUserFromReq, isAdminUser } from '@/lib/auth'
-import { getArenaAgentById, updateArenaAgentConfig, setArenaAgentStatus, resetArenaAgentLedger, updateArenaAgentCash } from '@stock/database'
+import {
+  getArenaAgentById,
+  updateArenaAgentConfig,
+  setArenaAgentStatus,
+  resetArenaAgentLedger,
+  updateArenaAgentCash,
+  getArenaHoldings,
+  getArenaSnapshots,
+  getArenaTrades,
+  getArenaDecisionLogs,
+} from '@stock/database'
 import { INVESTMENT_FRAMEWORKS } from '@stock/ai-engine'
 
 export const dynamic = 'force-dynamic'
@@ -11,6 +21,31 @@ const VALID_STRATEGIES = new Set(INVESTMENT_FRAMEWORKS.map((f) => f.id))
 
 interface Params {
   params: Promise<{ id: string }>
+}
+
+export async function GET(_req: NextRequest, { params }: Params) {
+  const { id } = await params
+  const agentId = Number(id)
+  if (!Number.isInteger(agentId) || agentId <= 0) {
+    return NextResponse.json({ error: '無效的 agent id' }, { status: 400 })
+  }
+
+  const agent = await getArenaAgentById(agentId)
+  if (!agent) {
+    return NextResponse.json({ error: '找不到該 agent' }, { status: 404 })
+  }
+
+  const [holdings, snapshots, trades, decisionLogs] = await Promise.all([
+    getArenaHoldings(agent.id),
+    getArenaSnapshots(agent.id),
+    getArenaTrades(agent.id, 50),
+    getArenaDecisionLogs(agent.id),
+  ])
+
+  return NextResponse.json(
+    { agent, holdings, snapshots, trades, decisionLogs },
+    { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } },
+  )
 }
 
 async function ownerOrAdmin(req: NextRequest, agentOwnerId: number): Promise<boolean> {

@@ -19,6 +19,8 @@ import {
   X,
   MessageSquare,
   FileText,
+  Eye,
+  Bot,
 } from 'lucide-react'
 import { useI18n } from '@/i18n/LanguageProvider'
 import type { Dict } from '@/i18n/dictionaries'
@@ -117,6 +119,29 @@ interface MyData {
   decisionLogs?: DecisionLog[]
 }
 
+interface AgentDetailData {
+  agent: {
+    id: number
+    name: string
+    division: Division
+    strategy_id: string
+    tone: Tone
+    personality: string | null
+    strategy_params: string | null
+    initial_capital: number
+    cash: number
+    status: string
+    last_round_date: string | null
+    adjust_count?: number
+    is_system?: number
+    owner_name?: string | null
+  }
+  holdings: Holding[]
+  snapshots: Array<{ round_date: string; equity: number; cash: number; return_pct: number }>
+  trades: Trade[]
+  decisionLogs?: DecisionLog[]
+}
+
 const STRATEGIES: Array<{ id: string; key: keyof Dict['portfolio'] }> = [
   { id: 'buffett', key: 'strategyBuffett' },
   { id: 'growth', key: 'strategyGrowth' },
@@ -161,9 +186,43 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
   const [fMinCash, setFMinCash] = useState(10)
   const [fMaxTrades, setFMaxTrades] = useState(2)
 
-  const [timelineOpen, setTimelineOpen] = useState(false)
   const [briefingOpen, setBriefingOpen] = useState(false)
   const [discussionOpen, setDiscussionOpen] = useState(false)
+
+  // 任何 Agent 的持股與決策歷程查看狀態
+  const [detailAgentId, setDetailAgentId] = useState<number | null>(null)
+  const [detailData, setDetailData] = useState<AgentDetailData | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailTab, setDetailTab] = useState<'holdings' | 'timeline' | 'trades'>('holdings')
+
+  const openAgentDetail = async (agentId: number, defaultTab: 'holdings' | 'timeline' | 'trades' = 'holdings') => {
+    setDetailAgentId(agentId)
+    setDetailTab(defaultTab)
+    if (my?.agent?.id === agentId) {
+      setDetailData({
+        agent: my.agent,
+        holdings: my.holdings,
+        snapshots: my.snapshots,
+        trades: my.trades,
+        decisionLogs: my.decisionLogs,
+      })
+      return
+    }
+
+    setDetailLoading(true)
+    setDetailData(null)
+    try {
+      const res = await fetch(`/api/agent-arena/agents/${agentId}`)
+      const json = await res.json()
+      if (res.ok && json.agent) {
+        setDetailData(json)
+      }
+    } catch (err) {
+      console.error('Failed to fetch agent detail:', err)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
 
   const getResolvedPersonality = () => {
     if (fPersonalityType === 'custom') return fPersonalityCustom.trim()
@@ -393,7 +452,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                 {d.btnEdit}
               </button>
               <button
-                onClick={() => setTimelineOpen(true)}
+                onClick={() => openAgentDetail(my.agent!.id, 'timeline')}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-sm text-[var(--text-primary)] hover:border-[var(--accent)]/50 transition"
               >
                 <Clock className="w-4 h-4 text-[var(--accent)]" />
@@ -918,11 +977,16 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                     <th className="px-3 py-2.5 font-medium">{d.colEquity}</th>
                     <th className="px-3 py-2.5 font-medium">{d.colReturn}</th>
                     <th className="px-3 py-2.5 font-medium hidden md:table-cell">{d.colRounds}</th>
+                    <th className="px-3 py-2.5 font-medium text-right">戰況</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r, i) => (
-                    <tr key={r.agent_id} className="border-b border-white/5 last:border-0">
+                    <tr
+                      key={r.agent_id}
+                      onClick={() => openAgentDetail(r.agent_id, 'holdings')}
+                      className="border-b border-white/5 last:border-0 hover:bg-white/[0.04] cursor-pointer transition"
+                    >
                       <td className="px-3 py-2.5 text-[var(--text-secondary)]">{i + 1}</td>
                       <td className="px-3 py-2.5 font-medium text-[var(--text-primary)]">
                         {r.agent_name}
@@ -950,6 +1014,16 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                         {fmt(r.return_pct, 2)}%
                       </td>
                       <td className="px-3 py-2.5 text-[var(--text-secondary)] hidden md:table-cell">{r.rounds}</td>
+                      <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => openAgentDetail(r.agent_id, 'holdings')}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-[var(--accent)]/15 text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white transition"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>持股・歷程</span>
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -972,63 +1046,297 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
         </div>
       )}
 
-      {/* 決策時間軸 Drawer / Modal */}
-      {timelineOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-white/10 bg-[var(--bg-card)] shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 p-5">
-              <div className="flex items-center gap-2">
-                <Clock className="w-5 h-5 text-[var(--accent)]" />
-                <h3 className="text-base font-semibold text-[var(--text-primary)]">
-                  {d.timelineTitle} — {my?.agent?.name}
-                </h3>
+      {/* Agent 戰況詳情彈窗（包含目前持股、決策思考歷程與交易明細） */}
+      {detailAgentId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-2xl border border-white/10 bg-[var(--bg-card)] shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-white/10 p-4 sm:p-5 bg-[var(--bg-secondary)]/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[var(--accent)]/15 border border-[var(--accent)]/30 flex items-center justify-center text-[var(--accent)] font-bold shrink-0">
+                  {detailData?.agent ? detailData.agent.name.slice(0, 1) : <Bot className="w-5 h-5" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base sm:text-lg font-bold text-[var(--text-primary)]">
+                      {detailData?.agent?.name ?? '載入中…'}
+                    </h3>
+                    {detailData?.agent?.is_system === 1 ? (
+                      <span className="inline-flex items-center rounded-full bg-[var(--accent-violet)]/15 px-2 py-0.5 text-[11px] font-medium text-[var(--accent-violet)]">
+                        {d.systemBadge}
+                      </span>
+                    ) : detailData?.agent?.owner_name ? (
+                      <span className="inline-flex items-center rounded-full bg-white/5 px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+                        @{detailData.agent.owner_name}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)] mt-0.5 flex-wrap">
+                    <span>策略：{detailData?.agent ? strategyName(detailData.agent.strategy_id) : '—'}</span>
+                    <span>•</span>
+                    <span>風格：{detailData?.agent ? toneName(detailData.agent.tone) : '—'}</span>
+                    {detailData?.agent?.personality && (
+                      <>
+                        <span>•</span>
+                        <span className="text-[var(--accent)]">{detailData.agent.personality}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => setTimelineOpen(false)}
-                className="rounded-lg p-1.5 text-[var(--text-secondary)] hover:bg-white/5 hover:text-[var(--text-primary)]"
+                onClick={() => setDetailAgentId(null)}
+                className="rounded-lg p-1.5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-[var(--text-primary)] transition"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="overflow-y-auto p-5 space-y-4">
-              {!my?.decisionLogs || my.decisionLogs.length === 0 ? (
-                <div className="py-8 text-center text-sm text-[var(--text-secondary)]">{d.timelineEmpty}</div>
+
+            {/* Modal Body */}
+            <div className="overflow-y-auto p-4 sm:p-6 space-y-5">
+              {detailLoading && !detailData ? (
+                <div className="py-16 text-center text-sm text-[var(--text-secondary)]">
+                  <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-[var(--accent)]" />
+                  正在載入 Agent 最新持倉與決策歷程…
+                </div>
+              ) : !detailData ? (
+                <div className="py-16 text-center text-sm text-[var(--text-secondary)]">
+                  查無該 Agent 資料
+                </div>
               ) : (
-                my.decisionLogs.map((log) => {
-                  const badge =
-                    log.phase === 'premarket'
-                      ? { label: d.phasePremarket, color: 'bg-blue-500/15 text-blue-400 border-blue-500/20' }
-                      : log.phase === 'trade'
-                      ? {
-                          label: `${d.phaseTrade} ${log.slot != null ? `(Slot ${log.slot})` : ''}`,
-                          color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
-                        }
-                      : { label: d.phasePostclose, color: 'bg-purple-500/15 text-purple-400 border-purple-500/20' }
-                  return (
-                    <div key={log.id} className="rounded-xl border border-white/5 bg-[var(--bg-secondary)] p-4 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-[var(--text-secondary)]">{log.round_date}</span>
-                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${badge.color}`}>
-                            {badge.label}
-                          </span>
-                        </div>
-                        {log.model && <span className="text-[10px] text-[var(--text-secondary)] font-mono">{log.model}</span>}
-                      </div>
-                      <div className="text-xs sm:text-sm text-[var(--text-primary)] whitespace-pre-wrap leading-relaxed">
-                        {log.content}
-                      </div>
+                <>
+                  {/* 總覽指標卡 */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
+                      <span className="text-xs text-[var(--text-secondary)] block mb-1">目前總權益</span>
+                      <span className="text-sm sm:text-base font-bold font-mono text-[var(--text-primary)]">
+                        {d.currency}
+                        {fmt(
+                          detailData.snapshots?.[0]?.equity ??
+                            detailData.agent.cash + (detailData.holdings?.reduce((s, h) => s + h.shares * h.avg_cost, 0) || 0),
+                        )}
+                      </span>
                     </div>
-                  )
-                })
+                    <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
+                      <span className="text-xs text-[var(--text-secondary)] block mb-1">累計報酬率</span>
+                      {(() => {
+                        const ret =
+                          detailData.snapshots?.[0]?.return_pct ??
+                          (((detailData.agent.cash - detailData.agent.initial_capital) / detailData.agent.initial_capital) * 100)
+                        return (
+                          <span
+                            className={`text-sm sm:text-base font-bold font-mono ${
+                              ret >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'
+                            }`}
+                          >
+                            {fmt(ret, 2)}%
+                          </span>
+                        )
+                      })()}
+                    </div>
+                    <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
+                      <span className="text-xs text-[var(--text-secondary)] block mb-1">可用現金</span>
+                      <span className="text-sm sm:text-base font-bold font-mono text-[var(--text-primary)]">
+                        {d.currency}
+                        {fmt(detailData.agent.cash)}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
+                      <span className="text-xs text-[var(--text-secondary)] block mb-1">已運行輪數</span>
+                      <span className="text-sm sm:text-base font-bold font-mono text-[var(--text-primary)]">
+                        {detailData.snapshots?.length || 1} 輪
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 導航 Tabs */}
+                  <div className="flex border-b border-white/10 gap-4 text-sm font-medium">
+                    <button
+                      type="button"
+                      onClick={() => setDetailTab('holdings')}
+                      className={`pb-2.5 transition flex items-center gap-1.5 border-b-2 ${
+                        detailTab === 'holdings'
+                          ? 'border-[var(--accent)] text-[var(--accent)] font-semibold'
+                          : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                      }`}
+                    >
+                      📊 {d.holdingsTitle} ({detailData.holdings?.length ?? 0})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetailTab('timeline')}
+                      className={`pb-2.5 transition flex items-center gap-1.5 border-b-2 ${
+                        detailTab === 'timeline'
+                          ? 'border-[var(--accent)] text-[var(--accent)] font-semibold'
+                          : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                      }`}
+                    >
+                      🧠 {d.timelineTitle} ({detailData.decisionLogs?.length ?? 0})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetailTab('trades')}
+                      className={`pb-2.5 transition flex items-center gap-1.5 border-b-2 ${
+                        detailTab === 'trades'
+                          ? 'border-[var(--accent)] text-[var(--accent)] font-semibold'
+                          : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                      }`}
+                    >
+                      🔄 {d.tradesTitle} ({detailData.trades?.length ?? 0})
+                    </button>
+                  </div>
+
+                  {/* Tab 內容：目前持股 */}
+                  {detailTab === 'holdings' && (
+                    <div>
+                      {detailData.holdings.length === 0 ? (
+                        <div className="p-8 text-center rounded-xl border border-white/5 bg-[var(--bg-secondary)] space-y-1">
+                          <p className="text-sm font-medium text-[var(--text-primary)]">{d.noHoldings}</p>
+                          <p className="text-xs text-[var(--text-secondary)]">
+                            AI 目前 100% 持有現金，嚴格遵守風險原則與策略設定，耐心等待最佳價值買點。
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto rounded-xl border border-white/5">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="text-left text-xs text-[var(--text-secondary)] bg-white/[0.02] border-b border-white/5">
+                                <th className="px-3 py-2 font-medium">{d.colSymbol}</th>
+                                <th className="px-3 py-2 font-medium">名稱</th>
+                                <th className="px-3 py-2 font-medium text-right">{d.colShares}</th>
+                                <th className="px-3 py-2 font-medium text-right">{d.colCost}</th>
+                                <th className="px-3 py-2 font-medium text-right">成本總值</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/5">
+                              {detailData.holdings.map((h) => (
+                                <tr key={h.symbol} className="hover:bg-white/[0.02]">
+                                  <td className="px-3 py-2.5 font-mono font-medium text-[var(--accent)]">{h.symbol}</td>
+                                  <td className="px-3 py-2.5 text-[var(--text-primary)]">{h.symbol_name || '—'}</td>
+                                  <td className="px-3 py-2.5 text-right font-mono text-[var(--text-primary)]">{fmt(h.shares)} 股</td>
+                                  <td className="px-3 py-2.5 text-right font-mono text-[var(--text-secondary)]">
+                                    {d.currency}
+                                    {fmt(h.avg_cost, 2)}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right font-mono text-[var(--text-primary)] font-medium">
+                                    {d.currency}
+                                    {fmt(h.shares * h.avg_cost)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tab 內容：決策歷程 */}
+                  {detailTab === 'timeline' && (
+                    <div className="space-y-4">
+                      {!detailData.decisionLogs || detailData.decisionLogs.length === 0 ? (
+                        <div className="p-8 text-center rounded-xl border border-white/5 bg-[var(--bg-secondary)]">
+                          <p className="text-sm text-[var(--text-secondary)]">{d.timelineEmpty}</p>
+                        </div>
+                      ) : (
+                        detailData.decisionLogs.map((log) => {
+                          const badge =
+                            log.phase === 'premarket'
+                              ? { label: d.phasePremarket, color: 'bg-blue-500/15 text-blue-400 border-blue-500/20' }
+                              : log.phase === 'trade'
+                              ? {
+                                  label: `${d.phaseTrade} ${log.slot != null ? `(Slot ${log.slot})` : ''}`,
+                                  color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+                                }
+                              : { label: d.phasePostclose, color: 'bg-purple-500/15 text-purple-400 border-purple-500/20' }
+                          return (
+                            <div key={log.id} className="rounded-xl border border-white/5 bg-[var(--bg-secondary)] p-4 space-y-2.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-mono font-bold text-[var(--text-primary)]">{log.round_date}</span>
+                                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${badge.color}`}>
+                                    {badge.label}
+                                  </span>
+                                </div>
+                                {log.model && <span className="text-[10px] text-[var(--text-secondary)] font-mono">{log.model}</span>}
+                              </div>
+                              <div className="text-xs sm:text-sm text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap bg-black/20 p-3 rounded-lg border border-white/5 font-sans">
+                                <MarkdownText text={log.content} />
+                              </div>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tab 內容：交易紀錄 */}
+                  {detailTab === 'trades' && (
+                    <div>
+                      {detailData.trades.length === 0 ? (
+                        <div className="p-8 text-center rounded-xl border border-white/5 bg-[var(--bg-secondary)]">
+                          <p className="text-sm text-[var(--text-secondary)]">{d.noTrades}</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {detailData.trades.map((t) => (
+                            <div
+                              key={t.id}
+                              className="p-3.5 rounded-xl border border-white/5 bg-[var(--bg-secondary)] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 text-sm flex-wrap">
+                                  <span className="text-xs font-mono text-[var(--text-secondary)]">{t.round_date}</span>
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-xs font-bold ${
+                                      t.action === 'BUY'
+                                        ? 'bg-[var(--accent-green)]/15 text-[var(--accent-green)]'
+                                        : t.action === 'SELL'
+                                        ? 'bg-[var(--accent-red)]/15 text-[var(--accent-red)]'
+                                        : 'bg-white/10 text-[var(--text-secondary)]'
+                                    }`}
+                                  >
+                                    {t.action === 'BUY' ? '買進' : t.action === 'SELL' ? '賣出' : t.action}
+                                  </span>
+                                  <span className="font-semibold text-[var(--text-primary)]">
+                                    {t.symbol} {t.symbol_name || ''}
+                                  </span>
+                                  {t.shares != null && (
+                                    <span className="font-mono text-xs text-[var(--text-secondary)]">
+                                      {fmt(t.shares)} 股 @ {d.currency}
+                                      {fmt(t.price, 2)}
+                                    </span>
+                                  )}
+                                </div>
+                                {t.reason && (
+                                  <p className="text-xs text-[var(--text-secondary)] pl-2 border-l-2 border-white/10">
+                                    理由：{t.reason}
+                                  </p>
+                                )}
+                              </div>
+                              {t.shares != null && t.price != null && (
+                                <div className="text-right font-mono font-medium text-sm text-[var(--text-primary)] sm:shrink-0">
+                                  {d.currency}
+                                  {fmt(t.shares * t.price)}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
-            <div className="border-t border-white/10 p-4 text-right">
+
+            {/* Modal Footer */}
+            <div className="border-t border-white/10 p-3.5 sm:p-4 bg-[var(--bg-secondary)]/50 text-right">
               <button
                 type="button"
-                onClick={() => setTimelineOpen(false)}
-                className="px-4 py-1.5 rounded-lg border border-white/10 text-sm text-[var(--text-secondary)] hover:border-white/30 transition"
+                onClick={() => setDetailAgentId(null)}
+                className="px-4 py-2 rounded-lg bg-white/10 text-sm font-medium text-[var(--text-primary)] hover:bg-white/20 transition"
               >
                 {d.drawerClose}
               </button>
