@@ -570,11 +570,11 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
       IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'agent_settings')
       BEGIN
         CREATE TABLE agent_settings (
-          key        NVARCHAR(120) PRIMARY KEY,
-          value      NVARCHAR(MAX),
-          category   NVARCHAR(50),
-          label      NVARCHAR(200),
-          updated_at DATETIME DEFAULT GETDATE()
+          setting_key NVARCHAR(120) PRIMARY KEY,
+          value       NVARCHAR(MAX),
+          category    NVARCHAR(50),
+          label       NVARCHAR(200),
+          updated_at  DATETIME DEFAULT GETDATE()
         );
       END
     `)
@@ -3790,7 +3790,7 @@ export interface AgentSettingRow {
 /** 讀取單一 Agent 設定值；無設定時回傳 null。 */
 export async function getAgentSetting(key: string): Promise<string | null> {
   const row = await dbQueryFirst<{ value: string | null }>(
-    'SELECT value FROM agent_settings WHERE key = @key',
+    'SELECT value FROM agent_settings WHERE setting_key = @key',
     { key },
   )
   return row?.value ?? null
@@ -3800,11 +3800,13 @@ export async function getAgentSetting(key: string): Promise<string | null> {
 export function listAgentSettings(category?: string): Promise<AgentSettingRow[]> {
   if (category) {
     return dbQueryAll<AgentSettingRow>(
-      'SELECT * FROM agent_settings WHERE category = @category ORDER BY key',
+      'SELECT setting_key AS key, value, category, label, updated_at FROM agent_settings WHERE category = @category ORDER BY setting_key',
       { category },
     )
   }
-  return dbQueryAll<AgentSettingRow>('SELECT * FROM agent_settings ORDER BY category, key')
+  return dbQueryAll<AgentSettingRow>(
+    'SELECT setting_key AS key, value, category, label, updated_at FROM agent_settings ORDER BY category, setting_key',
+  )
 }
 
 /** 寫入或更新 Agent 設定；回傳是否為新增。 */
@@ -3816,18 +3818,18 @@ export async function setAgentSetting(input: {
 }): Promise<boolean> {
   const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ')
   const existing = await dbQueryFirst<{ key: string }>(
-    'SELECT key FROM agent_settings WHERE key = @key',
+    'SELECT setting_key AS key FROM agent_settings WHERE setting_key = @key',
     { key: input.key },
   )
   if (existing) {
     await dbExecute(
-      'UPDATE agent_settings SET value = @value, updated_at = @updatedAt WHERE key = @key',
+      'UPDATE agent_settings SET value = @value, updated_at = @updatedAt WHERE setting_key = @key',
       { key: input.key, value: input.value, updatedAt: nowIso() },
     )
     return false
   }
   await dbExecute(
-    `INSERT INTO agent_settings (key, value, category, label, updated_at)
+    `INSERT INTO agent_settings (setting_key, value, category, label, updated_at)
      VALUES (@key, @value, @category, @label, @updatedAt)`,
     {
       key: input.key,

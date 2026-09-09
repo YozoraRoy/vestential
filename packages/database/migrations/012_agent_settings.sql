@@ -3,7 +3,7 @@
 -- 一律 key-value；prompt / 參數可於 /admin 編輯，未設定時各 Agent 使用內建預設。
 
 CREATE TABLE IF NOT EXISTS agent_settings (
-  key TEXT PRIMARY KEY,
+  setting_key TEXT PRIMARY KEY,
   value TEXT,
   category TEXT,
   label TEXT,
