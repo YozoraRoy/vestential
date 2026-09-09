@@ -44,7 +44,24 @@ export async function triggerSocialPublish(
   const editionKey = meta.generated_at
   const items = await getMarketFocus(6, 2)
 
-  // force 重發時跳過去重，所有指定平台一律重跑；否則只處理未發布過的平台。
+  // 乾跑保持單純：不讀去重、不寫任何發布狀態，永遠照目前 meta 生成文案＋圖卡＋梗圖（供預覽）。
+  if (dryRun) {
+    const captions = await generateSocialCaptions(meta, items)
+    const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'classic') as 'classic' | 'meme'
+    const meme = cardStyle === 'meme' ? await generateMemeConcept(meta, items) : null
+    const cardBuffer = await renderSocialCard({ meta, items }, { style: cardStyle, meme })
+    return {
+      triggered: true,
+      editionKey,
+      dryRun: true,
+      results: platforms.map((p) => ({ platform: p, status: 'dry_run', error: null })),
+      captions,
+      imageDataUrl: `data:image/jpeg;base64,${cardBuffer.toString('base64')}`,
+      meme,
+    }
+  }
+
+  // 發布：去重與發布綁定。force 重發時清除去重紀錄並全部重跑；否則只處理未發布過的平台。
   const unresolved = force
     ? platforms.map((p) => ({ platform: p, posted: false }))
     : (
@@ -56,33 +73,24 @@ export async function triggerSocialPublish(
   }
 
   const captions = await generateSocialCaptions(meta, items)
-  const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'classic') as 'classic' | 'meme'
-  const meme = cardStyle === 'meme' ? await generateMemeConcept(meta, items) : null
-  const cardBuffer = await renderSocialCard({ meta, items }, { style: cardStyle, meme })
   const imageUrl = buildImageUrl(editionKey!)
 
   const results: SocialPublishOutcome['results'] = []
   for (const { platform } of unresolved) {
     const content = platform === 'instagram' ? captions.instagram : captions.threads
-    const res = await publishSocialPost(platform, editionKey!, content, imageUrl, dryRun, force)
+    const res = await publishSocialPost(platform, editionKey!, content, imageUrl, false, force)
     results.push({ platform, status: res.status, error: res.error })
   }
 
   const failed = results.filter((r) => r.status === 'failed')
-  if (failed.length > 0 && !dryRun) {
+  if (failed.length > 0) {
     await sendMarketFocusAlert(
       '社群發布部分失敗',
       `${failed.map((f) => `${f.platform}: ${f.error}`).join('\n')}\nedition: ${editionKey}`,
     )
   }
 
-  const outcome: SocialPublishOutcome = { triggered: true, editionKey, dryRun, results }
-  if (dryRun) {
-    outcome.captions = captions
-    outcome.imageDataUrl = `data:image/jpeg;base64,${cardBuffer.toString('base64')}`
-    outcome.meme = meme
-  }
-  return outcome
+  return { triggered: true, editionKey, dryRun: false, results }
 }
 
 export function buildImageUrl(editionKey: string): string {

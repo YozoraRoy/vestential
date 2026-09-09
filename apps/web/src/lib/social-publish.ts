@@ -71,6 +71,11 @@ export async function publishSocialPost(
   dryRun = false,
   force = false,
 ): Promise<PublishResult> {
+  // dry-run 純模擬：不讀去重、不寫 DB、不動 Meta API。去重（force 清理）只屬發布流程。
+  if (dryRun) {
+    return { platform, status: 'dry_run', error: null }
+  }
+
   if (await alreadyPosted(platform, editionKey)) {
     if (!force) {
       return { platform, status: 'published', error: 'duplicate edition, skipped' }
@@ -83,11 +88,6 @@ export async function publishSocialPost(
   if (!env?.accessToken) {
     await recordFailure(platform, editionKey, content, imageUrl, 'missing access token in env')
     return { platform, status: 'failed', error: 'missing access token in env' }
-  }
-
-  // dry-run 純模擬：不寫 DB、不呼叫 Meta，避免污染去重清單
-  if (dryRun) {
-    return { platform, status: 'dry_run', error: null }
   }
 
   const row = await createSocialPost({ platform, editionKey, content, imageUrl })
