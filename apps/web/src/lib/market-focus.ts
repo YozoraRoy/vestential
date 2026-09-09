@@ -237,8 +237,8 @@ function extractLongestParagraph($: ReturnType<typeof load>): string {
   return best
 }
 
-const ARTICLE_FETCH_RETRIES = 3
-const ARTICLE_FETCH_BASE_DELAY_MS = 1200
+const ARTICLE_FETCH_RETRIES = 2
+const ARTICLE_FETCH_BASE_DELAY_MS = 800
 
 /** 對短暫性失敗(網路錯誤、429/408/5xx)做重試;4xx 其他狀態不重試直接回傳。 */
 async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
@@ -268,7 +268,7 @@ export async function fetchArticleContent(url: string): Promise<{ content: strin
     const res = await fetchWithRetry(url, {
       headers: { 'user-agent': USER_AGENT },
       redirect: 'follow',
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(6000),
     })
     if (!res.ok) return { content: null, sourceUrl: url }
     const finalUrl = res.url || url
