@@ -1321,7 +1321,6 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                                     {badge.label}
                                   </span>
                                 </div>
-                                {log.model && <span className="text-[10px] text-[var(--text-secondary)] font-mono">{log.model}</span>}
                               </div>
                               <div className="text-xs sm:text-sm text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap bg-black/20 p-3 rounded-lg border border-white/5 font-sans">
                                 <MarkdownText text={log.content} />
