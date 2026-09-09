@@ -22,7 +22,7 @@ export function SocialClient() {
 
   const run = async (dryRun: boolean, force: boolean) => {
     setBusy(true)
-    const r = await post('/api/admin/social/publish', { dryRun, force })
+    const r = await post('/api/admin/social/publish', { dryRun, force }, 180000)
     setBusy(false)
     if (r.ok && r.body.success) {
       if (dryRun) {
@@ -38,7 +38,7 @@ export function SocialClient() {
         })
       }
     } else {
-      setResult({ ok: false, message: r.ok ? `失敗：${r.body?.error ?? ''}` : `HTTP ${r.ok ? 200 : 'err'}` })
+      setResult({ ok: false, message: r.body?.error ? `失敗：${r.body.error}` : (r.ok ? '失敗：未知錯誤' : '連線逾時或網路錯誤') })
     }
   }
 
