@@ -23,10 +23,11 @@ export async function GET(req: NextRequest) {
         'Content-Type': 'image/jpeg',
         'Cache-Control': edition ? 'public, max-age=3600, immutable' : 'no-store',
         'Content-Length': String(buf.length),
+        'X-Content-Type-Options': 'nosniff',
       },
     })
   } catch (e: any) {
     console.error('[API/social/card-image] Failed:', e)
-    return new Response(`load failed: ${e?.message ?? e}`, { status: 500 })
+    return new Response('Internal Server Error', { status: 500 })
   }
 }

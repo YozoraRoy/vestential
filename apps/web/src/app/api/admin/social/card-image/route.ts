@@ -31,6 +31,10 @@ export async function POST(req: NextRequest) {
     if (buf.length === 0) {
       return NextResponse.json({ success: false, error: '圖卡資料為空' }, { status: 400 })
     }
+    // 防呆限制：圖卡不應超過 5MB，避免 DB 異常膨脹
+    if (buf.length > 5 * 1024 * 1024) {
+      return NextResponse.json({ success: false, error: '圖卡檔案大小超過 5MB 限制' }, { status: 400 })
+    }
     await saveSocialCardImage(editionKey, cardStyle, buf)
     return NextResponse.json({ success: true, url: buildCardImageUrl(editionKey, cardStyle) })
   } catch (e: any) {
