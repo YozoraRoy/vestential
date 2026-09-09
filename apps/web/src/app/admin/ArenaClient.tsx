@@ -15,6 +15,7 @@ import {
   SectionPageWrapper,
   type Result,
 } from './_components'
+import { MarkdownText } from '@/components/markdown-text'
 
 // ── 型別 ───────────────────────────────────────────────────────────
 interface ProgressData {
@@ -380,7 +381,9 @@ const lbById = useMemo(() => {
               <div>
                 <h3 className="text-sm font-semibold text-[var(--accent)] mb-2">當輪簡報（briefing）</h3>
                 {round.briefing?.content ? (
-                  <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap rounded-xl border border-white/10 bg-white/5 p-4">{round.briefing.content}</p>
+                  <div className="max-h-96 overflow-y-auto rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-[var(--text-secondary)] leading-relaxed">
+                    <MarkdownText text={round.briefing.content} />
+                  </div>
                 ) : (
                   <p className="text-sm text-[var(--text-secondary)]">尚未產出（先跑 Pre-market）</p>
                 )}
@@ -388,7 +391,9 @@ const lbById = useMemo(() => {
               <div>
                 <h3 className="text-sm font-semibold text-[var(--accent)] mb-2">收盤討論（discussion）</h3>
                 {round.discussion?.content ? (
-                  <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap rounded-xl border border-white/10 bg-white/5 p-4">{round.discussion.content}</p>
+                  <div className="max-h-96 overflow-y-auto rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-[var(--text-secondary)] leading-relaxed">
+                    <MarkdownText text={round.discussion.content} />
+                  </div>
                 ) : (
                   <p className="text-sm text-[var(--text-secondary)]">尚未產出（先跑收盤結算）</p>
                 )}
@@ -491,13 +496,15 @@ function AgentHistoryBody({ logs, trades }: { logs: RoundDecision[]; trades: Age
         ) : (
           <ul className="space-y-2">
             {logs.map((l) => (
-              <li key={l.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
-                <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
-                  <code className="text-[var(--accent)]">{l.phaseName}</code>
-                  {l.fallbackUsed && <span className="text-[var(--accent-violet)]">fallback</span>}
+              <li key={l.id} className="rounded-lg border border-white/10 bg-white/5 p-3.5 space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-xs border-b border-white/5 pb-2">
+                  <code className="text-[var(--accent)] font-semibold">{l.phaseName}</code>
+                  {l.fallbackUsed && <span className="text-[var(--accent-violet)] bg-purple-500/10 px-1.5 py-0.5 rounded text-[11px]">fallback</span>}
                   <span className="text-[var(--text-secondary)]">{l.model ?? ''}{l.createdAt ? `・${l.createdAt}` : ''}</span>
                 </div>
-                <pre className="whitespace-pre-wrap text-[var(--text-secondary)]">{l.content}</pre>
+                <div className="text-sm text-[var(--text-secondary)] leading-relaxed">
+                  <MarkdownText text={l.content} />
+                </div>
               </li>
             ))}
           </ul>
