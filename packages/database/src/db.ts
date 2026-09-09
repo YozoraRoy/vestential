@@ -414,6 +414,14 @@ function getSqliteDb(): Database.Database | null {
         UNIQUE (platform, edition_key)
       );
       CREATE INDEX IF NOT EXISTS idx_social_posts_platform_created ON social_posts(platform, created_at);
+
+      CREATE TABLE IF NOT EXISTS social_card_images (
+        edition_key TEXT NOT NULL,
+        style TEXT NOT NULL,
+        image_data BLOB NOT NULL,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        PRIMARY KEY (edition_key, style)
+      );
     `)
 
     return _db
@@ -899,6 +907,17 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           CONSTRAINT uq_social_post UNIQUE (platform, edition_key)
         );
         CREATE INDEX idx_social_posts_platform_created ON social_posts(platform, created_at);
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'social_card_images')
+      BEGIN
+        CREATE TABLE social_card_images (
+          edition_key NVARCHAR(100) NOT NULL,
+          style NVARCHAR(20) NOT NULL,
+          image_data VARBINARY(MAX) NOT NULL,
+          created_at DATETIME2 DEFAULT GETDATE(),
+          CONSTRAINT pk_social_card_images PRIMARY KEY (edition_key, style)
+        );
       END
     `)
 
@@ -3782,6 +3801,31 @@ export async function deleteSocialPostByEdition(platform: string, editionKey: st
     'DELETE FROM social_posts WHERE platform = @platform AND edition_key = @editionKey',
     { platform, editionKey },
   )
+}
+
+// ─── 後台手動發布用的圖卡快照 (social_card_images) ────────────────
+// 乾跑選定、要真的發布的那張圖會以 bytes 快照存下，並由公開 /api/social/card-image
+// 提供給 IG/Threads 下載，確保發布的圖與預覽完全一致（og 動態重繪梗圖文案每次不同）。
+
+/** 儲存（覆寫）指定 edition+style 的圖卡 bytes。 */
+export async function saveSocialCardImage(editionKey: string, style: string, data: Buffer): Promise<void> {
+  await dbExecute(
+    'DELETE FROM social_card_images WHERE edition_key = @editionKey AND style = @style',
+    { editionKey, style },
+  )
+  await dbExecute(
+    'INSERT INTO social_card_images (edition_key, style, image_data) VALUES (@editionKey, @style, @imageData)',
+    { editionKey, style, imageData: data },
+  )
+}
+
+/** 讀取指定 edition+style 的圖卡 bytes（無則回傳 null）。 */
+export async function getSocialCardImage(editionKey: string, style: string): Promise<Buffer | null> {
+  const row = await dbQueryFirst<{ image_data: Buffer | null }>(
+    'SELECT image_data FROM social_card_images WHERE edition_key = @editionKey AND style = @style',
+    { editionKey, style },
+  )
+  return row?.image_data ?? null
 }
 
 // ─── 後台 Agent 設定 (agent_settings) ──────────────────────────────

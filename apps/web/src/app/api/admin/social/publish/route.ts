@@ -4,6 +4,7 @@ import { migrate } from '@stock/database'
 import { getCurrentUserFromReq, isAdminUser } from '@/lib/auth'
 import { triggerSocialPublish } from '@/lib/social-trigger'
 import type { SocialPostPlatform } from '@stock/database'
+import type { SocialCaptions } from '@/lib/social'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -15,7 +16,13 @@ export async function POST(req: NextRequest) {
   if (!user || !(await isAdminUser(user))) {
     return NextResponse.json({ error: '未登入或無管理員權限' }, { status: 401 })
   }
-  let body: { dryRun?: boolean; force?: boolean; platforms?: string[] } = {}
+  let body: {
+    dryRun?: boolean
+    force?: boolean
+    platforms?: string[]
+    imageUrl?: string | null
+    captions?: SocialCaptions
+  } = {}
   try {
     body = await req.json()
   } catch {}
@@ -27,6 +34,8 @@ export async function POST(req: NextRequest) {
       dryRun: !!body.dryRun,
       force: !!body.force,
       platforms,
+      imageUrl: body.imageUrl ?? null,
+      captions: body.captions ?? undefined,
     })
     return NextResponse.json({ success: true, ...outcome })
   } catch (e: any) {

@@ -26,6 +26,7 @@ export {
   insertArenaDecisionLog, getArenaDecisionLogs, getArenaRoundDecisionLogs,
   saveArenaDiscussion, getArenaDiscussion,
   hasSocialPosted, createSocialPost, updateSocialPost, listSocialPosts, deleteSocialPostByEdition,
+  saveSocialCardImage, getSocialCardImage,
   getAgentSetting, setAgentSetting, listAgentSettings,
   getUserUsageReport,
 } from './db.js'
