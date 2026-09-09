@@ -18,6 +18,7 @@ export interface SocialPublishOutcome {
   message?: string
   results?: { platform: SocialPostPlatform; status: string; error?: string | null }[]
   /** 僅 dryRun 時回傳：本次渲染的文案與圖卡，供後台乾跑預覽。 */
+  cardStyle?: 'classic' | 'meme'
   captions?: SocialCaptions
   imageDataUrl?: string
   meme?: { title: string; punchline: string } | null
@@ -54,6 +55,7 @@ export async function triggerSocialPublish(
       triggered: true,
       editionKey,
       dryRun: true,
+      cardStyle,
       results: platforms.map((p) => ({ platform: p, status: 'dry_run', error: null })),
       captions,
       imageDataUrl: `data:image/jpeg;base64,${cardBuffer.toString('base64')}`,

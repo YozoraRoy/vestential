@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { btn, btnGhost, Card, Help, post, ResultBanner, SectionPageWrapper, type Result } from './_components'
 
 interface DryRunResult {
   editionKey?: string | null
+  cardStyle?: 'classic' | 'meme'
   captions?: { instagram: string; threads: string }
   imageDataUrl?: string
   meme?: { title: string; punchline: string } | null
@@ -19,6 +20,16 @@ export function SocialClient() {
   const [result, setResult] = useState<Result>(null)
   const [preview, setPreview] = useState<DryRunResult | null>(null)
   const [busy, setBusy] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    if (!busy) {
+      setElapsed(0)
+      return
+    }
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [busy])
 
   const run = async (dryRun: boolean, force: boolean) => {
     setBusy(true)
@@ -48,7 +59,7 @@ export function SocialClient() {
       <Card title="操作">
         <div className="flex flex-wrap gap-3">
           <button className={btn} onClick={() => run(true, false)} disabled={busy}>
-            乾跑預覽（文案＋圖卡）
+            {busy ? '處理中…' : '乾跑預覽（文案＋圖卡）'}
           </button>
           <button className={btnGhost} onClick={() => run(false, false)} disabled={busy}>
             發布（僅未發布平台）
@@ -60,6 +71,16 @@ export function SocialClient() {
             <Help text="圖卡樣式與 max_chars 可在「Agent 設定」調整；card_style=meme 時走梗圖大字版式，會先產生梗圖概念。" />
           </div>
         </div>
+        {busy && (
+          <p className="mt-4 text-sm text-[var(--text-secondary)]">
+            ⏳ 呼叫 AI 生成文案並渲染圖卡中…（已等待 {elapsed} 秒，通常需 30~90 秒）。完成前請勿關閉頁面。
+          </p>
+        )}
+        {preview?.cardStyle === 'classic' && (
+          <p className="mt-4 text-sm text-[var(--text-secondary)]">
+            目前圖卡樣式為 classic，不會產生梗圖。到「Agent 設定」將 social.card_style 改為 meme 後，乾跑會多出梗圖概念與大字卡。
+          </p>
+        )}
         {!preview && !busy && (
           <p className="mt-4 text-sm text-[var(--text-secondary)]">尚未乾跑。按下「乾跑預覽」會產出 Instagram／Threads 文案與 1080×1080 圖卡（不發布）。</p>
         )}
