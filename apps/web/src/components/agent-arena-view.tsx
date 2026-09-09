@@ -21,6 +21,8 @@ import {
   FileText,
   Eye,
   Bot,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react'
 import { useI18n } from '@/i18n/LanguageProvider'
 import type { Dict } from '@/i18n/dictionaries'
@@ -193,9 +195,14 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
   const [detailAgentId, setDetailAgentId] = useState<number | null>(null)
   const [detailData, setDetailData] = useState<AgentDetailData | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [detailMaximized, setDetailMaximized] = useState(false)
   const [detailTab, setDetailTab] = useState<'holdings' | 'timeline' | 'trades'>('holdings')
 
-  const openAgentDetail = async (agentId: number, defaultTab: 'holdings' | 'timeline' | 'trades' = 'holdings') => {
+  const openAgentDetail = async (
+    agentId: number,
+    defaultTab: 'holdings' | 'timeline' | 'trades' = 'holdings',
+    seedRow?: LeaderboardRow,
+  ) => {
     setDetailAgentId(agentId)
     setDetailTab(defaultTab)
     if (my?.agent?.id === agentId) {
@@ -209,8 +216,33 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
       return
     }
 
+    if (seedRow) {
+      setDetailData({
+        agent: {
+          id: seedRow.agent_id,
+          name: seedRow.agent_name,
+          division: seedRow.division,
+          strategy_id: seedRow.strategy_id,
+          tone: seedRow.tone as Tone,
+          personality: null,
+          strategy_params: null,
+          initial_capital: seedRow.equity ?? 100000,
+          cash: seedRow.cash ?? 100000,
+          status: seedRow.status,
+          last_round_date: seedRow.round_date,
+          is_system: seedRow.is_system,
+          owner_name: seedRow.owner_name,
+        },
+        holdings: [],
+        snapshots: seedRow.equity != null ? [{ round_date: seedRow.round_date || '', equity: seedRow.equity, cash: seedRow.cash || 0, return_pct: seedRow.return_pct || 0 }] : [],
+        trades: [],
+        decisionLogs: [],
+      })
+    } else {
+      setDetailData(null)
+    }
+
     setDetailLoading(true)
-    setDetailData(null)
     try {
       const res = await fetch(`/api/agent-arena/agents/${agentId}`)
       const json = await res.json()
@@ -984,7 +1016,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   {rows.map((r, i) => (
                     <tr
                       key={r.agent_id}
-                      onClick={() => openAgentDetail(r.agent_id, 'holdings')}
+                      onClick={() => openAgentDetail(r.agent_id, 'holdings', r)}
                       className="border-b border-white/5 last:border-0 hover:bg-white/[0.04] cursor-pointer transition"
                     >
                       <td className="px-3 py-2.5 text-[var(--text-secondary)]">{i + 1}</td>
@@ -1017,7 +1049,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                       <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
-                          onClick={() => openAgentDetail(r.agent_id, 'holdings')}
+                          onClick={() => openAgentDetail(r.agent_id, 'holdings', r)}
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-[var(--accent)]/15 text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white transition"
                         >
                           <Eye className="w-3.5 h-3.5" />
@@ -1048,25 +1080,35 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
 
       {/* Agent 戰況詳情彈窗（包含目前持股、決策思考歷程與交易明細） */}
       {detailAgentId !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-2xl border border-white/10 bg-[var(--bg-card)] shadow-2xl overflow-hidden">
+        <div
+          className={`fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md transition-all duration-200 ${
+            detailMaximized ? 'p-0' : 'p-2 sm:p-4 md:p-6'
+          }`}
+        >
+          <div
+            className={`flex flex-col border border-white/10 bg-[var(--bg-card)] shadow-2xl transition-all duration-200 overflow-hidden ${
+              detailMaximized
+                ? 'w-screen h-screen rounded-none'
+                : 'w-full max-w-full sm:max-w-4xl lg:max-w-6xl xl:max-w-7xl 2xl:max-w-[1500px] h-[92vh] rounded-2xl'
+            }`}
+          >
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-white/10 p-4 sm:p-5 bg-[var(--bg-secondary)]/50">
-              <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between border-b border-white/10 p-4 sm:p-5 bg-[var(--bg-secondary)]/50 shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-xl bg-[var(--accent)]/15 border border-[var(--accent)]/30 flex items-center justify-center text-[var(--accent)] font-bold shrink-0">
                   {detailData?.agent ? detailData.agent.name.slice(0, 1) : <Bot className="w-5 h-5" />}
                 </div>
-                <div>
+                <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-base sm:text-lg font-bold text-[var(--text-primary)]">
+                    <h3 className="text-base sm:text-lg font-bold text-[var(--text-primary)] truncate">
                       {detailData?.agent?.name ?? '載入中…'}
                     </h3>
                     {detailData?.agent?.is_system === 1 ? (
-                      <span className="inline-flex items-center rounded-full bg-[var(--accent-violet)]/15 px-2 py-0.5 text-[11px] font-medium text-[var(--accent-violet)]">
+                      <span className="inline-flex items-center rounded-full bg-[var(--accent-violet)]/15 px-2 py-0.5 text-[11px] font-medium text-[var(--accent-violet)] shrink-0">
                         {d.systemBadge}
                       </span>
                     ) : detailData?.agent?.owner_name ? (
-                      <span className="inline-flex items-center rounded-full bg-white/5 px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+                      <span className="inline-flex items-center rounded-full bg-white/5 px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)] shrink-0">
                         @{detailData.agent.owner_name}
                       </span>
                     ) : null}
@@ -1084,17 +1126,31 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setDetailAgentId(null)}
-                className="rounded-lg p-1.5 text-[var(--text-secondary)] hover:bg-white/10 hover:text-[var(--text-primary)] transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                <button
+                  type="button"
+                  onClick={() => setDetailMaximized((v) => !v)}
+                  className="rounded-lg p-2 text-[var(--text-secondary)] hover:bg-white/10 hover:text-[var(--text-primary)] transition hidden sm:inline-flex items-center justify-center"
+                  title={detailMaximized ? '還原視窗' : '全螢幕最大化'}
+                >
+                  {detailMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDetailAgentId(null)
+                    setDetailMaximized(false)
+                  }}
+                  className="rounded-lg p-2 text-[var(--text-secondary)] hover:bg-white/10 hover:text-[var(--text-primary)] transition"
+                  title="關閉"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Body */}
-            <div className="overflow-y-auto p-4 sm:p-6 space-y-5">
+            <div className="overflow-y-auto p-4 sm:p-6 space-y-6 flex-1">
               {detailLoading && !detailData ? (
                 <div className="py-16 text-center text-sm text-[var(--text-secondary)]">
                   <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-[var(--accent)]" />
@@ -1106,6 +1162,12 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                 </div>
               ) : (
                 <>
+                  {detailLoading && (
+                    <div className="flex items-center gap-2 text-xs text-[var(--accent)] bg-[var(--accent)]/10 px-3 py-1.5 rounded-lg border border-[var(--accent)]/20 animate-pulse">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      正在更新最新即時持倉與決策紀錄…
+                    </div>
+                  )}
                   {/* 總覽指標卡 */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
@@ -1335,7 +1397,10 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
             <div className="border-t border-white/10 p-3.5 sm:p-4 bg-[var(--bg-secondary)]/50 text-right">
               <button
                 type="button"
-                onClick={() => setDetailAgentId(null)}
+                onClick={() => {
+                  setDetailAgentId(null)
+                  setDetailMaximized(false)
+                }}
                 className="px-4 py-2 rounded-lg bg-white/10 text-sm font-medium text-[var(--text-primary)] hover:bg-white/20 transition"
               >
                 {d.drawerClose}

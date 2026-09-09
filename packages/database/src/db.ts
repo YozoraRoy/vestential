@@ -958,7 +958,7 @@ export function hasDb(): boolean {
  */
 export function translateLimitForAzure(sqlStr: string): string {
   return sqlStr.replace(
-    /^\s*(SELECT\s+)(.*)\s+LIMIT\s+(\d+)\s*;?\s*$/is,
+    /^\s*(SELECT\s+)(.*)\s+LIMIT\s+(\d+|@\w+)\s*;?\s*$/is,
     (_all, select, rest, n) => `SELECT TOP (${n}) ${rest}`,
   )
 }
@@ -3061,7 +3061,8 @@ export async function insertArenaTrade(record: {
 }
 
 export function getArenaTrades(agentId: number, limit = 50): Promise<ArenaTradeRow[]> {
-  return dbQueryAll<ArenaTradeRow>('SELECT * FROM arena_trades WHERE agent_id = @agentId ORDER BY round_date DESC, id DESC LIMIT @limit', { agentId, limit })
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200))
+  return dbQueryAll<ArenaTradeRow>(`SELECT * FROM arena_trades WHERE agent_id = @agentId ORDER BY round_date DESC, id DESC LIMIT ${safeLimit}`, { agentId })
 }
 
 export async function upsertArenaSnapshot(snapshot: {

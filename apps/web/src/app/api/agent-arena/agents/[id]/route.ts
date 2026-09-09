@@ -24,28 +24,45 @@ interface Params {
 }
 
 export async function GET(_req: NextRequest, { params }: Params) {
-  const { id } = await params
-  const agentId = Number(id)
-  if (!Number.isInteger(agentId) || agentId <= 0) {
-    return NextResponse.json({ error: '無效的 agent id' }, { status: 400 })
+  try {
+    const { id } = await params
+    const agentId = Number(id)
+    if (!Number.isInteger(agentId) || agentId <= 0) {
+      return NextResponse.json({ error: '無效的 agent id' }, { status: 400 })
+    }
+
+    const agent = await getArenaAgentById(agentId)
+    if (!agent) {
+      return NextResponse.json({ error: '找不到該 agent' }, { status: 404 })
+    }
+
+    const [holdings, snapshots, trades, decisionLogs] = await Promise.all([
+      getArenaHoldings(agent.id).catch((err) => {
+        console.error('[Arena API] getArenaHoldings failed:', err)
+        return []
+      }),
+      getArenaSnapshots(agent.id).catch((err) => {
+        console.error('[Arena API] getArenaSnapshots failed:', err)
+        return []
+      }),
+      getArenaTrades(agent.id, 50).catch((err) => {
+        console.error('[Arena API] getArenaTrades failed:', err)
+        return []
+      }),
+      getArenaDecisionLogs(agent.id).catch((err) => {
+        console.error('[Arena API] getArenaDecisionLogs failed:', err)
+        return []
+      }),
+    ])
+
+    return NextResponse.json(
+      { agent, holdings, snapshots, trades, decisionLogs },
+      { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } },
+    )
+  } catch (err: any) {
+    console.error('[Arena API] GET agent detail error:', err)
+    return NextResponse.json({ error: err?.message || '取得 Agent 詳情失敗' }, { status: 500 })
   }
-
-  const agent = await getArenaAgentById(agentId)
-  if (!agent) {
-    return NextResponse.json({ error: '找不到該 agent' }, { status: 404 })
-  }
-
-  const [holdings, snapshots, trades, decisionLogs] = await Promise.all([
-    getArenaHoldings(agent.id),
-    getArenaSnapshots(agent.id),
-    getArenaTrades(agent.id, 50),
-    getArenaDecisionLogs(agent.id),
-  ])
-
-  return NextResponse.json(
-    { agent, holdings, snapshots, trades, decisionLogs },
-    { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } },
-  )
 }
 
 async function ownerOrAdmin(req: NextRequest, agentOwnerId: number): Promise<boolean> {
