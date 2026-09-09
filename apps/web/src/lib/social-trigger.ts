@@ -39,13 +39,14 @@ export async function triggerSocialPublish(
     platforms?: SocialPostPlatform[]
     force?: boolean
     imageUrl?: string | null
+    imageUrls?: Partial<Record<SocialPostPlatform, string | null>>
     captions?: SocialCaptions
   } = {},
 ): Promise<SocialPublishOutcome> {
   const dryRun = options.dryRun ?? false
   const force = options.force ?? false
   const platforms = options.platforms?.length ? options.platforms : (['instagram', 'threads'] as SocialPostPlatform[])
-  const manual = !!(options.imageUrl && options.captions)
+  const manual = !!((options.imageUrl || options.imageUrls) && options.captions)
 
   const meta = await getMarketFocusMeta()
   if (!meta?.summary) {
@@ -90,11 +91,17 @@ export async function triggerSocialPublish(
 
   // 手動發布（乾跑後選定圖卡＋改文案）：直接用指定的圖與文字；自動發布則產出文案＋og 圖。
   const contentByPlatform = manual ? options.captions! : await generateSocialCaptions(meta, items)
-  const imageUrl = manual ? options.imageUrl! : buildImageUrl(editionKey!)
 
   const results: SocialPublishOutcome['results'] = []
   for (const { platform } of unresolved) {
     const content = platform === 'instagram' ? contentByPlatform.instagram : contentByPlatform.threads
+    // IG 預設用 meme 梗圖大字卡，Threads 預設用 classic 品牌資訊卡
+    const defaultStyle: 'classic' | 'meme' = platform === 'instagram' ? 'meme' : 'classic'
+    const imageUrl =
+      options.imageUrls?.[platform] ??
+      options.imageUrl ??
+      buildImageUrl(editionKey!, defaultStyle)
+
     const res = await publishSocialPost(platform, editionKey!, content, imageUrl, false, force)
     results.push({ platform, status: res.status, error: res.error })
   }
@@ -110,8 +117,8 @@ export async function triggerSocialPublish(
   return { triggered: true, editionKey, dryRun: false, results }
 }
 
-export function buildImageUrl(editionKey: string): string {
-  return `${SITE_BASE}/api/social/og?edition=${encodeURIComponent(editionKey)}`
+export function buildImageUrl(editionKey: string, style: 'classic' | 'meme' = 'classic'): string {
+  return `${SITE_BASE}/api/social/og?edition=${encodeURIComponent(editionKey)}&style=${style}`
 }
 
 /** 手動發布用的圖卡快照 URL（乾跑後選定上傳的那張，與預覽完全一致）。 */
