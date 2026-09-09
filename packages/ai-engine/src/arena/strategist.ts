@@ -36,6 +36,8 @@ export interface ArenaDecisionContext {
   personality?: string | null
   /** 細部策略參數（已正規化 clamp）。 */
   strategyParams: ArenaStrategyParams
+  /** 全域 custom prompt 覆寫（後台 arena.system_prompt），附加在 system prompt 末尾。 */
+  customPrompt?: string | null
 }
 
 export interface ArenaDecisionResult {

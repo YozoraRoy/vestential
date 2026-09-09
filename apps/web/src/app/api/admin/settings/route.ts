@@ -25,6 +25,8 @@ export async function GET(req: NextRequest) {
       label: meta.label,
       value: existing?.value ?? meta.defaultValue,
       updatedAt: existing?.updated_at ?? null,
+      editable: meta.editable !== false,
+      help: meta.help ?? null,
     }
   })
   // 加上 DB 中使用者自行新增、不在預設清單內的設定
@@ -36,6 +38,8 @@ export async function GET(req: NextRequest) {
         label: row.label ?? row.key,
         value: row.value ?? '',
         updatedAt: row.updated_at ?? null,
+        editable: true,
+        help: null,
       })
     }
   }
@@ -56,8 +60,11 @@ export async function POST(req: NextRequest) {
   }
   const key = body.key?.trim()
   if (!key) return NextResponse.json({ success: false, error: 'key required' }, { status: 400 })
-  const value = body.value ?? ''
   const meta = DEFAULT_AGENT_SETTINGS[key]
+  if (meta && meta.editable === false) {
+    return NextResponse.json({ success: false, error: `${key} 為唯讀設定，不可修改` }, { status: 400 })
+  }
+  const value = body.value ?? ''
   await setAgentSetting({
     key,
     value,

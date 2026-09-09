@@ -25,6 +25,22 @@ function toCompact(d: Date): string {
   return `${y}${m}${day}`
 }
 
+/**
+ * 台灣時間是否尚未到「預期交易日 15:30」。
+ * TW 15:30 前收盤資料尚未公布；用於將 oddlot 缺失降為 warn。
+ * 以 UTC getter 計算（now + 8h 後讀 UTC 欄位），避免本機時區造成雙重偏移。
+ */
+function beforeTwClose(nowMs: number, expectedCompact: string): boolean {
+  const tw = new Date(nowMs + 8 * 60 * 60 * 1000)
+  const y = tw.getUTCFullYear()
+  const m = String(tw.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(tw.getUTCDate()).padStart(2, '0')
+  const compact = `${y}${m}${d}`
+  if (compact < expectedCompact) return false
+  if (compact > expectedCompact) return false
+  return tw.getUTCHours() * 60 + tw.getUTCMinutes() < 15 * 60 + 30
+}
+
 export async function runHealthChecks(): Promise<HealthReport> {
   const issues: HealthIssue[] = []
   const now = Date.now()
@@ -83,12 +99,22 @@ export async function runHealthChecks(): Promise<HealthReport> {
     const row = await dbQueryFirst<{ d: string | null }>('SELECT MAX(date) AS d FROM odd_lot_trades')
     checks.oddLot = { latestDate: row?.d ?? null, expectedDate: expected, expectedIso: formatDateIso(lastTradingDay) }
     if (!row?.d) {
-      issues.push({ code: 'oddlot_empty', severity: 'error', message: 'odd_lot_trades 完全沒有資料' })
+      const pending = beforeTwClose(now, expected)
+      issues.push({
+        code: 'oddlot_empty',
+        severity: pending ? 'warn' : 'error',
+        message: pending
+          ? `odd_lot_trades 尚無資料（今日 TW 15:30 前屬預期）`
+          : 'odd_lot_trades 完全沒有資料',
+      })
     } else if (row.d < expected) {
+      const pending = beforeTwClose(now, expected)
       issues.push({
         code: 'oddlot_stale',
-        severity: 'error',
-        message: `odd_lot 最新交易日 ${row.d} 早於最近交易日 ${expected}`,
+        severity: pending ? 'warn' : 'error',
+        message: pending
+          ? `odd_lot 最新交易日 ${row.d}，今日 ${expected} 收盤資料尚未公布（TW 15:30 前屬預期）`
+          : `odd_lot 最新交易日 ${row.d} 早於最近交易日 ${expected}`,
       })
     }
   } catch (e: any) {

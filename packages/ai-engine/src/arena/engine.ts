@@ -43,6 +43,8 @@ export interface RunArenaRoundParams {
    * 缺失 symbol 回退到 prices（日線收盤）。
    */
   liveMark?: Record<string, number>
+  /** 全域 custom prompt 覆寫（後台 arena.system_prompt），附加到每個 agent 決策 system prompt 末尾。 */
+  customPrompt?: string | null
 }
 
 export interface RunArenaRoundResult {
@@ -87,7 +89,7 @@ function entryText(e: ArenaLedgerEntry): string {
 }
 
 export async function runArenaRound(params: RunArenaRoundParams): Promise<RunArenaRoundResult> {
-  const { store, strategist, prices, history, universe, roundDate, agentIds, slippage, phase, slotIndex, liveMark } = params
+  const { store, strategist, prices, history, universe, roundDate, agentIds, slippage, phase, slotIndex, liveMark, customPrompt } = params
   const errors: string[] = []
   let trades = 0
   let modelCalls = 0
@@ -267,6 +269,7 @@ export async function runArenaRound(params: RunArenaRoundParams): Promise<RunAre
         briefing: briefingText ?? undefined,
         personality: agent.personality,
         strategyParams: agent.strategyParams,
+        customPrompt,
       }
       let decision: import('./types.js').ArenaDecision
       let model: string | undefined
@@ -341,6 +344,7 @@ export async function runArenaRound(params: RunArenaRoundParams): Promise<RunAre
       briefing: briefingText ?? undefined,
       personality: agent.personality,
       strategyParams: agent.strategyParams,
+      customPrompt,
     })
 
     for (let slot = 0; slot < numSlots; slot++) {
@@ -395,6 +399,7 @@ export async function runArenaRound(params: RunArenaRoundParams): Promise<RunAre
         briefing: briefingText ?? undefined,
         personality: agent.personality,
         strategyParams: agent.strategyParams,
+        customPrompt,
       }
       let decision: import('./types.js').ArenaDecision
       let model: string | undefined

@@ -37,9 +37,17 @@ export interface SocialCardData {
   items: MarketFocusItem[]
 }
 
+export interface SocialCardOptions {
+  /** classic＝品牌資訊卡；meme＝梗圖大字版式。 */
+  style?: 'classic' | 'meme'
+  /** style=meme 時的梗圖內容。 */
+  meme?: { title: string; punchline: string } | null
+}
+
 /** 依市場焦點總覽與新聞生成 1080×1080 PNG buffer。 */
-export async function renderSocialCard(data: SocialCardData): Promise<Buffer> {
+export async function renderSocialCard(data: SocialCardData, opts: SocialCardOptions = {}): Promise<Buffer> {
   ensureFont()
+  const style = opts.style ?? 'classic'
   const canvas = createCanvas(CARD_W, CARD_H)
   const ctx = canvas.getContext('2d')
 
@@ -69,12 +77,24 @@ export async function renderSocialCard(data: SocialCardData): Promise<Buffer> {
   ctx.textAlign = 'right'
   ctx.fillText(dateStr.slice(0, 10), CARD_W - 72, 96)
 
+  const maxWidth = CARD_W - 144
+
+  if (style === 'meme' && opts.meme) {
+    renderMeme(ctx, opts.meme, maxWidth, CARD_H)
+  } else {
+    renderClassic(ctx, data, maxWidth)
+  }
+
+  // IG 只接受 JPEG; Threads 亦支援 JPEG。以高品質 JPEG 輸出。
+  return canvas.toBuffer('image/jpeg', 92)
+}
+
+function renderClassic(ctx: any, data: SocialCardData, maxWidth: number) {
   // ── 主標題（auto-wrap，最多 3 行）─────────────────────────────
   const headline = data.items[0]?.title ?? data.meta.summary ?? '今日市場焦點'
   ctx.textAlign = 'left'
   ctx.font = `700 58px "${FONT_NAME}"`
   ctx.fillStyle = '#ffffff'
-  const maxWidth = CARD_W - 144
   const lines = wrapText(ctx, headline, maxWidth, 3)
   let y = 220
   const lineH = 78
@@ -95,7 +115,45 @@ export async function renderSocialCard(data: SocialCardData): Promise<Buffer> {
     y += summaryLineH
   }
 
-  // ── 梗圖式 CTA 底列：導流網址 ─────────────────────────────────
+  drawCtaBottom(ctx)
+}
+
+function renderMeme(ctx: any, meme: { title: string; punchline: string }, maxWidth: number, CARD_H: number) {
+  // ── 梗：左上繞大的逗趣小徽章 ─────────────────────────────────
+  ctx.save()
+  ctx.translate(96, 170)
+  ctx.font = `700 32px "${FONT_NAME}"`
+  ctx.fillStyle = '#22c55e'
+  ctx.rotate(-Math.PI / 22)
+  ctx.fillText('MEME', 0, 0)
+  ctx.restore()
+
+  // ── 主標題：極大字，auto-wrap 最多 3 行 ──────────────────────
+  ctx.textAlign = 'left'
+  ctx.font = `700 84px "${FONT_NAME}"`
+  ctx.fillStyle = '#ffffff'
+  const lines = wrapText(ctx, meme.title, maxWidth, 3)
+  let y = 360
+  const lineH = 112
+  for (const line of lines) {
+    ctx.fillText(line, 72, y)
+    y += lineH
+  }
+
+  // ── punchline ───────────────────────────────────────────────
+  ctx.font = `400 48px "${FONT_NAME}"`
+  ctx.fillStyle = '#22c55e'
+  const punch = wrapText(ctx, meme.punchline, maxWidth, 2)
+  y += 36
+  for (const line of punch) {
+    ctx.fillText(line, 72, y)
+    y += 64
+  }
+
+  drawCtaBottom(ctx)
+}
+
+function drawCtaBottom(ctx: any) {
   const ctaX = 72
   const ctaY = CARD_H - 196
   const ctaW = CARD_W - 144
@@ -120,9 +178,6 @@ export async function renderSocialCard(data: SocialCardData): Promise<Buffer> {
   ctx.font = `400 26px "${FONT_NAME}"`
   ctx.fillStyle = '#6b7280'
   ctx.fillText('Vestential 市場焦點 · 價值投資陪你透過數據看台灣股市', 72, CARD_H - 60)
-
-  // IG 只接受 JPEG; Threads 亦支援 JPEG。以高品質 JPEG 輸出。
-  return canvas.toBuffer('image/jpeg', 92)
 }
 
 /** 依 UTF-8 斷詞做換行（對中文逐字斷行防止中文標點被切），超過 maxLines 以 … 收尾。 */

@@ -22,7 +22,7 @@ export {
   saveArenaMarketBriefing, getArenaMarketBriefing,
   getArenaRoundProgress, listArenaRoundProgress, markArenaRoundProgress, clearArenaRoundProgress,
   replaceArenaRoundUniverse, getArenaRoundUniverse, clearArenaPhaseArtifacts,
-  getArenaTradesByRound,
+  getArenaTradesByRound, getArenaTradesAllByRound,
   insertArenaDecisionLog, getArenaDecisionLogs, getArenaRoundDecisionLogs,
   saveArenaDiscussion, getArenaDiscussion,
   hasSocialPosted, createSocialPost, updateSocialPost, listSocialPosts, deleteSocialPostByEdition,

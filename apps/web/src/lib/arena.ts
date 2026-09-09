@@ -35,6 +35,7 @@ import {
   clearArenaPhaseArtifacts,
   replaceArenaRoundUniverse,
   getArenaRoundUniverse,
+  getAgentSetting,
 } from '@stock/database'
 import type { ArenaAgentRecord, ArenaTradeRecord, ArenaSnapshotRecord } from '@stock/ai-engine'
 
@@ -272,6 +273,7 @@ export async function runArenaTick(
       phase,
       slotIndex: slot,
       liveMark,
+      customPrompt: ((await getAgentSetting('arena.system_prompt').catch(() => null)) ?? '') || null,
     })
 
     // ── 標記進度（僅分段模式）──────────────────────────────────

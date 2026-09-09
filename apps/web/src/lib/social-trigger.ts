@@ -1,6 +1,6 @@
-import { getMarketFocusMeta, getMarketFocus } from '@stock/database'
+import { getMarketFocusMeta, getMarketFocus, getAgentSetting } from '@stock/database'
 import type { SocialPostPlatform } from '@stock/database'
-import { generateSocialCaptions } from '@/lib/social'
+import { generateSocialCaptions, generateMemeConcept, type SocialCaptions } from '@/lib/social'
 import { renderSocialCard } from '@/lib/social-canvas'
 import { publishSocialPost, alreadyPosted } from '@/lib/social-publish'
 import { sendMarketFocusAlert } from '@/lib/email'
@@ -17,6 +17,10 @@ export interface SocialPublishOutcome {
   dryRun?: boolean
   message?: string
   results?: { platform: SocialPostPlatform; status: string; error?: string | null }[]
+  /** 僅 dryRun 時回傳：本次渲染的文案與圖卡，供後台乾跑預覽。 */
+  captions?: SocialCaptions
+  imageDataUrl?: string
+  meme?: { title: string; punchline: string } | null
   error?: string
 }
 
@@ -52,7 +56,9 @@ export async function triggerSocialPublish(
   }
 
   const captions = await generateSocialCaptions(meta, items)
-  await renderSocialCard({ meta, items })
+  const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'classic') as 'classic' | 'meme'
+  const meme = cardStyle === 'meme' ? await generateMemeConcept(meta, items) : null
+  const cardBuffer = await renderSocialCard({ meta, items }, { style: cardStyle, meme })
   const imageUrl = buildImageUrl(editionKey!)
 
   const results: SocialPublishOutcome['results'] = []
@@ -70,7 +76,13 @@ export async function triggerSocialPublish(
     )
   }
 
-  return { triggered: true, editionKey, dryRun, results }
+  const outcome: SocialPublishOutcome = { triggered: true, editionKey, dryRun, results }
+  if (dryRun) {
+    outcome.captions = captions
+    outcome.imageDataUrl = `data:image/jpeg;base64,${cardBuffer.toString('base64')}`
+    outcome.meme = meme
+  }
+  return outcome
 }
 
 export function buildImageUrl(editionKey: string): string {

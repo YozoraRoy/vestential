@@ -125,6 +125,54 @@ export function buildFallbackCaptions(meta: MarketFocusMeta, items: MarketFocusI
   }
 }
 
+export interface MemeConcept {
+  title: string
+  punchline: string
+}
+
+/**
+ * 生成「經濟/科技梗」文字版概念（主標題＋一句 punchline）。
+ * v1 純文字梗（v2 AI 生圖排 backlog）：梗放入圖卡大字版式。
+ * LLM 失敗時以首則新聞標題作主標題兜底。
+ */
+export async function generateMemeConcept(meta: MarketFocusMeta, items: MarketFocusItem[]): Promise<MemeConcept | null> {
+  const promptOverride = (await getAgentSetting('social.meme_prompt').catch(() => null)) ?? ''
+  try {
+    const config = loadConfig()
+    const { llm } = createQuickLLM(config, { maxTokens: 500 })
+    const dateStr = meta.generated_at ? sanitizeDataField(meta.generated_at, 40) : ''
+    const summary = meta.summary ? sanitizeDataField(meta.summary, 800) : ''
+    const top = items
+      .slice(0, 6)
+      .map((it, i) => `${i + 1}. ${sanitizeDataField(it.title ?? '', 120)}`)
+      .join('\n')
+    const userPrompt = [dataBlock('date', dateStr, 40), dataBlock('overview', summary, 800), dataBlock('news', top, 1200)]
+      .filter(Boolean)
+      .join('\n')
+
+    const base = `你是台灣股市梗圖企劃，針對今日市場寫一個「經濟/科技梗」：
+1. 主標題：像 meme 大字標題的一句話（≤18 字），要有張力。
+2. punchline：一句吐槽／反轉（≤30 字），要看得懂、好笑、不引戰。
+3. 不得編造數據與新聞內容；只輸出合法 JSON，格式：
+{"title":"...","punchline":"..."}`
+    const override = promptOverride.trim()
+    const system = override ? `${base}\n\n【後台覆寫指示】\n${override}` : base
+
+    const raw = await llm.generate(system, `${userPrompt}\n\n請寫梗圖。`)
+    const parsed = JSON.parse(raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()) as {
+      title?: string
+      punchline?: string
+    }
+    const title = typeof parsed?.title === 'string' ? parsed.title.trim() : ''
+    const punchline = typeof parsed?.punchline === 'string' ? parsed.punchline.trim() : ''
+    if (title) return { title: trimToChars(title, 18), punchline: trimToChars(punchline, 30) }
+  } catch (e) {
+    console.error('[Social] meme concept generation failed, using fallback:', e)
+  }
+  const fallbackTitle = items[0]?.title ? trimToChars(items[0].title, 18) : '今日市場焦點'
+  return { title: fallbackTitle, punchline: '數據會說話，詳情上 Vestential →' }
+}
+
 function trimToChars(text: string, max: number): string {
   return Array.from(text).slice(0, max).join('')
 }

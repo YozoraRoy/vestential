@@ -3526,6 +3526,13 @@ export function getArenaTradesByRound(agentId: number, roundDate: string): Promi
   )
 }
 
+export function getArenaTradesAllByRound(roundDate: string): Promise<ArenaTradeRow[]> {
+  return dbQueryAll<ArenaTradeRow>(
+    'SELECT * FROM arena_trades WHERE round_date = @roundDate ORDER BY agent_id ASC, slot ASC, id ASC',
+    { roundDate },
+  )
+}
+
 // ── 決策時間軸記錄 (arena_decision_logs) ──────────────────────
 export async function insertArenaDecisionLog(record: {
   agentId: number
@@ -3862,8 +3869,8 @@ export async function getUserUsageReport(): Promise<UserUsageReportRow[]> {
        u.display_name AS displayName,
        u.email AS email,
        u.created_at AS createdAt,
-       (SELECT COUNT(*) FROM api_usage a WHERE a.user_id = u.id) AS apiUsageCount,
-       (SELECT COUNT(*) FROM recognition_usage r WHERE r.user_id = u.id) AS recognitionCount,
+       (SELECT COALESCE(SUM(a.count), 0) FROM api_usage a WHERE a.user_id = u.id) AS apiUsageCount,
+       (SELECT COALESCE(SUM(r.count), 0) FROM recognition_usage r WHERE r.user_id = u.id) AS recognitionCount,
        (SELECT COUNT(*) FROM arena_agents aa WHERE aa.owner_user_id = u.id) AS arenaAgentCount
      FROM users u
      ORDER BY u.id DESC`,
