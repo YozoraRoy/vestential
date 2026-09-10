@@ -1,7 +1,7 @@
 import { revalidateTag } from 'next/cache'
 import type { MarketFocusItem } from '@stock/database'
 import { getMarketFocusMeta } from '@stock/database'
-import { refreshMarketFocus, previewMarketFocus } from '@/lib/market-focus'
+import { refreshMarketFocusDetailed, previewMarketFocus } from '@/lib/market-focus'
 import { sendMarketFocusAlert, sendMarketFocusSummary, isSummaryFallback } from '@/lib/email'
 import { triggerSocialPublish } from '@/lib/social-trigger'
 import type { SocialPostPlatform } from '@stock/database'
@@ -122,32 +122,38 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
       job.summary = summary
       job.count = items.length
     } else {
-      const items = await refreshMarketFocus()
+      const { enriched: items, summary, hasNewEdition, newCount } = await refreshMarketFocusDetailed()
       revalidateTag('market-focus')
       job.count = items.length
       const meta = await getMarketFocusMeta()
       job.editionKey = meta?.generated_at ?? null
       job.timestamp = new Date().toISOString()
+      job.summary = summary
+      job.items = items.map((it: MarketFocusItem) => ({ title: it.title, source: it.source, reason: it.reason }))
 
-      // Email：回退偵測同原流程
-      try {
-        if (meta?.summary && isSummaryFallback(meta.summary)) {
-          await sendMarketFocusAlert('LLM 每日總覽回退', '主模型與備援皆失敗,每日總覽以新聞標題拼接呈現。')
-        } else {
-          await sendMarketFocusSummary()
-        }
-      } catch (e: any) {
-        console.error('[MarketFocusJob] email dispatch error:', e)
-      }
-
-      // 社群：refresh 必發；publish 依勾選
-      if (job.kind === 'refresh' || job.alsoSocial) {
+      if (!hasNewEdition) {
+        console.log(`[MarketFocusJob] 無新重大新聞通過門檻（新增: ${newCount} 則），保留上一版總覽，略過 Email 與社群發布。`)
+      } else {
+        // Email：回退偵測同原流程
         try {
-          const social = await triggerSocialPublish()
-          job.socialResults = social?.results ?? []
+          if (meta?.summary && isSummaryFallback(meta.summary)) {
+            await sendMarketFocusAlert('LLM 每日總覽回退', '主模型與備援皆失敗,每日總覽以新聞標題拼接呈現。')
+          } else {
+            await sendMarketFocusSummary(job.editionKey ?? undefined)
+          }
         } catch (e: any) {
-          console.error('[MarketFocusJob] social publish error:', e)
-          job.socialResults = [{ platform: 'instagram', status: 'failed', error: e?.message ?? String(e) }]
+          console.error('[MarketFocusJob] email dispatch error:', e)
+        }
+
+        // 社群：refresh 必發；publish 依勾選
+        if (job.kind === 'refresh' || job.alsoSocial) {
+          try {
+            const social = await triggerSocialPublish()
+            job.socialResults = social?.results ?? []
+          } catch (e: any) {
+            console.error('[MarketFocusJob] social publish error:', e)
+            job.socialResults = [{ platform: 'instagram', status: 'failed', error: e?.message ?? String(e) }]
+          }
         }
       }
     }

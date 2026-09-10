@@ -3,7 +3,7 @@ import { createQuickLLM } from '@stock/ai-engine'
 import { loadConfig } from '@stock/core'
 import { getAgentSetting } from '@stock/database'
 import type { MarketFocusItem } from '@stock/database'
-import { saveMarketFocus, saveMarketFocusMeta } from '@stock/database'
+import { saveMarketFocus, saveMarketFocusMeta, getMarketFocus, getMarketFocusMeta } from '@stock/database'
 
 // ─── 候選新聞來源設定 (多來源聚合池) ─────────────────────────────
 // 1. 鉅亨網 (Anue Cnyes)：台股、外匯、頭條
@@ -472,10 +472,22 @@ export async function generateArticleSummaries(
   }
 }
 
+export interface MarketFocusPipelineResult {
+  enriched: MarketFocusItem[]
+  summary: string
+  hasNewEdition: boolean
+  newCount: number
+}
+
 /** 抓取候選新聞 (多來源聚合池) → 保留近 2 天且依發布時間新到舊排序 → AI 過濾 → 並行爬全文 → AI 逐則摘要與當日總覽 → 寫入 DB。回傳儲存後的清單。 */
 export async function refreshMarketFocus(): Promise<MarketFocusItem[]> {
   const { enriched } = await runMarketFocusPipeline(false)
   return enriched
+}
+
+/** 完整版市場焦點刷新：回傳新聞清單、總覽與是否真正產生新版版次 (hasNewEdition)。 */
+export async function refreshMarketFocusDetailed(): Promise<MarketFocusPipelineResult> {
+  return runMarketFocusPipeline(false)
 }
 
 /**
@@ -490,7 +502,7 @@ export async function previewMarketFocus(): Promise<{
   return { items: enriched, summary }
 }
 
-async function runMarketFocusPipeline(dryRun: boolean): Promise<{ enriched: MarketFocusItem[]; summary: string }> {
+async function runMarketFocusPipeline(dryRun: boolean): Promise<MarketFocusPipelineResult> {
   const candidates = await fetchMultiSourceCandidates()
 
   const now = Date.now()
@@ -505,6 +517,33 @@ async function runMarketFocusPipeline(dryRun: boolean): Promise<{ enriched: Mark
     .map((it) => ({ ...it, published_at: it.published_at ? toIsoDate(it.published_at) : '' }))
     .sort((a, b) => b.published_at.localeCompare(a.published_at))
     .slice(0, 12)
+
+  // 檢查資料庫中現存的焦點新聞（近 3 天）
+  const existing = await getMarketFocus(20, 3).catch(() => [])
+  const existingUrls = new Set(existing.map((x) => (x.url || '').trim().toLowerCase()))
+  const existingTitles = new Set(existing.map((x) => (x.title || '').trim().toLowerCase()))
+
+  // 計算篩選出的新聞中有幾則是未曾收錄過的新重大新聞
+  const newSignificantItems = items.filter(
+    (it) => !existingUrls.has(it.url.trim().toLowerCase()) && !existingTitles.has(it.title.trim().toLowerCase()),
+  )
+
+  // 門檻：若完全沒有新聞通過 AI 門檻，或者通過的新聞全為舊新聞（且非首次運行），代表市場無新重大事件
+  const hasNewEdition = items.length > 0 && (existing.length === 0 || newSignificantItems.length > 0)
+
+  // 若無新重大新聞且非乾跑預覽：保留現有總覽，不產生新版次（不覆蓋 meta、不寄信、不發文）
+  if (!hasNewEdition && !dryRun) {
+    console.log(
+      `[MarketFocus] 通過門檻的新聞皆已收錄過（新重大新聞: 0 則），保留上一版總覽，不產生新版次`,
+    )
+    const existingMeta = await getMarketFocusMeta()
+    return {
+      enriched: existing.length > 0 ? existing : items,
+      summary: existingMeta?.summary || '',
+      hasNewEdition: false,
+      newCount: 0,
+    }
+  }
 
   const crawled = await Promise.allSettled(items.map((it) => fetchArticleContent(it.url)))
   const enriched: MarketFocusItem[] = items.map((it, i) => ({
@@ -527,5 +566,5 @@ async function runMarketFocusPipeline(dryRun: boolean): Promise<{ enriched: Mark
     await saveMarketFocus(enriched)
     await saveMarketFocusMeta({ summary, generatedAt: new Date().toISOString() })
   }
-  return { enriched, summary }
+  return { enriched, summary, hasNewEdition: true, newCount: newSignificantItems.length }
 }

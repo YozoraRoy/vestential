@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer'
 import type { MarketFocusItem, MarketFocusMeta } from '@stock/database'
-import { getMarketFocus, getMarketFocusMeta, listActiveMarketFocusSubscribers } from '@stock/database'
+import { getMarketFocus, getMarketFocusMeta, listActiveMarketFocusSubscribers, getAgentSetting, setAgentSetting } from '@stock/database'
 
 export const FALLBACK_SUMMARY_PREFIX = '當日市場焦點：'
 
@@ -317,12 +317,22 @@ ${confirmUrl}
   return sendMailCore(subject, text, html, email)
 }
 
-export async function sendMarketFocusSummary(): Promise<boolean> {
+export async function sendMarketFocusSummary(forcedEditionKey?: string, force = false): Promise<boolean> {
   const [meta, items] = await Promise.all([getMarketFocusMeta(), getMarketFocus(6, 2)])
   if (!meta?.summary) {
     console.warn('[Notify] market_focus_meta 無內容,略過寄送')
     return false
   }
+
+  const editionKey = forcedEditionKey || meta.generated_at
+  if (!force && editionKey) {
+    const lastSent = await getAgentSetting('email.last_sent_edition').catch(() => null)
+    if (lastSent === editionKey) {
+      console.log(`[Notify] editionKey ${editionKey} 已寄送過電子報，略過重複寄送（防洗版保護）`)
+      return false
+    }
+  }
+
   const dateStr = formatTwDate(meta.generated_at ?? new Date().toISOString())
   const subject = `📬 今日市場焦點 (Vestential) — ${dateStr}（近 2 天重點精選）`
 
@@ -348,6 +358,18 @@ export async function sendMarketFocusSummary(): Promise<boolean> {
   if (subscribers.length > 0) {
     console.log(`[Notify] 電子報已寄出 ${sentTo}/${subscribers.length} 位訂閱者`)
   }
+
+  if (editionKey) {
+    await setAgentSetting({
+      key: 'email.last_sent_edition',
+      value: editionKey,
+      category: 'email',
+      label: '最後寄送之電子報版本',
+    }).catch((e) => {
+      console.warn('[Notify] 記錄 email.last_sent_edition 失敗:', e)
+    })
+  }
+
   return adminOk
 }
 
