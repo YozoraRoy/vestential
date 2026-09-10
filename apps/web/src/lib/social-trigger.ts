@@ -2,6 +2,7 @@ import { getMarketFocusMeta, getMarketFocus, getAgentSetting, saveSocialCardImag
 import type { SocialPostPlatform } from '@stock/database'
 import { generateSocialCaptions, generateMemeConcept, type SocialCaptions } from '@/lib/social'
 import { renderSocialCard } from '@/lib/social-canvas'
+import { generateSocialBackgroundImage } from '@/lib/social-ai-image'
 import { publishSocialPost, alreadyPosted } from '@/lib/social-publish'
 import { sendMarketFocusAlert } from '@/lib/email'
 
@@ -58,13 +59,16 @@ export async function triggerSocialPublish(
 
   // 乾跑保持單純：不讀去重、不寫任何發布狀態。固定產生 classic＋meme 兩版圖卡供選。
   if (dryRun) {
-    const captions = await generateSocialCaptions(meta, items)
+    const [captions, meme, bgImage] = await Promise.all([
+      generateSocialCaptions(meta, items),
+      generateMemeConcept(meta, items),
+      generateSocialBackgroundImage({ headline: items[0]?.title, summary: meta.summary, items }).catch(() => null),
+    ])
     const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'classic') as 'classic' | 'meme'
-    const meme = await generateMemeConcept(meta, items)
     const toDataUrl = (buf: Buffer) => `data:image/jpeg;base64,${buf.toString('base64')}`
     const [classicBuf, memeBuf] = await Promise.all([
-      renderSocialCard({ meta, items }, { style: 'classic' }),
-      renderSocialCard({ meta, items }, { style: 'meme', meme }),
+      renderSocialCard({ meta, items }, { style: 'classic', backgroundImage: bgImage }),
+      renderSocialCard({ meta, items }, { style: 'meme', meme, backgroundImage: bgImage }),
     ])
     return {
       triggered: true,
@@ -100,17 +104,33 @@ export async function triggerSocialPublish(
     }
   }
 
-  for (const style of stylesNeeded) {
-    const existing = await getSocialCardImage(editionKey!, style).catch(() => null)
-    if (!existing) {
-      let meme = null
-      if (style === 'meme') {
-        meme = await generateMemeConcept(meta, items)
+  if (stylesNeeded.size > 0) {
+    let sharedBg: Buffer | null = null
+    const missingStyles: ('classic' | 'meme')[] = []
+    for (const style of stylesNeeded) {
+      const existing = await getSocialCardImage(editionKey!, style).catch(() => null)
+      if (!existing) {
+        missingStyles.push(style)
       }
-      const buf = await renderSocialCard({ meta, items }, { style, meme })
-      await saveSocialCardImage(editionKey!, style, buf).catch((e) => {
-        console.warn(`[Social] 預先快取 ${style} 圖卡失敗:`, e)
-      })
+    }
+
+    if (missingStyles.length > 0) {
+      sharedBg = await generateSocialBackgroundImage({
+        headline: items[0]?.title,
+        summary: meta.summary,
+        items,
+      }).catch(() => null)
+
+      for (const style of missingStyles) {
+        let meme = null
+        if (style === 'meme') {
+          meme = await generateMemeConcept(meta, items)
+        }
+        const buf = await renderSocialCard({ meta, items }, { style, meme, backgroundImage: sharedBg })
+        await saveSocialCardImage(editionKey!, style, buf).catch((e) => {
+          console.warn(`[Social] 預先快取 ${style} 圖卡失敗:`, e)
+        })
+      }
     }
   }
 

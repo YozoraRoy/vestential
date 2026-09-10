@@ -1,4 +1,4 @@
-import { createCanvas, GlobalFonts } from '@napi-rs/canvas'
+import { createCanvas, GlobalFonts, loadImage } from '@napi-rs/canvas'
 import path from 'node:path'
 import fs from 'node:fs'
 import type { MarketFocusItem, MarketFocusMeta } from '@stock/database'
@@ -42,6 +42,8 @@ export interface SocialCardOptions {
   style?: 'classic' | 'meme'
   /** style=meme 時的梗圖內容。 */
   meme?: { title: string; punchline: string } | null
+  /** AI 生成的高品質科技底圖 Buffer（選填，未傳入或失敗時使用純色漸層兜底）。 */
+  backgroundImage?: Buffer | null
 }
 
 /** 依市場焦點總覽與新聞生成 1080×1080 PNG buffer。 */
@@ -51,12 +53,32 @@ export async function renderSocialCard(data: SocialCardData, opts: SocialCardOpt
   const canvas = createCanvas(CARD_W, CARD_H)
   const ctx = canvas.getContext('2d')
 
-  // ── 背景：深色漸層 ────────────────────────────────────────────
-  const bg = ctx.createLinearGradient(0, 0, 0, CARD_H)
-  bg.addColorStop(0, '#10131a')
-  bg.addColorStop(1, '#0b0d13')
-  ctx.fillStyle = bg
-  ctx.fillRect(0, 0, CARD_W, CARD_H)
+  // ── 背景：若有傳入底圖則繪製並疊上深色遮罩，否則使用深色純色漸層 ──────
+  let drawnBg = false
+  if (opts.backgroundImage && opts.backgroundImage.length > 0) {
+    try {
+      const bgImg = await loadImage(opts.backgroundImage)
+      ctx.drawImage(bgImg, 0, 0, CARD_W, CARD_H)
+      // 疊上半透明科技暗化遮罩（兼顧微光科技線條與文字極致可讀性）
+      const overlay = ctx.createLinearGradient(0, 0, 0, CARD_H)
+      overlay.addColorStop(0, 'rgba(11, 13, 19, 0.82)')
+      overlay.addColorStop(0.4, 'rgba(11, 13, 19, 0.88)')
+      overlay.addColorStop(1, 'rgba(11, 13, 19, 0.94)')
+      ctx.fillStyle = overlay
+      ctx.fillRect(0, 0, CARD_W, CARD_H)
+      drawnBg = true
+    } catch (err) {
+      console.warn('[SocialCanvas] 載入背景圖失敗，降級使用純色漸層:', err)
+    }
+  }
+
+  if (!drawnBg) {
+    const bg = ctx.createLinearGradient(0, 0, 0, CARD_H)
+    bg.addColorStop(0, '#10131a')
+    bg.addColorStop(1, '#0b0d13')
+    ctx.fillStyle = bg
+    ctx.fillRect(0, 0, CARD_W, CARD_H)
+  }
 
   // 裝飾：右上小色塊（品牌綠）與底部細線
   ctx.fillStyle = '#22c55e'
