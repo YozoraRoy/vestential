@@ -328,12 +328,36 @@ export default function BacktestPage() {
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
 
-  // 造訪回測頁記錄（僅 mount 一次，避免 HMR/重渲染重複計）
+  // 造訪回測頁記錄（僅 mount 一次，避免 HMR/重渲染重複計），並支援 URL 參數自動帶入回測
   useEffect(() => {
     trackEvent('page_view')
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const paramSym = params.get('symbol')
+    if (paramSym) {
+      const cleanSym = paramSym.replace(/\.(TW|TWO)$/i, '').trim()
+      setSymbol(cleanSym)
+      const paramPreset = params.get('preset')
+      if (paramPreset === 'short') {
+        applyPreset('short')
+        void runFromSymbol(cleanSym, undefined, { years: '5', holdingDays: '40', targetPct: '8', stopPct: '5' })
+      } else if (paramPreset === 'medium') {
+        applyPreset('medium')
+        void runFromSymbol(cleanSym, undefined, { years: '10', holdingDays: '120', targetPct: '15', stopPct: '8' })
+      } else if (paramPreset === 'long') {
+        applyPreset('long')
+        void runFromSymbol(cleanSym, undefined, { years: '15', holdingDays: '252', targetPct: '25', stopPct: '12' })
+      } else {
+        void runFromSymbol(cleanSym)
+      }
+    }
   }, [])
 
-  const runFromSymbol = async (sym: string, nameOpt?: string) => {
+  const runFromSymbol = async (
+    sym: string,
+    nameOpt?: string,
+    overrideParams?: { holdingDays?: string; targetPct?: string; stopPct?: string; years?: string },
+  ) => {
     setLoading(true)
     setError(null)
     setResult(null)
@@ -351,10 +375,10 @@ export default function BacktestPage() {
     try {
       const qs = new URLSearchParams({
         symbol: sym,
-        holdingDays: holdingDays || '252',
-        target: targetPct || '25',
-        stop: stopPct || '12',
-        years: years || '15',
+        holdingDays: overrideParams?.holdingDays ?? holdingDays ?? '252',
+        target: overrideParams?.targetPct ?? targetPct ?? '25',
+        stop: overrideParams?.stopPct ?? stopPct ?? '12',
+        years: overrideParams?.years ?? years ?? '15',
       })
       const res = await fetch(`/api/backtest?${qs.toString()}`)
       const data = await res.json()

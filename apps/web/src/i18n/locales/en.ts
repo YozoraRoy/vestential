@@ -688,8 +688,11 @@ export const en: Dict = {
     methodR3: 'Oversold reversal: RSI dipped below 35 within 10 days and has recovered above 40.',
     methodR4: 'Volume contraction: 5-day average volume below 20-day average.',
     methodR5: 'Momentum flip: MACD histogram turned positive within 5 days.',
-    methodGate: 'Passed candidates are fit-tested with \u201cnormal entry next day, +8% target / \u22125% stop / 40 days\u201d on historical matching signals, showing win rate and average days to target.',
-    backHome: '\u2190 Back to home',
+    methodGate: 'Passed candidates are fit-tested with “normal entry next day, +8% target / −5% stop / 40 days” on historical matching signals, showing win rate and average days to target.',
+    backHome: '← Back to home',
+    viewBacktestChart: 'Chart & details',
+    exploreBacktestLab: 'Explore the Backtest Lab for custom parameters and interactive charts →',
+    winRateLegend: 'Win rate tiers: <30% Low · 30%–49% Fair · 50%–69% Good · 70%+ Great · 100% Perfect',
   },
   agentArena: {
     metaTitle: 'AI Agent Investment Arena — Vestential',

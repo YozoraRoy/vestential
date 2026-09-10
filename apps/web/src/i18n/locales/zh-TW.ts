@@ -690,6 +690,9 @@ export const zhTW: Dict = {
     methodR5: '動能翻正：5 日內 MACD 柱狀值由負轉正。',
     methodGate: '通過門檻後，再以「訊號日次一交易日進場、+8% 目標獲利 / −5% 停損 / 40 日」對歷史同規則訊號做擬合回測，呈現勝率與平均達成天數。',
     backHome: '← 返回首頁',
+    viewBacktestChart: '曲線圖與詳情',
+    exploreBacktestLab: '前往乖離率回測實驗室，自訂持股天數與查看完整股價走勢曲線圖 →',
+    winRateLegend: '勝率分級：<30% 低 · 30%~49% 中 · 50%~69% 良 · 70%+ 優 · 100% 滿',
   },
   agentArena: {
     metaTitle: 'AI Agent 投資競技場 — Vestential',

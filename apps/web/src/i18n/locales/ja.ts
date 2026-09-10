@@ -690,6 +690,9 @@ export const ja: Dict = {
     methodR5: 'モメンタム回復：5 日以内に MACD ヒストグラムが負から正へ転換。',
     methodGate: '通過後は「シグナル翌日参入、+8% 目標利益 / −5% 損切り / 40 日」で過去の同ルールシグナルを近似バックテストし、勝率と平均達成日数を表示します。',
     backHome: '← ホームに戻る',
+    viewBacktestChart: 'チャートと詳細',
+    exploreBacktestLab: 'バックテストラボでカスタムパラメータとチャートを確認 →',
+    winRateLegend: '勝率ランク：<30% 低 · 30%~49% 中 · 50%~69% 良 · 70%+ 優 · 100% 完勝',
   },
   agentArena: {
     metaTitle: 'AIエージェント投資アリーナ — Vestential',

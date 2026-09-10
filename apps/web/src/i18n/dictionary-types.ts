@@ -645,6 +645,9 @@ export interface Dict {
     methodR5: string
     methodGate: string
     backHome: string
+    viewBacktestChart: string
+    exploreBacktestLab: string
+    winRateLegend: string
   }
   agentArena: {
     metaTitle: string

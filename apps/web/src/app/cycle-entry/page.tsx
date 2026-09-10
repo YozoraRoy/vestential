@@ -1,4 +1,4 @@
-import { TrendingUp, Sparkles, RefreshCw } from 'lucide-react'
+import { TrendingUp, Sparkles, RefreshCw, LineChart } from 'lucide-react'
 import Link from 'next/link'
 import { getLocale, getDict } from '@/i18n/server'
 import { localizePath } from '@/i18n/paths'
@@ -72,6 +72,9 @@ export default async function CycleEntryPage() {
     ruleR3: ce.ruleR3,
     ruleR4: ce.ruleR4,
     ruleR5: ce.ruleR5,
+    viewBacktestChart: ce.viewBacktestChart,
+    exploreBacktestLab: ce.exploreBacktestLab,
+    winRateLegend: ce.winRateLegend,
   }
 
   const pageTitle = ce.pageTitle
@@ -165,7 +168,26 @@ export default async function CycleEntryPage() {
           <li>{ce.methodR4}</li>
           <li>{ce.methodR5}</li>
         </ul>
-        <p className="text-sm text-[var(--text-secondary)] leading-relaxed mb-6">{ce.methodGate}</p>
+        <p className="text-sm text-[var(--text-secondary)] leading-relaxed mb-4">{ce.methodGate}</p>
+        <div className="mb-6 rounded-xl border border-[var(--accent)]/20 bg-[var(--accent)]/5 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <LineChart className="w-5 h-5 text-[var(--accent)] shrink-0" />
+            <div>
+              <div className="text-sm font-semibold text-[var(--text-primary)]">
+                {dict.backtest.pageTitle}
+              </div>
+              <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                {ce.exploreBacktestLab}
+              </p>
+            </div>
+          </div>
+          <Link
+            href={localizePath(locale, '/backtest')}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)]/15 hover:bg-[var(--accent)]/25 text-[var(--accent)] text-xs font-semibold whitespace-nowrap transition"
+          >
+            {ce.viewBacktestChart} →
+          </Link>
+        </div>
         <div className="rounded-xl border border-[var(--accent-red)]/30 bg-[var(--accent-red)]/5 px-6 py-5">
           <p className="text-sm leading-relaxed text-[var(--text-secondary)]">{ce.disclaimer}</p>
         </div>
