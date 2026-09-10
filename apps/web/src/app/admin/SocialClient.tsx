@@ -21,6 +21,16 @@ type SocialPlatform = 'instagram' | 'threads'
 const IG_LIMIT = 2200
 const TH_LIMIT = 500
 
+const BG_PRESET_OPTIONS = [
+  { id: 'auto', label: '🤖 AI 智能匹配新聞' },
+  { id: 'chip', label: '🔬 晶片半導體' },
+  { id: 'ai', label: '🧠 AI 算力中心' },
+  { id: 'finance', label: '📈 金融趨勢線' },
+  { id: 'energy', label: '⚡ 綠能智慧電網' },
+  { id: 'shipping', label: '🚢 航運貨櫃巨輪' },
+  { id: 'none', label: '⬛ 純色漸層 (無底圖)' },
+]
+
 export function SocialClient() {
   const [result, setResult] = useState<Result>(null)
   const [preview, setPreview] = useState<DryRunResult | null>(null)
@@ -31,6 +41,9 @@ export function SocialClient() {
   const [threadsCardStyle, setThreadsCardStyle] = useState<'classic' | 'meme'>('classic')
   const [draftIg, setDraftIg] = useState('')
   const [draftThreads, setDraftThreads] = useState('')
+  const [bgPreset, setBgPreset] = useState('auto')
+  const [bgCustomPrompt, setBgCustomPrompt] = useState('')
+  const [generatingBg, setGeneratingBg] = useState(false)
 
   const togglePlatform = (p: SocialPlatform) => {
     setPlatforms((prev) => {
@@ -74,6 +87,34 @@ export function SocialClient() {
       }
     } else {
       setResult({ ok: false, message: r.body?.error ? `失敗：${r.body.error}` : (r.ok ? '失敗：未知錯誤' : '連線逾時或網路錯誤') })
+    }
+  }
+
+  const handleRegenerateBg = async (presetChoice = bgPreset) => {
+    if (!preview?.editionKey) return
+    setGeneratingBg(true)
+    const r = await post(
+      '/api/admin/social/generate-image',
+      {
+        preset: presetChoice,
+        prompt: bgCustomPrompt.trim() || undefined,
+        editionKey: preview.editionKey,
+        meme: preview.meme,
+      },
+      60000,
+    )
+    setGeneratingBg(false)
+    if (r.ok && r.body?.success && r.body?.cards) {
+      setPreview((prev) => (prev ? { ...prev, cards: r.body.cards } : prev))
+      setResult({
+        ok: true,
+        message: presetChoice === 'none' ? '已切換為純色深色漸層' : '科技底圖已成功重新生成並套用至所有圖卡！',
+      })
+    } else {
+      setResult({
+        ok: false,
+        message: r.body?.error ? `底圖生成失敗：${r.body.error}` : '底圖生成連線逾時或網路錯誤',
+      })
     }
   }
 
@@ -207,6 +248,57 @@ export function SocialClient() {
 
       {preview?.cards && !busy && (
         <>
+          {/* AI 科技底圖工作室 */}
+          <Card title="🎨 AI 科技底圖工作室 (Cloudflare FLUX.1-schnell)">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-[var(--text-secondary)]">底圖風格預設：</span>
+                {BG_PRESET_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    disabled={generatingBg || busy}
+                    onClick={() => {
+                      setBgPreset(opt.id)
+                      handleRegenerateBg(opt.id)
+                    }}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors cursor-pointer ${
+                      bgPreset === opt.id
+                        ? 'bg-[var(--accent)] text-black font-semibold border-[var(--accent)]'
+                        : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)]'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex-1 min-w-[280px]">
+                  <input
+                    type="text"
+                    className={input}
+                    placeholder="自訂 Prompt (選填，如: cyberpunk futuristic data center in taipei)"
+                    value={bgCustomPrompt}
+                    onChange={(e) => setBgCustomPrompt(e.target.value)}
+                    disabled={generatingBg || busy}
+                  />
+                </div>
+                <button
+                  className={btn}
+                  type="button"
+                  onClick={() => handleRegenerateBg()}
+                  disabled={generatingBg || busy}
+                >
+                  {generatingBg ? '🎨 科技底圖生成中…' : '🔄 重新生成底圖'}
+                </button>
+              </div>
+              <p className="text-xs text-[var(--text-secondary)]">
+                💡 採用 Cloudflare Workers AI 免費額度生成，每次約耗時 2~3 秒。點擊上方風格標籤即可一鍵替換底圖；若需極簡版面可點「純色深色漸層」。
+              </p>
+            </div>
+          </Card>
+
           <div className={`grid gap-6 ${isIgSelected && isThSelected ? 'lg:grid-cols-2' : 'max-w-2xl mx-auto'}`}>
             {/* Instagram 設定與預覽 */}
             {isIgSelected && (

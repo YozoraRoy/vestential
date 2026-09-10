@@ -55,17 +55,68 @@ export function buildPromptForMarketFocus(ctx: SocialAiImageContext): string {
   return 'abstract financial technology background, subtle dark green glowing circuit patterns and flowing data streams, elegant dark luxury tech wallpaper, minimalist composition, 8k resolution, no text'
 }
 
+export const BACKGROUND_PRESETS = [
+  { id: 'auto', label: '🤖 AI 智能匹配', prompt: '' },
+  {
+    id: 'chip',
+    label: '🔬 晶片半導體',
+    prompt:
+      'minimalist high-tech macro photography of glowing advanced microchip wafer, dark emerald green circuits, sleek modern semiconductor architecture, dark moody cinematic lighting, ultra-clean aesthetic, 8k resolution, no text',
+  },
+  {
+    id: 'ai',
+    label: '🧠 AI 算力中心',
+    prompt:
+      'futuristic AI neural network data center, glowing emerald green fiber optics and quantum processors, abstract matrix data stream, sleek dark tech atmosphere, cinematic depth of field, 8k resolution, no text',
+  },
+  {
+    id: 'finance',
+    label: '📈 金融趨勢線',
+    prompt:
+      'abstract digital financial stock market visualization, glowing emerald green candlestick chart lines and network nodes on dark reflective glass, sleek modern fintech aesthetic, cinematic lighting, 8k resolution, no text',
+  },
+  {
+    id: 'energy',
+    label: '⚡ 綠能智慧電網',
+    prompt:
+      'abstract clean energy electrical power grid, glowing emerald green energy currents and high-voltage transmission network at twilight, futuristic renewable power concept, sleek dark mood, 8k resolution, no text',
+  },
+  {
+    id: 'shipping',
+    label: '🚢 航運貨櫃巨輪',
+    prompt:
+      'modern maritime cargo container vessel moving through dark ocean at night, subtle glowing emerald green navigational lights, futuristic marine navigation radar, cinematic moody lighting, 8k resolution, no text',
+  },
+  { id: 'none', label: '⬛ 純色深色漸層', prompt: '' },
+] as const
+
 /**
  * 呼叫 Cloudflare Workers AI FLUX.1-schnell 生成科技底圖 Buffer。
  * 包含超時控制與容錯降級（失敗時回傳 null，圖卡將平滑回退至純色漸層）。
  */
-export async function generateSocialBackgroundImage(ctx: SocialAiImageContext): Promise<Buffer | null> {
+export async function generateSocialBackgroundImage(
+  ctx: SocialAiImageContext,
+  options?: { prompt?: string; preset?: string },
+): Promise<Buffer | null> {
+  if (options?.preset === 'none') {
+    return null
+  }
+
   if (!CF_ACCOUNT_ID || !CF_AI_TOKEN) {
     console.warn('[SocialAiImage] 缺少 Cloudflare Workers AI 憑證，跳過底圖生成')
     return null
   }
 
-  const prompt = buildPromptForMarketFocus(ctx)
+  let prompt = options?.prompt?.trim()
+  if (!prompt && options?.preset && options.preset !== 'auto') {
+    const matched = BACKGROUND_PRESETS.find((p) => p.id === options.preset)
+    if (matched?.prompt) {
+      prompt = matched.prompt
+    }
+  }
+  if (!prompt) {
+    prompt = buildPromptForMarketFocus(ctx)
+  }
 
   try {
     const controller = new AbortController()
