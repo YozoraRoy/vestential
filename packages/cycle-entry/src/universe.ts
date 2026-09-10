@@ -127,3 +127,35 @@ export const TW_LARGE_CAP_UNIVERSE: UniverseEntry[] = [
 export const TW_LARGE_CAP_UNIVERSE_BY_SYMBOL: Map<string, string> = new Map(
   TW_LARGE_CAP_UNIVERSE.map((u) => [u.symbol, u.name]),
 )
+
+/**
+ * 解析標的名稱（繁體中文優先，除非原本就是英文標的）。
+ * - 優先比對台股大型股中文俗名（如 "2317.TW" 或 "2317" -> "鴻海"）
+ * - 若 rawName 包含中文字元，保留中文名稱
+ * - 否則回傳 rawName（若原本即為英文標的）或純代號
+ */
+export function resolveStockName(symbol: string, rawName?: string | null): string {
+  if (!symbol) return rawName ?? ''
+  const trimmed = symbol.trim()
+  const cleanSym = trimmed.replace(/\.(TW|TWO)$/i, '')
+
+  // 1. 優先查台股大型股清單（支援 "2330.TW" 或純代號 "2330"）
+  const match =
+    TW_LARGE_CAP_UNIVERSE_BY_SYMBOL.get(trimmed) ||
+    TW_LARGE_CAP_UNIVERSE_BY_SYMBOL.get(`${cleanSym}.TW`) ||
+    TW_LARGE_CAP_UNIVERSE_BY_SYMBOL.get(cleanSym)
+  if (match) return match
+
+  // 2. 若 rawName 包含中文字元，保留中文
+  if (rawName && /[\u4e00-\u9fa5]/.test(rawName)) {
+    return rawName.trim()
+  }
+
+  // 3. 原本就是英文標的或其他無中文對照，保留 rawName
+  if (rawName && rawName.trim().length > 0) {
+    return rawName.trim()
+  }
+
+  // 4. 保底回傳純代號
+  return cleanSym
+}

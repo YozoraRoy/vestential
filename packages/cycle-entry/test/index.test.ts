@@ -19,6 +19,7 @@ import {
   ruleR5,
 } from '../src/rules.js'
 import type { OHLCV } from '../src/types.js'
+import { resolveStockName } from '../src/universe.js'
 
 function bar(price: number, volume = 1000): OHLCV {
   return {
@@ -195,5 +196,28 @@ describe('runSignalBacktest', () => {
     volumes.push(...Array.from({ length: 10 }, () => 400))
     const stats = runSignalBacktest(seriesOf(closes, volumes))
     expect(stats.totalSignals).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('resolveStockName', () => {
+  it('台股大型股代號優先回傳中文名', () => {
+    expect(resolveStockName('2317.TW', 'HON HAI PRECISION INDUSTRY')).toBe('鴻海')
+    expect(resolveStockName('2330.TW', 'Taiwan Semiconductor')).toBe('台積電')
+    expect(resolveStockName('2207.TW', 'HOTAI MOTOR CO')).toBe('和泰車')
+    expect(resolveStockName('3711.TW', 'ASE TECHNOLOGY HOLDING CO LTD')).toBe('日月光投控')
+    expect(resolveStockName('6770.TW')).toBe('力積電')
+  })
+
+  it('支援純數字台股代號查詢', () => {
+    expect(resolveStockName('2317')).toBe('鴻海')
+  })
+
+  it('rawName 若原本包含中文則保留中文', () => {
+    expect(resolveStockName('9999.TW', '自訂中文股')).toBe('自訂中文股')
+  })
+
+  it('原本為英文且無對照時保留英文名稱', () => {
+    expect(resolveStockName('NVDA', 'NVIDIA Corporation')).toBe('NVIDIA Corporation')
+    expect(resolveStockName('AAPL')).toBe('AAPL')
   })
 })

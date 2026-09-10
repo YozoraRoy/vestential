@@ -6,6 +6,7 @@ import {
   runSignalBacktest,
   MAX_CANDIDATES,
   TW_LARGE_CAP_UNIVERSE,
+  resolveStockName,
 } from '@stock/cycle-entry'
 import type { CycleCandidate } from '@stock/cycle-entry'
 import { saveCycleEntrySignals, saveCycleEntryMeta } from '@stock/database'
@@ -85,7 +86,7 @@ export async function collectCycleCandidates(quotes: BatchQuote[]): Promise<Cycl
 
     candidates.push({
       symbol: top[i].symbol,
-      name: top[i].name ?? TW_LARGE_CAP_UNIVERSE.find((u) => u.symbol === top[i].symbol)?.name ?? top[i].symbol,
+      name: resolveStockName(top[i].symbol, top[i].name),
       marketCap: top[i].marketCap ?? 0,
       rank: 0,
       score: last.score,

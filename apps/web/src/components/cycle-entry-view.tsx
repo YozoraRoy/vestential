@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { LayoutGrid, LayoutList, Sparkles } from 'lucide-react'
 import type { CycleEntrySignalRow } from '@stock/database'
+import { resolveStockName } from '@stock/cycle-entry'
 
 export interface CycleEntryDict {
   viewModeList: string
@@ -128,7 +129,7 @@ export function CycleEntryView({ signals, dict }: Props) {
                     <td className="px-3 py-3 text-[var(--text-secondary)]">#{s.signalRank ?? '—'}</td>
                     <td className="px-3 py-3">
                       <div className="font-semibold text-[var(--text-primary)]">{shortSymbol(s.symbol)}</div>
-                      <div className="text-xs text-[var(--text-secondary)] mt-0.5">{s.name}</div>
+                      <div className="text-xs text-[var(--text-secondary)] mt-0.5">{resolveStockName(s.symbol, s.name)}</div>
                     </td>
                     <td className="px-3 py-3">
                       {s.cycleStage ? (
@@ -184,7 +185,7 @@ export function CycleEntryView({ signals, dict }: Props) {
                         <span className={STAGE_STYLE[s.cycleStage] ?? STAGE_STYLE.pullback}>{dict[STAGES[s.cycleStage] ?? 'pullback']}</span>
                       ) : null}
                     </div>
-                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{s.name}</div>
+                    <div className="text-xs text-[var(--text-secondary)] mt-0.5">{resolveStockName(s.symbol, s.name)}</div>
                   </div>
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[var(--accent)]/15 text-[var(--accent)] font-semibold tabular-nums text-sm">
                     {s.score}

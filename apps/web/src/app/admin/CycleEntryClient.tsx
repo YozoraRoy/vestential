@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { btn, btnGhost, Card, getJson, Help, post, ResultBanner, SectionPageWrapper, type Result } from './_components'
 import type { CycleEntrySignalRow } from '@stock/database'
+import { resolveStockName } from '@stock/cycle-entry'
 
 interface Job {
   id: string
@@ -130,7 +131,7 @@ export function CycleEntryClient() {
       {signals.map((s, i) => (
         <li key={s.symbol + i}>
           • <span className="text-[var(--text-primary)]">{shortSymbol(s.symbol)}</span>
-          {s.name ? ` ${s.name}` : ''}（score {s.score}，{s.matchedRules}，price {s.price ?? '—'}）
+          {' '}{resolveStockName(s.symbol, s.name)}（score {s.score}，{s.matchedRules}，price {s.price ?? '—'}）
           {s.llmNote ? <span className="text-xs opacity-80"> — {s.llmNote}</span> : ''}
         </li>
       ))}

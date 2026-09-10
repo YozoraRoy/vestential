@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getLatestCycleEntryMeta, getCycleEntrySignalsByEdition } from '@stock/database'
+import { resolveStockName } from '@stock/cycle-entry'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -16,13 +17,17 @@ export async function GET() {
       )
     }
     const signals = await getCycleEntrySignalsByEdition(meta.editionDate)
+    const resolvedSignals = signals.map((s) => ({
+      ...s,
+      name: resolveStockName(s.symbol, s.name),
+    }))
     return NextResponse.json({
       success: true,
       editionDate: meta.editionDate,
       generatedAt: meta.generatedAt,
       signalCount: meta.signalCount,
       summary: meta.summary,
-      signals,
+      signals: resolvedSignals,
     })
   } catch (e: any) {
     return NextResponse.json(

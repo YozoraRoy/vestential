@@ -6,6 +6,7 @@ import { buildAlternates } from '@/i18n/metadata'
 import { getLatestCycleEntryMeta, getCycleEntrySignalsByEdition } from '@stock/database'
 import { SectionHeading } from '@/components/section-heading'
 import { CycleEntryView, type CycleEntryDict } from '@/components/cycle-entry-view'
+import { resolveStockName } from '@stock/cycle-entry'
 
 const BASE_URL = 'https://vestential.com'
 
@@ -101,7 +102,7 @@ export default async function CycleEntryPage() {
       itemListElement: signals.map((s, i) => ({
         '@type': 'ListItem',
         position: i + 1,
-        name: s.name || s.symbol,
+        name: resolveStockName(s.symbol, s.name),
         description: s.llmNote || undefined,
       })),
     })
