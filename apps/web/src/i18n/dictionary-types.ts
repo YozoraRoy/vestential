@@ -453,6 +453,7 @@ export interface Dict {
     errorNetwork: string
     errorTopVolume: string
     errorTopNetwork: string
+    cycleEntryDiffBanner: string
   }
   portfolio: {
     llmRateLimited: string
@@ -648,6 +649,9 @@ export interface Dict {
     viewBacktestChart: string
     exploreBacktestLab: string
     winRateLegend: string
+    btDiffNoticeTitle: string
+    btDiffNoticeDesc: string
+    colBacktestTooltip: string
   }
   agentArena: {
     metaTitle: string

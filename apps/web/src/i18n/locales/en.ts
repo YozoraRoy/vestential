@@ -498,6 +498,7 @@ export const en: Dict = {
     errorNetwork: 'Network error, please try again later',
     errorTopVolume: 'Failed to fetch ranking',
     errorTopNetwork: 'Network error, please try again later',
+    cycleEntryDiffBanner: '💡 Strategy note: This lab evaluates a 5–15 year quarterly-MA bias grid search. If you navigated here from "Entry Points", that page reflects 1-year multi-rule composite signals (R1–R5), while this lab searches for optimal single bias thresholds across longer horizons.',
   },
   portfolio: {
     llmRateLimited: 'The AI model quota is temporarily exhausted. Please try again later (about 1 minute).',
@@ -693,6 +694,9 @@ export const en: Dict = {
     viewBacktestChart: 'Chart & details',
     exploreBacktestLab: 'Explore the Backtest Lab for custom parameters and interactive charts →',
     winRateLegend: 'Win rate tiers: <30% Low · 30%–49% Fair · 50%–69% Good · 70%+ Great · 100% Perfect',
+    btDiffNoticeTitle: 'Why do win rate numbers differ from the Backtest Lab?',
+    btDiffNoticeDesc: '• This page (Fitted Backtest): Evaluates strictly matching R1–R5 multi-rule resonance over the past 1 year (selective signals, typically 3–4 occurrences), reflecting recent composite market behavior.\n• Backtest Lab (/backtest): Runs a grid search over 5–15 years on single quarterly-MA bias thresholds to identify mathematically optimal entry levels.',
+    colBacktestTooltip: '1-year multi-rule resonance backtest. Differs from the Backtest Lab bias grid search methodology.',
   },
   agentArena: {
     metaTitle: 'AI Agent Investment Arena — Vestential',

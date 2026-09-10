@@ -1,4 +1,4 @@
-import { TrendingUp, Sparkles, RefreshCw, LineChart } from 'lucide-react'
+import { TrendingUp, Sparkles, RefreshCw, LineChart, Info } from 'lucide-react'
 import Link from 'next/link'
 import { getLocale, getDict } from '@/i18n/server'
 import { localizePath } from '@/i18n/paths'
@@ -75,6 +75,7 @@ export default async function CycleEntryPage() {
     viewBacktestChart: ce.viewBacktestChart,
     exploreBacktestLab: ce.exploreBacktestLab,
     winRateLegend: ce.winRateLegend,
+    colBacktestTooltip: ce.colBacktestTooltip,
   }
 
   const pageTitle = ce.pageTitle
@@ -169,6 +170,15 @@ export default async function CycleEntryPage() {
           <li>{ce.methodR5}</li>
         </ul>
         <p className="text-sm text-[var(--text-secondary)] leading-relaxed mb-4">{ce.methodGate}</p>
+        <div className="mb-6 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs leading-relaxed text-[var(--text-secondary)] space-y-2">
+          <div className="font-semibold text-sm text-[var(--text-primary)] flex items-center gap-1.5">
+            <Info className="w-4 h-4 text-[var(--accent)] shrink-0" />
+            <span>{ce.btDiffNoticeTitle}</span>
+          </div>
+          <p className="whitespace-pre-line text-xs text-[var(--text-secondary)] leading-relaxed">
+            {ce.btDiffNoticeDesc}
+          </p>
+        </div>
         <div className="mb-6 rounded-xl border border-[var(--accent)]/20 bg-[var(--accent)]/5 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <LineChart className="w-5 h-5 text-[var(--accent)] shrink-0" />

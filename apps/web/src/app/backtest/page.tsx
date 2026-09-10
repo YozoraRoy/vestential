@@ -819,6 +819,17 @@ export default function BacktestPage() {
             </div>
           </div>
 
+          {/* 策略與數據說明提示條 */}
+          <div className="p-3.5 rounded-xl bg-[var(--accent)]/10 border border-[var(--accent)]/20 text-xs text-[var(--text-secondary)] flex items-start gap-2.5">
+            <Info className="w-4 h-4 text-[var(--accent)] shrink-0 mt-0.5" />
+            <div className="leading-relaxed">
+              <span className="font-semibold text-[var(--text-primary)] mr-1">
+                {locale === 'en' ? 'Strategy & Data Note:' : locale === 'ja' ? '戦略・データに関する説明：' : '策略與數據說明：'}
+              </span>
+              <span>{ui.cycleEntryDiffBanner}</span>
+            </div>
+          </div>
+
           {result.belowTarget && (
             <div className="flex items-center gap-2 p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
               <AlertTriangle className="w-4 h-4 shrink-0" />

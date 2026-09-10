@@ -498,6 +498,7 @@ export const zhTW: Dict = {
     errorNetwork: '網路錯誤，請稍後再試',
     errorTopVolume: '取得排行榜失敗',
     errorTopNetwork: '網路錯誤，請稍後再試',
+    cycleEntryDiffBanner: '💡 回測策略說明：本實驗室回測為「5~15 年季線負乖離率網格尋優模型」。若您是從「已現進場點」點擊跳轉而來，該頁勝率（如 50%）為「近 1 年五大複合規則共振」的嚴格擬合結果；本頁勝率（如 75%）為「長區間最佳乖離率閥值」統計，兩者進場條件與時間長度不同，提供多維度交叉印證。',
   },
   portfolio: {
     llmRateLimited: 'AI 模型額度暫時用完，請稍後再試（約 1 分鐘後）',
@@ -693,6 +694,9 @@ export const zhTW: Dict = {
     viewBacktestChart: '曲線圖與詳情',
     exploreBacktestLab: '前往乖離率回測實驗室，自訂持股天數與查看完整股價走勢曲線圖 →',
     winRateLegend: '勝率分級：<30% 低 · 30%~49% 中 · 50%~69% 良 · 70%+ 優 · 100% 滿',
+    btDiffNoticeTitle: '【重要說明】「已現進場點」擬合回測 vs「回測實驗室」數據差異',
+    btDiffNoticeDesc: '• 本頁擬合回測：鎖定近 1 年歷史，僅統計完全觸發 R1～R5 多重規則共振（如均線+量縮+動能翻正）的嚴選訊號日（頻率低、通常 3～4 次），勝率與達成天數反映近期同複合條件的精準表現。\n• 回測實驗室（/backtest）：採用 5 年～15 年歷史長區間，以單一「季線負乖離率閥值」進行全域網格尋優（Grid Search），觸發次數更多，尋找長期數學期望值最高之參數，兩者可相互參照印證。',
+    colBacktestTooltip: '近 1 年多規則（R1~R5）共振擬合回測，與回測實驗室的長區間季線乖離率算法不同',
   },
   agentArena: {
     metaTitle: 'AI Agent 投資競技場 — Vestential',
