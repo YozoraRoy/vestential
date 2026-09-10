@@ -13,18 +13,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Trigger market-focus refresh on Azure
+      - name: Trigger market-focus refresh (background job)
+        id: trigger
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
         run: |
           CODE=$(curl -s -o /tmp/mf_resp.json -w "%{http_code}" \
-            --max-time 300 \
+            --max-time 60 \
             -X POST \
-            -H "Authorization: Bearer ${{ secrets.SYNC_TOKEN }}" \
+            -H "Authorization: Bearer $SYNC_TOKEN" \
             -H "Content-Type: application/json" \
             "https://vestential.com/api/market-focus/refresh")
           echo "HTTP $CODE"
           cat /tmp/mf_resp.json
           echo ""
           if [ "$CODE" != "200" ]; then
-            echo "::error::market-focus refresh failed (HTTP $CODE)"
+            echo "::error::market-focus refresh trigger failed (HTTP $CODE)"
             exit 1
           fi
+          JOB_ID=$(python3 -c "import sys,json;d=json.load(open('/tmp/mf_resp.json'));print(d.get('jobId',''))")
+          if [ -z "$JOB_ID" ]; then
+            echo "::error::no jobId in response"
+            exit 1
+          fi
+          echo "job-id=$JOB_ID"
+          echo "jobId=$JOB_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for market-focus job completion
+        id: wait
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          JOB_ID: ${{ steps.trigger.outputs.jobId }}
+        run: |
+          for i in $(seq 1 110); do
+            CODE=$(curl -s -o /tmp/mf_status.json -w "%{http_code}" --max-time 30 \
+              -H "Authorization: Bearer $SYNC_TOKEN" \
+              "https://vestential.com/api/market-focus/refresh/status?jobId=$JOB_ID" || echo "000")
+            if [ "$CODE" != "200" ]; then
+              echo "attempt $i -> HTTP $CODE (retrying)"
+              sleep 10
+              continue
+            fi
+            STATUS=$(python3 -c "import sys,json;d=json.load(open('/tmp/mf_status.json'));j=d.get('job',{});print(j.get('status',''))")
+            echo "attempt $i -> status=$STATUS"
+            if [ "$STATUS" = "done" ]; then
+              python3 -c "import sys,json;d=json.load(open('/tmp/mf_status.json'));j=d['job'];print(json.dumps({'count':j.get('count'),'editionKey':j.get('editionKey'),'social':j.get('socialResults')},ensure_ascii=False))"
+              echo "::notice::market-focus refresh completed"
+              exit 0
+            fi
+            if [ "$STATUS" = "failed" ]; then
+              echo "::error::market-focus refresh failed: $(python3 -c "import sys,json;d=json.load(open('/tmp/mf_status.json'));print(d['job'].get('error',''))")"
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "::error::market-focus refresh timed out waiting for job"
+          exit 1

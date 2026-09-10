@@ -1,51 +1,34 @@
 import { NextResponse } from 'next/server'
-import { revalidateTag } from 'next/cache'
-import { migrate, getMarketFocusMeta } from '@stock/database'
-import { refreshMarketFocus } from '@/lib/market-focus'
-import { sendMarketFocusSummary, sendMarketFocusAlert, isSummaryFallback } from '@/lib/email'
+import { migrate } from '@stock/database'
+import { startMarketFocusJob } from '@/lib/market-focus-job'
 import { authorizeSync } from '@/lib/sync-auth'
-import { triggerSocialPublish } from '@/lib/social-trigger'
 
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+/**
+ * 觸發市場焦點 refresh。整個管線（抓新聞→AI→摘要→總覽→email→社群）
+ * 改為背景執行並立即回傳 jobId，呼叫端透過 GET .../refresh/status 輪詢，
+ * 徹底避免同步執行超過 Azure 240s 網關逾時 (504)。
+ */
 export async function POST(req: Request) {
   if (!authorizeSync(req)) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   }
-
   try {
     await migrate()
-    const items = await refreshMarketFocus()
-    revalidateTag('market-focus')
-    // 背景執行 Email 通知與社群小編發布，不阻塞 HTTP 回應，徹底避免 Azure 240s 網關逾時 (504)
-    void (async () => {
-      try {
-        const meta = await getMarketFocusMeta()
-        if (meta?.summary && isSummaryFallback(meta.summary)) {
-          await sendMarketFocusAlert('LLM 每日總覽回退', '主模型與備援皆失敗,每日總覽以新聞標題拼接呈現。')
-        } else {
-          await sendMarketFocusSummary()
-        }
-      } catch (e: any) {
-        console.error('[API/market-focus/refresh] Background email dispatch error:', e)
-      }
-
-      try {
-        await triggerSocialPublish()
-      } catch (e: any) {
-        console.error('[API/market-focus/refresh] Background social publish error:', e)
-      }
-    })()
-
+    const job = startMarketFocusJob({ kind: 'refresh' })
     return NextResponse.json({
       success: true,
-      count: items.length,
-      timestamp: new Date().toISOString(),
-      background: 'dispatched',
+      accepted: true,
+      jobId: job.id,
+      status: job.status,
+      since: job.startedAt,
+      note: 'background job started; poll GET /api/market-focus/refresh/status?jobId=... for result',
     })
-  } catch (error: any) {
-    console.error('[API/market-focus/refresh] Failed:', error)
-    await sendMarketFocusAlert('refresh 失敗', error?.message || '未知錯誤')
+  } catch (e: any) {
     return NextResponse.json(
-      { success: false, error: error.message || 'Failed to refresh market focus' },
+      { success: false, error: e?.message ?? 'Failed to start market focus refresh' },
       { status: 500 },
     )
   }

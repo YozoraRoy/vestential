@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import sql from 'mssql'
+import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -422,6 +423,17 @@ function getSqliteDb(): Database.Database | null {
         created_at TEXT DEFAULT (datetime('now','localtime')),
         PRIMARY KEY (edition_key, style)
       );
+
+      CREATE TABLE IF NOT EXISTS market_focus_subscribers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'active',
+        token TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        unsubscribed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_market_focus_subscribers_status ON market_focus_subscribers(status);
     `)
 
     return _db
@@ -918,6 +930,20 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           created_at DATETIME2 DEFAULT GETDATE(),
           CONSTRAINT pk_social_card_images PRIMARY KEY (edition_key, style)
         );
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'market_focus_subscribers')
+      BEGIN
+        CREATE TABLE market_focus_subscribers (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          email NVARCHAR(255) NOT NULL UNIQUE,
+          status NVARCHAR(20) NOT NULL DEFAULT 'active',
+          token NVARCHAR(100) NOT NULL,
+          created_at DATETIME2 DEFAULT GETDATE(),
+          updated_at DATETIME2 DEFAULT GETDATE(),
+          unsubscribed_at DATETIME2
+        );
+        CREATE INDEX idx_market_focus_subscribers_status ON market_focus_subscribers(status);
       END
     `)
 
@@ -3929,4 +3955,138 @@ export async function getUserUsageReport(): Promise<UserUsageReportRow[]> {
     recognitionCount: Number(r.recognitionCount ?? 0),
     arenaAgentCount: Number(r.arenaAgentCount ?? 0),
   }))
+}
+
+// ─── 市場焦點電子報訂閱 (market_focus_subscribers) ────────────────
+
+export type MarketFocusSubscriberStatus = 'active' | 'unsubscribed'
+
+export interface MarketFocusSubscriberRow {
+  id: number
+  email: string
+  status: MarketFocusSubscriberStatus
+  token: string
+  created_at: string
+  updated_at: string
+  unsubscribed_at: string | null
+}
+
+function nowIso(): string {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ')
+}
+
+function newSubscriberToken(): string {
+  return randomBytes(24).toString('base64url')
+}
+
+/** 訂閱（或重新啟用）：email 已存在時改為 active 並換新 token。回傳訂閱紀錄。 */
+export async function subscribeMarketFocus(email: string): Promise<MarketFocusSubscriberRow> {
+  const normalized = email.trim().toLowerCase().slice(0, 255)
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+    throw new Error('invalid email')
+  }
+  const existing = await dbQueryFirst<MarketFocusSubscriberRow>(
+    'SELECT * FROM market_focus_subscribers WHERE email = @email LIMIT 1',
+    { email: normalized },
+  )
+  if (existing) {
+    await dbExecute(
+      `UPDATE market_focus_subscribers
+         SET status = 'active', token = @token, unsubscribed_at = NULL, updated_at = @updatedAt
+       WHERE email = @email`,
+      { email: normalized, token: newSubscriberToken(), updatedAt: nowIso() },
+    )
+  } else {
+    try {
+      await dbExecute(
+        `INSERT INTO market_focus_subscribers (email, status, token, created_at, updated_at)
+         VALUES (@email, 'active', @token, @createdAt, @updatedAt)`,
+        { email: normalized, token: newSubscriberToken(), createdAt: nowIso(), updatedAt: nowIso() },
+      )
+    } catch (e) {
+      // UNIQUE race：並發訂閱同一 email 時回填既有紀錄與否即可
+      if (String(e).includes('UNIQUE')) {
+        const raced = await dbQueryFirst<MarketFocusSubscriberRow>(
+          'SELECT * FROM market_focus_subscribers WHERE email = @email LIMIT 1',
+          { email: normalized },
+        )
+        if (raced) return raced
+      }
+      throw e
+    }
+  }
+  const row = await dbQueryFirst<MarketFocusSubscriberRow>(
+    'SELECT * FROM market_focus_subscribers WHERE email = @email LIMIT 1',
+    { email: normalized },
+  )
+  if (!row) throw new Error('subscribeMarketFocus: row not found')
+  return row
+}
+
+/** 公開退訂：以 email + token 驗證；token 不符或已退訂時回傳 false。 */
+export async function unsubscribeMarketFocusByToken(email: string, token: string): Promise<boolean> {
+  const row = await dbQueryFirst<MarketFocusSubscriberRow>(
+    'SELECT * FROM market_focus_subscribers WHERE email = @email LIMIT 1',
+    { email: email.trim().toLowerCase() },
+  )
+  if (!row || row.status !== 'active' || row.token !== token) return false
+  await dbExecute(
+    `UPDATE market_focus_subscribers
+       SET status = 'unsubscribed', unsubscribed_at = @unsubscribedAt, updated_at = @updatedAt
+     WHERE id = @id`,
+    { id: row.id, unsubscribedAt: nowIso(), updatedAt: nowIso() },
+  )
+  return true
+}
+
+/** 後台管理用的單筆狀態變更（取消訂閱 / 恢復訂閱）。 */
+export async function setMarketFocusSubscriberStatus(id: number, status: MarketFocusSubscriberStatus): Promise<void> {
+  await dbExecute(
+    `UPDATE market_focus_subscribers
+       SET status = @status,
+           unsubscribed_at = CASE WHEN @status = 'active' THEN NULL ELSE unsubscribed_at END,
+           updated_at = @updatedAt
+     WHERE id = @id`,
+    { id, status, updatedAt: nowIso() },
+  )
+  if (status === 'unsubscribed') {
+    await dbExecute(
+      `UPDATE market_focus_subscribers SET unsubscribed_at = @unsubscribedAt WHERE id = @id AND status = 'unsubscribed'`,
+      { id, unsubscribedAt: nowIso() },
+    )
+  }
+}
+
+/** 後台管理用的刪除名單。 */
+export async function deleteMarketFocusSubscriber(id: number): Promise<void> {
+  await dbExecute('DELETE FROM market_focus_subscribers WHERE id = @id', { id })
+}
+
+/** 列出全部訂閱（新→舊）。 */
+export function listMarketFocusSubscribers(limit = 500): Promise<MarketFocusSubscriberRow[]> {
+  return dbQueryAll<MarketFocusSubscriberRow>(
+    'SELECT * FROM market_focus_subscribers ORDER BY id DESC LIMIT ' + Math.max(1, limit),
+  )
+}
+
+/** 列出所有 active 訂閱者（供電子報寄送）。 */
+export function listActiveMarketFocusSubscribers(): Promise<MarketFocusSubscriberRow[]> {
+  return dbQueryAll<MarketFocusSubscriberRow>(
+    "SELECT * FROM market_focus_subscribers WHERE status = 'active' ORDER BY id",
+  )
+}
+
+/** 訂閱統計：總數 / 有效 / 已退訂。 */
+export async function countMarketFocusSubscribers(): Promise<{ total: number; active: number; unsubscribed: number }> {
+  const row = await dbQueryFirst<{ total: number; active: number; unsubscribed: number }>(`
+    SELECT COUNT(*) AS total,
+           SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
+           SUM(CASE WHEN status = 'unsubscribed' THEN 1 ELSE 0 END) AS unsubscribed
+    FROM market_focus_subscribers
+  `)
+  return {
+    total: Number(row?.total ?? 0),
+    active: Number(row?.active ?? 0),
+    unsubscribed: Number(row?.unsubscribed ?? 0),
+  }
 }

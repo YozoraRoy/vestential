@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { getCurrentUserFromReq, isAdminUser } from '@/lib/auth'
-import { previewMarketFocus, refreshMarketFocus } from '@/lib/market-focus'
-import { triggerSocialPublish } from '@/lib/social-trigger'
-import { sendMarketFocusAlert, sendMarketFocusSummary, isSummaryFallback } from '@/lib/email'
-import { getMarketFocusMeta, migrate } from '@stock/database'
-import { revalidateTag } from 'next/cache'
+import { startMarketFocusJob } from '@/lib/market-focus-job'
+import { migrate } from '@stock/database'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
+/**
+ * 後台觸發市場焦點：乾跑/發布皆是背景 Job，立即回傳 jobId。
+ * 前台 UI 輪詢 GET /api/market-focus/refresh/status?jobId=... 取得結果，
+ * 避免同步跑完整管線超過 Azure 240s 網關逾時。
+ */
 export async function POST(req: NextRequest) {
   await migrate()
   const user = await getCurrentUserFromReq(req)
@@ -23,44 +25,17 @@ export async function POST(req: NextRequest) {
   } catch {}
   const mode = body.mode === 'publish' ? 'publish' : 'dry'
   try {
-    if (mode === 'dry') {
-      const { items, summary } = await previewMarketFocus()
-      return NextResponse.json({
-        success: true,
-        mode: 'dry',
-        count: items.length,
-        summary,
-        items: items.map((it) => ({
-          title: it.title,
-          source: it.source,
-          url: it.url,
-          reason: it.reason,
-          summary: it.summary,
-        })),
-      })
-    }
-
-    // publish
-    const items = await refreshMarketFocus()
-    revalidateTag('market-focus')
-    const meta = await getMarketFocusMeta()
-    if (meta?.summary && isSummaryFallback(meta.summary)) {
-      await sendMarketFocusAlert('LLM 每日總覽回退', '主模型與備援皆失敗,每日總覽以新聞標題拼接呈現。')
-    } else {
-      await sendMarketFocusSummary()
-    }
-    let social = null
-    if (body.alsoSocial) {
-      social = await triggerSocialPublish().catch((e) => ({ triggered: false, error: e.message }))
-    }
+    const job = startMarketFocusJob({ kind: mode, alsoSocial: !!body.alsoSocial })
     return NextResponse.json({
       success: true,
-      mode: 'publish',
-      count: items.length,
-      timestamp: new Date().toISOString(),
-      social,
+      accepted: true,
+      mode,
+      jobId: job.id,
+      status: job.status,
+      since: job.startedAt,
+      note: 'background job started; poll GET /api/market-focus/refresh/status?jobId=... for result',
     })
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e?.message ?? 'market-focus 失敗' }, { status: 500 })
+    return NextResponse.json({ success: false, error: e?.message ?? 'market-focus 啟動失敗' }, { status: 500 })
   }
 }

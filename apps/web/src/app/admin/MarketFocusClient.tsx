@@ -1,11 +1,49 @@
 'use client'
 
 import { useState } from 'react'
-import { btn, btnGhost, Card, Help, post, ResultBanner, SectionPageWrapper, type Result } from './_components'
+import { btn, btnGhost, Card, getJson, Help, post, ResultBanner, SectionPageWrapper, type Result } from './_components'
 
 interface MfPreview {
   summary: string
-  items: Array<{ title: string; source: string; reason: string | null }>
+  items: Array<{ title: string; source: string | null; reason: string | null }>
+}
+
+interface Job {
+  id: string
+  kind: string
+  status: 'running' | 'done' | 'failed'
+  error?: string | null
+  count?: number | null
+  editionKey?: string | null
+  summary?: string | null
+  items?: MfPreview['items'] | null
+  socialResults?: Array<{ platform: string; status: string; error?: string | null }> | null
+  startedAt?: string
+}
+
+const POLL_INTERVAL_MS = 5000
+const POLL_TIMEOUT_MS = 20 * 60 * 1000
+
+function waitForJob(jobId: string): Promise<Job> {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + POLL_TIMEOUT_MS
+    const tick = async () => {
+      if (Date.now() > deadline) {
+        reject(new Error('等待逾時（20 分鐘）'))
+        return
+      }
+      const r = await getJson('/api/market-focus/refresh/status?jobId=' + encodeURIComponent(jobId), 30000)
+      const job = (r.body as { job?: Job })?.job
+      if (r.ok && job) {
+        if (job.status === 'done' || job.status === 'failed') {
+          resolve(job)
+          return
+        }
+      }
+      setTimeout(tick, POLL_INTERVAL_MS)
+    }
+    tick()
+  })
 }
 
 export function MarketFocusClient() {
@@ -13,32 +51,56 @@ export function MarketFocusClient() {
   const [preview, setPreview] = useState<MfPreview | null>(null)
   const [alsoSocial, setAlsoSocial] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
 
-  const runDry = async () => {
+  const runJob = async (mode: 'dry' | 'publish', cb: (job: Job) => void) => {
     setBusy(true)
-    const r = await post('/api/admin/market-focus', { mode: 'dry' })
-    setBusy(false)
-    if (r.ok && r.body.success) {
-      setPreview({ summary: r.body.summary ?? '', items: r.body.items ?? [] })
-      setResult({ ok: true, message: `乾跑完成：精選 ${r.body.count} 則（未寫入 DB）` })
-    } else {
-      setResult({ ok: false, message: `乾跑失敗：${r.body?.error ?? ''}` })
+    setElapsed(0)
+    const timer = setInterval(() => setElapsed((s) => s + 1), 1000)
+    try {
+      const r = await post('/api/admin/market-focus', { mode, alsoSocial })
+      if (!r.ok || !(r.body as { accepted?: boolean }).accepted) {
+        setResult({ ok: false, message: `啟動失敗：${(r.body as { error?: string })?.error ?? '未知錯誤'}` })
+        return
+      }
+      const jobId = (r.body as { jobId?: string }).jobId!
+      const job = await waitForJob(jobId)
+      cb(job)
+    } catch (e: any) {
+      setResult({ ok: false, message: e?.message ?? '執行失敗' })
+    } finally {
+      clearInterval(timer)
+      setBusy(false)
+      setElapsed(0)
     }
   }
 
-  const runPublish = async () => {
-    setBusy(true)
-    const r = await post('/api/admin/market-focus', { mode: 'publish', alsoSocial })
-    setBusy(false)
-    setResult(
-      r.ok
-        ? { ok: true, message: `已發布 ${r.body.count} 則新聞` + (alsoSocial ? `，社群：${JSON.stringify(r.body.social?.results ?? r.body.social ?? {})}` : '') }
-        : { ok: false, message: `發布失敗：${r.body?.error ?? ''}` },
-    )
-  }
+  const runDry = () =>
+    runJob('dry', (job) => {
+      if (job.status === 'done') {
+        setPreview({ summary: job.summary ?? '', items: job.items ?? [] })
+        setResult({ ok: true, message: `乾跑完成：精選 ${job.count ?? 0} 則（未寫入 DB）` })
+      } else {
+        setResult({ ok: false, message: `乾跑失敗：${job.error ?? '未知錯誤'}` })
+      }
+    })
+
+  const runPublish = () =>
+    runJob('publish', (job) => {
+      if (job.status === 'done') {
+        const social = job.socialResults?.length
+          ? `，社群：${JSON.stringify(job.socialResults)}`
+          : alsoSocial
+            ? '，社群：無新內容可發'
+            : ''
+        setResult({ ok: true, message: `已發布 ${job.count ?? 0} 則新聞（edition ${job.editionKey ?? '?'}）${social}` })
+      } else {
+        setResult({ ok: false, message: `發布失敗：${job.error ?? '未知錯誤'}` })
+      }
+    })
 
   return (
-    <SectionPageWrapper title="市場焦點小編" subtitle="乾跑預覽後再決定是否寫入 DB；也可同步觸發社群發布">
+    <SectionPageWrapper title="市場焦點小編" subtitle="乾跑預覽後再決定是否寫入 DB；也可同步觸發社群發布。執行與發布皆為背景任務，頁面會自動等待結果。">
       <ResultBanner result={result} onDismiss={() => setResult(null)} />
       <Card title="操作">
         <div className="flex flex-wrap items-center gap-3">
@@ -56,6 +118,11 @@ export function MarketFocusClient() {
             <Help text="每日收盤後執行一次：選新聞＋寫每日總覽。勾選「同步觸發社群」會接著跑社群小編（IG / Threads 發布）。" />
           </div>
         </div>
+        {busy && (
+          <p className="mt-4 text-sm text-[var(--text-secondary)]">
+            ⏳ 背景執行中…（已等待 {elapsed} 秒，首次需 1~4 分鐘；完成前請勿關閉頁面）
+          </p>
+        )}
       </Card>
 
       {preview && (

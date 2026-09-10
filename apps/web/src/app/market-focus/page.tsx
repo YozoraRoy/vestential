@@ -6,6 +6,7 @@ import { buildAlternates } from '@/i18n/metadata'
 import { getMarketFocus, getMarketFocusMeta } from '@stock/database'
 import { SectionHeading } from '@/components/section-heading'
 import { NewsCard } from '@/components/news-card'
+import { MarketFocusSubscribe } from '@/components/market-focus-subscribe'
 
 const BASE_URL = 'https://vestential.com'
 const PAGE_TITLE = '市場焦點 | Vestential'
@@ -110,6 +111,9 @@ export default async function MarketFocusPage() {
           </div>
         </section>
       ) : null}
+
+      {/* 電子報訂閱 */}
+      <MarketFocusSubscribe />
 
       {/* 精選新聞 */}
       <section aria-labelledby="market-news" className="mb-10">

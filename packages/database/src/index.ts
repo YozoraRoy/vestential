@@ -29,12 +29,16 @@ export {
   saveSocialCardImage, getSocialCardImage,
   getAgentSetting, setAgentSetting, listAgentSettings,
   getUserUsageReport,
+  subscribeMarketFocus, unsubscribeMarketFocusByToken, setMarketFocusSubscriberStatus,
+  deleteMarketFocusSubscriber, listMarketFocusSubscribers, listActiveMarketFocusSubscribers,
+  countMarketFocusSubscribers,
 } from './db.js'
 export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta,
   ArenaSeasonRow, ArenaAgentRow, ArenaHoldingRow, ArenaTradeRow, ArenaSnapshotRow, ArenaAgentInput, ArenaLeaderboardRow,
   ArenaIntradayPriceRow, ArenaMarketBriefingRow, ArenaDecisionLogRow, ArenaDiscussionRow,
   SocialPostRow, SocialPostInput, SocialPostPlatform, SocialPostStatus,
-  AgentSettingRow, UserUsageReportRow } from './db.js'
+  AgentSettingRow, UserUsageReportRow,
+  MarketFocusSubscriberRow, MarketFocusSubscriberStatus } from './db.js'
 export { exportSyncData, mergeExports, applySyncMerge, applySyncImport, SYNC_TABLES } from './sync.js'
 export type { SyncExport, SyncRow, MergedExport, SyncTableName, TaggedRow, RowSource } from './sync.js'
 export type { Database } from 'better-sqlite3'

@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer'
 import type { MarketFocusItem, MarketFocusMeta } from '@stock/database'
-import { getMarketFocus, getMarketFocusMeta } from '@stock/database'
+import { getMarketFocus, getMarketFocusMeta, listActiveMarketFocusSubscribers } from '@stock/database'
 
 export const FALLBACK_SUMMARY_PREFIX = '當日市場焦點：'
 
@@ -12,6 +12,12 @@ export function isSummaryFallback(summary: string): boolean {
 
 const SITE_BASE = process.env.AUTH_BASE_URL ?? 'https://vestential.com'
 const SITE_LINK = `${SITE_BASE}/market-focus`
+
+// 社群推廣：設定這兩個 env 後，電子報 footer 會放 IG / Threads 追蹤連結。
+const SOCIAL_LINKS = {
+  instagram: process.env.INSTAGRAM_PROFILE_URL ?? '',
+  threads: process.env.THREADS_PROFILE_URL ?? '',
+}
 
 // ─── SMTP / 收件人設定 ────────────────────────────────────────────
 function smtpConfig() {
@@ -32,7 +38,7 @@ function smtpConfig() {
   }
 }
 
-async function sendMailCore(subject: string, text: string, html?: string): Promise<boolean> {
+async function sendMailCore(subject: string, text: string, html?: string, toOverride?: string): Promise<boolean> {
   const cfg = smtpConfig()
   if (!cfg) return false
   try {
@@ -44,12 +50,12 @@ async function sendMailCore(subject: string, text: string, html?: string): Promi
     })
     await transporter.sendMail({
       from: `Vestential <${cfg.from}>`,
-      to: cfg.to,
+      to: toOverride ?? cfg.to,
       subject,
       text,
       html,
     })
-    console.log(`[Notify] email sent: ${subject} -> ${cfg.to}`)
+    console.log(`[Notify] email sent: ${subject} -> ${toOverride ?? cfg.to}`)
     return true
   } catch (e) {
     console.error('[Notify] email send failed:', subject, e)
@@ -113,7 +119,29 @@ function buildBrandHeader(generatedAtIso?: string | null): string {
   </div>`
 }
 
-function buildSummaryHtml(summary: string, items: MarketFocusItem[], generatedAtIso?: string | null): string {
+function buildSocialPromoBlock(): string {
+  const items = [
+    SOCIAL_LINKS.instagram ? `<a href="${escapeHtml(SOCIAL_LINKS.instagram)}" style="color:#64748b;text-decoration:underline;">Instagram</a>` : '',
+    SOCIAL_LINKS.threads ? `<a href="${escapeHtml(SOCIAL_LINKS.threads)}" style="color:#64748b;text-decoration:underline;">Threads</a>` : '',
+  ].filter(Boolean)
+  if (items.length === 0) return ''
+  return `<div style="margin-top:6px;">追蹤我們：${items.join(' · ')}，每日市場焦點不漏接。</div>`
+}
+
+function buildUnsubscribeBlock(opts?: { email?: string; token?: string }): string {
+  if (opts?.email && opts?.token) {
+    const url = `${SITE_BASE}/api/market-focus/unsubscribe?email=${encodeURIComponent(opts.email)}&token=${encodeURIComponent(opts.token)}`
+    return `<div style="margin-top:6px;">不想再收到電子報？<a href="${escapeHtml(url)}" style="color:#64748b;text-decoration:underline;">立即退訂</a>。</div>`
+  }
+  return ''
+}
+
+function buildSummaryHtml(
+  summary: string,
+  items: MarketFocusItem[],
+  generatedAtIso?: string | null,
+  opts?: { email?: string; token?: string },
+): string {
   const listHtml = items
     .map((it, i) => {
       const link = it.source_url ?? it.url
@@ -185,6 +213,8 @@ function buildSummaryHtml(summary: string, items: MarketFocusItem[], generatedAt
           • 本信由 Vestential 排程自動產出並寄送（每 4 小時追蹤一次最新市場焦點）。<br/>
           • 篩選範圍涵蓋近 2 天重點報導；內容僅供研究參考，不構成任何買賣投資建議。<br/>
           • 新聞原始全文版權均屬原始媒體所有。<br/>
+          ${buildSocialPromoBlock()}
+          ${buildUnsubscribeBlock(opts)}
           <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1;color:#94a3b8;">
             <a href="${escapeHtml(SITE_BASE)}" style="color:#64748b;text-decoration:underline;">Vestential 首頁</a> · 
             <a href="${escapeHtml(SITE_LINK)}" style="color:#64748b;text-decoration:underline;">市場焦點專頁</a> — 價值投資路上的必備工具
@@ -194,7 +224,12 @@ function buildSummaryHtml(summary: string, items: MarketFocusItem[], generatedAt
     </div>`
 }
 
-function buildSummaryText(summary: string, items: MarketFocusItem[], generatedAtIso?: string | null): string {
+function buildSummaryText(
+  summary: string,
+  items: MarketFocusItem[],
+  generatedAtIso?: string | null,
+  opts?: { email?: string; token?: string },
+): string {
   const timeStr = formatTwDateTime(generatedAtIso ?? new Date().toISOString())
   const list = items
     .map((it, i) => {
@@ -228,10 +263,14 @@ ${list}
 
 ※ 本信由 Vestential 自動排程產生並發送。
 ※ 資料來源涵蓋鉅亨網、經濟日報等財經媒體；內容僅供研究參考，不構成投資建議。
+${opts?.email && opts?.token ? `\n不想再收到電子報？退訂：${SITE_BASE}/api/market-focus/unsubscribe?email=${encodeURIComponent(opts.email)}&token=${encodeURIComponent(opts.token)}` : ''}
 ========================================`
 }
 
-/** 將最新一輪市場焦點總覽寄給 NOTIFY_TO。回傳是否成功送出。 */
+/**
+ * 將最新一輪市場焦點總覽寄給 NOTIFY_TO 與所有 active 訂閱者。
+ * 訂閱者會收到個人化退訂連結。回傳管理員信箱是否寄送成功。
+ */
 export async function sendMarketFocusSummary(): Promise<boolean> {
   const [meta, items] = await Promise.all([getMarketFocusMeta(), getMarketFocus(6, 2)])
   if (!meta?.summary) {
@@ -240,11 +279,30 @@ export async function sendMarketFocusSummary(): Promise<boolean> {
   }
   const dateStr = formatTwDate(meta.generated_at ?? new Date().toISOString())
   const subject = `📬 今日市場焦點 (Vestential) — ${dateStr}（近 2 天重點精選）`
-  return sendMailCore(
+
+  const adminOk = await sendMailCore(
     subject,
     buildSummaryText(meta.summary, items, meta.generated_at),
     buildSummaryHtml(meta.summary, items, meta.generated_at),
   )
+
+  const subscribers = await listActiveMarketFocusSubscribers().catch(() => [])
+  let sentTo = 0
+  for (const sub of subscribers) {
+    const to = sub.email
+    if (!to || !to.includes('@')) continue
+    const ok = await sendMailCore(
+      subject,
+      buildSummaryText(meta.summary, items, meta.generated_at, { email: sub.email, token: sub.token }),
+      buildSummaryHtml(meta.summary, items, meta.generated_at, { email: sub.email, token: sub.token }),
+      to,
+    )
+    if (ok) sentTo += 1
+  }
+  if (subscribers.length > 0) {
+    console.log(`[Notify] 電子報已寄出 ${sentTo}/${subscribers.length} 位訂閱者`)
+  }
+  return adminOk
 }
 
 // ─── ② 異常告警信 ───────────────────────────────────────────────

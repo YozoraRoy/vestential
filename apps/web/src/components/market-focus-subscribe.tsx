@@ -1,0 +1,87 @@
+'use client'
+
+import { Mail } from 'lucide-react'
+import { useState } from 'react'
+
+type SubscribeState = 'idle' | 'loading' | 'done' | 'error'
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+export function MarketFocusSubscribe() {
+  const [email, setEmail] = useState('')
+  const [state, setState] = useState<SubscribeState>('idle')
+  const [message, setMessage] = useState('')
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const value = email.trim()
+    if (!value || !EMAIL_RE.test(value) || value.length > 255) {
+      setState('error')
+      setMessage('請輸入有效的 Email 地址。')
+      return
+    }
+    setState('loading')
+    const res = await fetch('/api/market-focus/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: value }),
+    }).catch(() => null)
+    const body = (await res?.json().catch(() => ({}))) as { success?: boolean; error?: string }
+    if (res?.ok && body.success) {
+      setState('done')
+      setMessage('訂閱成功！市場焦點更新後，最新總覽會寄到您的信箱。')
+    } else {
+      setState('error')
+      setMessage(body?.error ?? '訂閱失敗，請稍後再試。')
+    }
+  }
+
+  return (
+    <section aria-labelledby="newsletter-title" className="mb-10">
+      <div className="rounded-xl border border-[var(--accent)]/30 bg-[var(--accent)]/5 px-6 py-5">
+        <div className="flex items-center gap-2 mb-2">
+          <Mail className="w-4 h-4 text-[var(--accent)]" />
+          <h2 id="newsletter-title" className="text-base font-semibold text-[var(--text-primary)]">
+            訂閱市場焦點電子報
+          </h2>
+        </div>
+        <p className="text-sm text-[var(--text-secondary)] leading-relaxed mb-4">
+          留下 Email，最新一期「市場焦點」總覽更新時自動寄給您，免費且可隨時一鍵退訂。
+        </p>
+        {state === 'done' ? (
+          <p className="text-sm text-[var(--accent-green)] font-medium">{message}</p>
+        ) : (
+          <form onSubmit={submit} className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value)
+                if (state === 'error') {
+                  setState('idle')
+                  setMessage('')
+                }
+              }}
+              placeholder="you@example.com"
+              aria-label="Email"
+              className="flex-1 px-3.5 py-2.5 rounded-lg bg-white/5 border border-white/10 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/60 focus:outline-none focus:border-[var(--accent)]/60"
+            />
+            <button
+              type="submit"
+              disabled={state === 'loading' || email.trim().length === 0}
+              className="px-5 py-2.5 rounded-lg bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition"
+            >
+              {state === 'loading' ? '訂閱中…' : '訂閱'}
+            </button>
+          </form>
+        )}
+        {state === 'error' && <p className="mt-3 text-sm text-[var(--accent-red)]">{message}</p>}
+        <p className="mt-3 text-xs text-[var(--text-secondary)]/80">
+          訂閱即表示同意接收 Vestential 市場焦點電子報；您可隨時使用信件內文退訂連結取消。
+        </p>
+      </div>
+    </section>
+  )
+}
