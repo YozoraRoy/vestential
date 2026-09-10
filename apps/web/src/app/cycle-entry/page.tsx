@@ -31,9 +31,12 @@ export async function generateMetadata() {
   }
 }
 
-function formatDateTime(s: string, locale: string): string {
-  const dt = new Date(s)
-  if (Number.isNaN(dt.getTime())) return s
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+function formatDateTime(s: string | Date, locale: string): string {
+  const dt = typeof s === 'string' ? new Date(s) : s
+  if (!dt || Number.isNaN(dt.getTime())) return String(s ?? '')
   return dt.toLocaleDateString(locale === 'zh-TW' ? 'zh-TW' : locale) + ' ' + dt.toLocaleTimeString(locale === 'zh-TW' ? 'zh-TW' : locale, { hour: '2-digit', minute: '2-digit' })
 }
 
@@ -42,10 +45,8 @@ export default async function CycleEntryPage() {
   const dict = await getDict()
   const ce = dict.cycleEntry
 
-  const [meta, signals] = await Promise.all([
-    getLatestCycleEntryMeta(),
-    getLatestCycleEntryMeta().then((m) => (m ? getCycleEntrySignalsByEdition(m.editionDate) : [])),
-  ])
+  const meta = await getLatestCycleEntryMeta()
+  const signals = meta ? await getCycleEntrySignalsByEdition(meta.editionDate) : []
 
   const viewDict: CycleEntryDict = {
     viewModeList: ce.viewModeList,
@@ -90,7 +91,7 @@ export default async function CycleEntryPage() {
       url: `${BASE_URL}/cycle-entry`,
       inLanguage: locale,
       isPartOf: { '@type': 'WebSite', name: 'Vestential', url: BASE_URL },
-      dateModified: meta?.generatedAt?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+      dateModified: meta?.generatedAt ? new Date(meta.generatedAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
     },
   ]
   if (signals.length > 0) {
