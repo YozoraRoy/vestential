@@ -180,7 +180,7 @@ describe('runSignalBacktest', () => {
     expect(stats.wins + stats.losses + stats.neutral).toBe(stats.totalSignals)
     if (stats.wins + stats.losses > 0) {
       expect(stats.winRate).toBeGreaterThanOrEqual(0)
-      expect(stats.winRate).toBeLessThanOrEqual(1)
+      expect(stats.winRate).toBeLessThanOrEqual(100)
     }
   })
 

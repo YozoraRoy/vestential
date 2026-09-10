@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS cycle_entry_signals (
   bt_wins INTEGER DEFAULT 0,
   bt_losses INTEGER DEFAULT 0,
   bt_neutral INTEGER DEFAULT 0,
-  bt_win_rate REAL,                           -- 勝率（0~1）
+  bt_win_rate REAL,                           -- 勝率百分比（0~100）
   bt_avg_days REAL,                           -- 獲利交易平均達成天數
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );

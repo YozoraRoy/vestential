@@ -45,7 +45,7 @@ export interface EntryStats {
   wins: number
   losses: number
   neutral: number
-  /** 勝率 = wins / (wins+losses)；無判定結果時 null */
+  /** 勝率百分比數值（0~100，保留一位小數，如 66.7 代表 66.7%）；無判定結果時 null */
   winRate: number | null
   /** 獲利交易平均達成天數；無 win 時 null */
   avgDaysToTarget: number | null

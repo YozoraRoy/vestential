@@ -210,7 +210,7 @@ export function runSignalBacktest(ohlcv: OHLCV[], params: EntryStatsParams = {})
   const losses = trades.filter((t) => t.outcome === 'loss').length
   const neutral = trades.filter((t) => t.outcome === 'neutral').length
   const decided = wins + losses
-  const winRate = decided > 0 ? wins / decided : null
+  const winRate = decided > 0 ? Math.round((wins / decided) * 1000) / 10 : null
   const winTrades = trades.filter((t) => t.outcome === 'win' && t.daysToTarget != null)
   const avgDaysToTarget =
     winTrades.length > 0

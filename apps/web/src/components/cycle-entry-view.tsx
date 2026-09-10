@@ -69,6 +69,13 @@ function fmt(n: number | null | undefined, digits = 1) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: digits })
 }
 
+function formatWinRate(rate: number | null | undefined): string {
+  if (rate == null || Number.isNaN(rate)) return '—'
+  // 向下相容：若歷史版次資料庫仍存 0~1 小數（如 0.5），自動換算為百分比（50）
+  const pct = rate > 0 && rate <= 1 ? rate * 100 : rate
+  return `${Math.round(pct)}%`
+}
+
 interface Props {
   signals: CycleEntrySignalRow[]
   dict: CycleEntryDict
@@ -150,7 +157,7 @@ export function CycleEntryView({ signals, dict }: Props) {
                         {dict.btSignals} {s.btTotalSignals ?? '—'}
                       </div>
                       <div className="text-xs text-[var(--accent-green)] font-semibold whitespace-nowrap tabular-nums">
-                        勝率 {s.btWinRate != null ? `${s.btWinRate}%` : '—'}
+                        勝率 {formatWinRate(s.btWinRate)}
                       </div>
                       <div className="text-xs text-[var(--text-secondary)] whitespace-nowrap tabular-nums">
                         {dict.btAvgDays} {s.btAvgDays ?? '—'}
@@ -199,7 +206,7 @@ export function CycleEntryView({ signals, dict }: Props) {
                   </div>
                   <div>
                     <dt className="text-[var(--text-secondary)]">{dict.btWinRate}</dt>
-                    <dd className="text-[var(--accent-green)] font-semibold tabular-nums mt-0.5">{s.btWinRate != null ? `${s.btWinRate}%` : '—'}</dd>
+                    <dd className="text-[var(--accent-green)] font-semibold tabular-nums mt-0.5">{formatWinRate(s.btWinRate)}</dd>
                   </div>
                   <div>
                     <dt className="text-[var(--text-secondary)]">{dict.btSignals}</dt>
