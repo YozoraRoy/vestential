@@ -1,13 +1,22 @@
 'use client'
 
-import { Mail } from 'lucide-react'
+import { Instagram, Mail, MessageCircle } from 'lucide-react'
 import { useState } from 'react'
 
 type SubscribeState = 'idle' | 'loading' | 'done' | 'error'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-export function MarketFocusSubscribe() {
+export interface MarketFocusSocialLinks {
+  instagram?: string
+  threads?: string
+}
+
+interface MarketFocusSubscribeProps {
+  socialLinks?: MarketFocusSocialLinks
+}
+
+export function MarketFocusSubscribe({ socialLinks }: MarketFocusSubscribeProps) {
   const [email, setEmail] = useState('')
   const [state, setState] = useState<SubscribeState>('idle')
   const [message, setMessage] = useState('')
@@ -29,7 +38,7 @@ export function MarketFocusSubscribe() {
     const body = (await res?.json().catch(() => ({}))) as { success?: boolean; error?: string }
     if (res?.ok && body.success) {
       setState('done')
-      setMessage('訂閱成功！市場焦點更新後，最新總覽會寄到您的信箱。')
+      setMessage('確認信已寄出！請到信箱點擊信中連結完成訂閱。')
     } else {
       setState('error')
       setMessage(body?.error ?? '訂閱失敗，請稍後再試。')
@@ -79,8 +88,36 @@ export function MarketFocusSubscribe() {
         )}
         {state === 'error' && <p className="mt-3 text-sm text-[var(--accent-red)]">{message}</p>}
         <p className="mt-3 text-xs text-[var(--text-secondary)]/80">
-          訂閱即表示同意接收 Vestential 市場焦點電子報；您可隨時使用信件內文退訂連結取消。
+          訂閱採雙重驗證（double opt-in）：提交後會收到一封確認信，點擊確認才算完成訂閱。完成後您可隨時使用信件內文退訂連結取消。
         </p>
+        {(socialLinks?.instagram || socialLinks?.threads) && (
+          <div className="mt-4 pt-3 border-t border-white/10 text-xs text-[var(--text-secondary)]/80 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span>追蹤我們：</span>
+            {socialLinks.instagram && (
+              <a
+                href={socialLinks.instagram}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline font-medium"
+              >
+                <Instagram className="w-3.5 h-3.5" />
+                Instagram
+              </a>
+            )}
+            {socialLinks.threads && (
+              <a
+                href={socialLinks.threads}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline font-medium"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                Threads
+              </a>
+            )}
+            <span className="text-[var(--text-secondary)]/60">每日市場焦點不漏接</span>
+          </div>
+        )}
       </div>
     </section>
   )

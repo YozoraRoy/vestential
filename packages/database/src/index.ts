@@ -29,7 +29,7 @@ export {
   saveSocialCardImage, getSocialCardImage,
   getAgentSetting, setAgentSetting, listAgentSettings,
   getUserUsageReport,
-  subscribeMarketFocus, unsubscribeMarketFocusByToken, setMarketFocusSubscriberStatus,
+  subscribeMarketFocus, confirmMarketFocusSubscription, unsubscribeMarketFocusByToken, setMarketFocusSubscriberStatus,
   deleteMarketFocusSubscriber, listMarketFocusSubscribers, listActiveMarketFocusSubscribers,
   countMarketFocusSubscribers,
 } from './db.js'

@@ -15,6 +15,7 @@ interface Subscriber {
 interface Stats {
   total: number
   active: number
+  pending: number
   unsubscribed: number
 }
 
@@ -29,7 +30,7 @@ function fmt(s: string | null | undefined): string {
 
 export function SubscribersClient() {
   const [rows, setRows] = useState<Subscriber[]>([])
-  const [stats, setStats] = useState<Stats>({ total: 0, active: 0, unsubscribed: 0 })
+  const [stats, setStats] = useState<Stats>({ total: 0, active: 0, pending: 0, unsubscribed: 0 })
   const [result, setResult] = useState<Result>(null)
   const [busy, setBusy] = useState(false)
 
@@ -38,7 +39,7 @@ export function SubscribersClient() {
     if (r.ok && (r.body as ListResponse).success) {
       const b = r.body as ListResponse
       setRows(b.subscribers ?? [])
-      setStats(b.stats ?? { total: 0, active: 0, unsubscribed: 0 })
+      setStats(b.stats ?? { total: 0, active: 0, pending: 0, unsubscribed: 0 })
     } else {
       setResult({ ok: false, message: (r.body as ListResponse)?.error ?? '載入失敗' })
     }
@@ -56,8 +57,8 @@ export function SubscribersClient() {
     if (r.ok && (r.body as ListResponse).success) {
       const b = r.body as ListResponse
       setRows(b.subscribers ?? [])
-      setStats(b.stats ?? { total: 0, active: 0, unsubscribed: 0 })
-      const label = action === 'delete' ? '已刪除' : action === 'restore' ? '已恢復訂閱' : '已取消訂閱'
+      setStats(b.stats ?? { total: 0, active: 0, pending: 0, unsubscribed: 0 })
+      const label = action === 'delete' ? '已刪除' : action === 'restore' ? '已核准/恢復訂閱' : '已取消訂閱'
       setResult({ ok: true, message: `${sub.email} ${label}` })
     } else {
       setResult({ ok: false, message: (r.body as ListResponse)?.error ?? '操作失敗' })
@@ -65,14 +66,17 @@ export function SubscribersClient() {
   }
 
   return (
-    <SectionPageWrapper title="訂閱名單" subtitle="市場焦點電子報的訂閱者管理：查看、取消訂閱、恢復或刪除。" >
+    <SectionPageWrapper title="訂閱名單" subtitle="市場焦點電子報的訂閱者管理：查看、核准待驗證、取消訂閱、恢復或刪除。" >
       <ResultBanner result={result} onDismiss={() => setResult(null)} />
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <Card title="總訂閱">
           <p className="text-3xl font-bold text-[var(--text-primary)]">{stats.total}</p>
         </Card>
         <Card title="有效訂閱">
           <p className="text-3xl font-bold text-[var(--accent-green)]">{stats.active}</p>
+        </Card>
+        <Card title="待驗證">
+          <p className="text-3xl font-bold text-amber-300">{stats.pending}</p>
         </Card>
         <Card title="已退訂">
           <p className="text-3xl font-bold text-[var(--text-secondary)]">{stats.unsubscribed}</p>
@@ -104,10 +108,12 @@ export function SubscribersClient() {
                         className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
                           s.status === 'active'
                             ? 'bg-[var(--accent-green)]/10 text-[var(--accent-green)]'
-                            : 'bg-[var(--accent-red)]/10 text-[var(--accent-red)]'
+                            : s.status === 'pending'
+                              ? 'bg-amber-400/10 text-amber-300'
+                              : 'bg-[var(--accent-red)]/10 text-[var(--accent-red)]'
                         }`}
                       >
-                        {s.status === 'active' ? '訂閱中' : '已退訂'}
+                        {s.status === 'active' ? '訂閱中' : s.status === 'pending' ? '待驗證' : '已退訂'}
                       </span>
                     </td>
                     <td className="py-2 pr-4 text-[var(--text-secondary)]">{fmt(s.created_at)}</td>
@@ -119,7 +125,7 @@ export function SubscribersClient() {
                         </button>
                       ) : (
                         <button className={btnGhost} disabled={busy} onClick={() => act('restore', s)}>
-                          恢復訂閱
+                          {s.status === 'pending' ? '核准' : '恢復訂閱'}
                         </button>
                       )}
                       <button className={`${btnGhost} ml-2 hover:!border-[var(--accent-red)] hover:!text-[var(--accent-red)]`} disabled={busy} onClick={() => act('delete', s)}>

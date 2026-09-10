@@ -271,6 +271,52 @@ ${opts?.email && opts?.token ? `\n不想再收到電子報？退訂：${SITE_BAS
  * 將最新一輪市場焦點總覽寄給 NOTIFY_TO 與所有 active 訂閱者。
  * 訂閱者會收到個人化退訂連結。回傳管理員信箱是否寄送成功。
  */
+// ─── ①a 訂閱確認信（double opt-in）───────────────────────────
+export async function sendMarketFocusConfirmEmail(email: string, token: string): Promise<boolean> {
+  const confirmUrl = `${SITE_BASE}/api/market-focus/confirm?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
+  const subject = '📬 確認訂閱 Vestential 市場焦點'
+  const text = `您好，
+
+您剛剛在 Vestential「市場焦點」頁面提交了電子報訂閱申請。
+請點選下方連結完成確認訂閱（若您並未申請，請直接忽略此信）：
+
+${confirmUrl}
+
+完成確認後，最新一期市場焦點總覽更新時，就會自動寄送到您的信箱 ${email}。
+退訂與管理，之後信件內也有提供。
+
+—— Vestential 團隊`
+  const html = `
+    <div style="background:#f1f5f9;padding:24px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,Microsoft JhengHei,sans-serif;">
+      <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
+        ${buildBrandHeader()}
+        <div style="padding:26px 24px;">
+          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:4px;">📬 確認您的訂閱</div>
+          <div style="font-size:13px;color:#64748b;margin-bottom:16px;">您剛剛在 Vestential 市場焦點頁面提交了電子報訂閱申請。</div>
+          <div style="font-size:14px;color:#1e293b;line-height:1.8;margin-bottom:24px;">
+            請點選下方按鈕完成確認訂閱。若您並未申請訂閱，請直接忽略這封信。
+          </div>
+          <div style="text-align:center;margin-bottom:24px;">
+            <a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 30px;border-radius:9999px;box-shadow:0 2px 4px rgba(37,99,235,0.2);">✅ 確認訂閱市場焦點</a>
+          </div>
+          <div style="font-size:12px;color:#64748b;line-height:1.8;">
+            · 確認後，最新一期市場焦點總覽更新時即自動寄送。<br/>
+            · 若按鈕無法點擊，請複製以下連結到瀏覽器開啟：<br/>
+            <a href="${escapeHtml(confirmUrl)}" style="color:#2563eb;word-break:break-all;">${escapeHtml(confirmUrl)}</a>
+          </div>
+        </div>
+        <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 24px;font-size:12px;color:#64748b;line-height:1.8;">
+          ${buildSocialPromoBlock()}
+          <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1;color:#94a3b8;">
+            <a href="${escapeHtml(SITE_BASE)}" style="color:#64748b;text-decoration:underline;">Vestential 首頁</a> ·
+            <a href="${escapeHtml(SITE_LINK)}" style="color:#64748b;text-decoration:underline;">市場焦點專頁</a> — 價值投資路上的必備工具
+          </div>
+        </div>
+      </div>
+    </div>`
+  return sendMailCore(subject, text, html, email)
+}
+
 export async function sendMarketFocusSummary(): Promise<boolean> {
   const [meta, items] = await Promise.all([getMarketFocusMeta(), getMarketFocus(6, 2)])
   if (!meta?.summary) {

@@ -3959,7 +3959,7 @@ export async function getUserUsageReport(): Promise<UserUsageReportRow[]> {
 
 // ─── 市場焦點電子報訂閱 (market_focus_subscribers) ────────────────
 
-export type MarketFocusSubscriberStatus = 'active' | 'unsubscribed'
+export type MarketFocusSubscriberStatus = 'active' | 'pending' | 'unsubscribed'
 
 export interface MarketFocusSubscriberRow {
   id: number
@@ -3979,7 +3979,11 @@ function newSubscriberToken(): string {
   return randomBytes(24).toString('base64url')
 }
 
-/** 訂閱（或重新啟用）：email 已存在時改為 active 並換新 token。回傳訂閱紀錄。 */
+/**
+ * 訂閱（double opt-in 第一段）：建立 pending 紀錄並換發新 token。
+ * 確認信寄出後，使用者點擊 /api/market-focus/confirm 才會轉為 active。
+ * 已存在的 email（含 active）一律回 pending 並換新 token，需重新確認。
+ */
 export async function subscribeMarketFocus(email: string): Promise<MarketFocusSubscriberRow> {
   const normalized = email.trim().toLowerCase().slice(0, 255)
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
@@ -3992,7 +3996,7 @@ export async function subscribeMarketFocus(email: string): Promise<MarketFocusSu
   if (existing) {
     await dbExecute(
       `UPDATE market_focus_subscribers
-         SET status = 'active', token = @token, unsubscribed_at = NULL, updated_at = @updatedAt
+         SET status = 'pending', token = @token, unsubscribed_at = NULL, updated_at = @updatedAt
        WHERE email = @email`,
       { email: normalized, token: newSubscriberToken(), updatedAt: nowIso() },
     )
@@ -4000,7 +4004,7 @@ export async function subscribeMarketFocus(email: string): Promise<MarketFocusSu
     try {
       await dbExecute(
         `INSERT INTO market_focus_subscribers (email, status, token, created_at, updated_at)
-         VALUES (@email, 'active', @token, @createdAt, @updatedAt)`,
+         VALUES (@email, 'pending', @token, @createdAt, @updatedAt)`,
         { email: normalized, token: newSubscriberToken(), createdAt: nowIso(), updatedAt: nowIso() },
       )
     } catch (e) {
@@ -4021,6 +4025,24 @@ export async function subscribeMarketFocus(email: string): Promise<MarketFocusSu
   )
   if (!row) throw new Error('subscribeMarketFocus: row not found')
   return row
+}
+
+/** 訂閱確認（double opt-in 第二段）：以 email + token 驗證，僅 pending 可轉 active；已 active 時冪等回傳 true。 */
+export async function confirmMarketFocusSubscription(email: string, token: string): Promise<boolean> {
+  const row = await dbQueryFirst<MarketFocusSubscriberRow>(
+    'SELECT * FROM market_focus_subscribers WHERE email = @email LIMIT 1',
+    { email: email.trim().toLowerCase() },
+  )
+  if (!row || row.token !== token) return false
+  if (row.status === 'active') return true
+  if (row.status !== 'pending') return false
+  await dbExecute(
+    `UPDATE market_focus_subscribers
+       SET status = 'active', unsubscribed_at = NULL, updated_at = @updatedAt
+     WHERE id = @id`,
+    { id: row.id, updatedAt: nowIso() },
+  )
+  return true
 }
 
 /** 公開退訂：以 email + token 驗證；token 不符或已退訂時回傳 false。 */
@@ -4076,17 +4098,19 @@ export function listActiveMarketFocusSubscribers(): Promise<MarketFocusSubscribe
   )
 }
 
-/** 訂閱統計：總數 / 有效 / 已退訂。 */
-export async function countMarketFocusSubscribers(): Promise<{ total: number; active: number; unsubscribed: number }> {
-  const row = await dbQueryFirst<{ total: number; active: number; unsubscribed: number }>(`
+/** 訂閱統計：總數 / 有效 / 待確認 / 已退訂。 */
+export async function countMarketFocusSubscribers(): Promise<{ total: number; active: number; pending: number; unsubscribed: number }> {
+  const row = await dbQueryFirst<{ total: number; active: number; pending: number; unsubscribed: number }>(`
     SELECT COUNT(*) AS total,
            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
+           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
            SUM(CASE WHEN status = 'unsubscribed' THEN 1 ELSE 0 END) AS unsubscribed
     FROM market_focus_subscribers
   `)
   return {
     total: Number(row?.total ?? 0),
     active: Number(row?.active ?? 0),
+    pending: Number(row?.pending ?? 0),
     unsubscribed: Number(row?.unsubscribed ?? 0),
   }
 }

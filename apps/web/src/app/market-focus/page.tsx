@@ -113,7 +113,12 @@ export default async function MarketFocusPage() {
       ) : null}
 
       {/* 電子報訂閱 */}
-      <MarketFocusSubscribe />
+      <MarketFocusSubscribe
+        socialLinks={{
+          instagram: process.env.INSTAGRAM_PROFILE_URL || undefined,
+          threads: process.env.THREADS_PROFILE_URL || undefined,
+        }}
+      />
 
       {/* 精選新聞 */}
       <section aria-labelledby="market-news" className="mb-10">
