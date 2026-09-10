@@ -1,4 +1,4 @@
-import { dbQueryFirst, getMarketFocusMeta } from '@stock/database'
+import { dbQueryFirst, getMarketFocusMeta, getLatestCycleEntryMeta } from '@stock/database'
 import { getLastMarketTradingDay, isTaiwanMarketTradingDay, formatDateIso } from '@/utils/taiwan-calendar'
 import { FALLBACK_SUMMARY_PREFIX } from '@/lib/email'
 
@@ -17,6 +17,7 @@ export interface HealthReport {
 }
 
 export const MARKET_FOCUS_STALE_MS = 5 * 60 * 60 * 1000
+export const CYCLE_ENTRY_STALE_MS = 48 * 60 * 60 * 1000
 
 function toCompact(d: Date): string {
   const y = d.getFullYear()
@@ -94,6 +95,29 @@ export async function runHealthChecks(): Promise<HealthReport> {
     }
   } catch (e: any) {
     issues.push({ code: 'mf_meta_error', severity: 'error', message: `market_focus_meta 查詢失敗: ${e.message}` })
+  }
+
+  // ── cycle_entry 資料鮮度 ────────────────────────────────────────
+  try {
+    const meta = await getLatestCycleEntryMeta()
+    checks.cycleEntry = {
+      exists: !!meta?.editionDate,
+      editionDate: meta?.editionDate ?? null,
+      generatedAt: meta?.generatedAt ?? null,
+      signalCount: meta?.signalCount ?? 0,
+    }
+    const ts = meta?.generatedAt ? new Date(meta.generatedAt).getTime() : NaN
+    if (!meta?.editionDate) {
+      issues.push({ code: 'cycle_entry_missing', severity: 'error', message: 'cycle_entry 從未產出版次(掃描未執行過?)' })
+    } else if (Number.isNaN(ts) || now - ts > CYCLE_ENTRY_STALE_MS) {
+      issues.push({
+        code: 'cycle_entry_stale',
+        severity: 'warn',
+        message: `cycle_entry 最新版次 ${meta.editionDate} 更新於 ${meta.generatedAt}（已超過 48 小時未刷新；週末或非交易時段屬正常現象）`,
+      })
+    }
+  } catch (e: any) {
+    issues.push({ code: 'cycle_entry_error', severity: 'error', message: `cycle_entry 查詢失敗: ${e.message}` })
   }
 
   // ── odd_lot 最新交易日 ─────────────────────────────────────────

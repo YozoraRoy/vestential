@@ -57,6 +57,8 @@ export interface Dict {
     portfolioDesc: string
     backtestTitle: string
     backtestDesc: string
+    cycleEntryTitle: string
+    cycleEntryDesc: string
     optionsTitle: string
     optionsDesc: string
     agentTitle: string
@@ -599,6 +601,50 @@ export interface Dict {
     guestRedeemed: string
     guestErrCodeRequired: string
     guestAiLoginRequired: string
+  }
+  cycleEntry: {
+    metaTitle: string
+    metaDesc: string
+    pageTitle: string
+    pageDesc: string
+    badge: string
+    summaryTitle: string
+    updatedAt: string
+    emptyTitle: string
+    emptyDesc: string
+    viewModeList: string
+    viewModeCard: string
+    colRank: string
+    colName: string
+    colStage: string
+    colRules: string
+    colPrice: string
+    colScore: string
+    colBacktest: string
+    aiNoteTitle: string
+    btTitle: string
+    btSignals: string
+    btWinRate: string
+    btAvgDays: string
+    stageNearHigh: string
+    stageMildPullback: string
+    stagePullback: string
+    stageDeepPullback: string
+    ruleR1: string
+    ruleR2: string
+    ruleR3: string
+    ruleR4: string
+    ruleR5: string
+    disclaimer: string
+    methodTitle: string
+    methodIntro: string
+    methodR1: string
+    methodR2: string
+    methodR3: string
+    methodR4: string
+    methodR5: string
+    methodGate: string
+    backHome: string
   }
   agentArena: {
     metaTitle: string

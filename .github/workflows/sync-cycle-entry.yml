@@ -1,0 +1,71 @@
+name: Sync cycle-entry (weekly large-cap entry signals)
+
+on:
+  schedule:
+    # 每個台灣交易日（UTC 08:00 = TW 16:00，盤後）執行一次盤後掃描
+    - cron: '0 8 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trigger cycle-entry refresh (background job)
+        id: trigger
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          CODE=$(curl -s -o /tmp/ce_resp.json -w "%{http_code}" \
+            --max-time 60 \
+            -X POST \
+            -H "Authorization: Bearer $SYNC_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://vestential.com/api/cycle-entry/refresh")
+          echo "HTTP $CODE"
+          cat /tmp/ce_resp.json
+          echo ""
+          if [ "$CODE" != "200" ]; then
+            echo "::error::cycle-entry refresh trigger failed (HTTP $CODE)"
+            exit 1
+          fi
+          JOB_ID=$(python3 -c "import sys,json;d=json.load(open('/tmp/ce_resp.json'));print(d.get('jobId',''))")
+          if [ -z "$JOB_ID" ]; then
+            echo "::error::no jobId in response"
+            exit 1
+          fi
+          echo "job-id=$JOB_ID"
+          echo "jobId=$JOB_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for cycle-entry job completion
+        id: wait
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          JOB_ID: ${{ steps.trigger.outputs.jobId }}
+        run: |
+          for i in $(seq 1 200); do
+            CODE=$(curl -s -o /tmp/ce_status.json -w "%{http_code}" --max-time 30 \
+              -H "Authorization: Bearer $SYNC_TOKEN" \
+              "https://vestential.com/api/cycle-entry/refresh/status?jobId=$JOB_ID" || echo "000")
+            if [ "$CODE" != "200" ]; then
+              echo "attempt $i -> HTTP $CODE (retrying)"
+              sleep 10
+              continue
+            fi
+            STATUS=$(python3 -c "import sys,json;d=json.load(open('/tmp/ce_status.json'));j=d.get('job',{});print(j.get('status',''))")
+            echo "attempt $i -> status=$STATUS"
+            if [ "$STATUS" = "done" ]; then
+              python3 -c "import sys,json;d=json.load(open('/tmp/ce_status.json'));j=d['job'];print(json.dumps({'count':j.get('count'),'editionDate':j.get('editionDate')},ensure_ascii=False))"
+              echo "::notice::cycle-entry refresh completed"
+              exit 0
+            fi
+            if [ "$STATUS" = "failed" ]; then
+              echo "::error::cycle-entry refresh failed: $(python3 -c "import sys,json;d=json.load(open('/tmp/ce_status.json'));print(d['job'].get('error',''))")"
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "::error::cycle-entry refresh timed out waiting for job"
+          exit 1

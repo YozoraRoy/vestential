@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 const LINKS = [
   { href: '/admin', label: '總覽', icon: '◈' },
   { href: '/admin/market-focus', label: '市場焦點', icon: '✦' },
+  { href: '/admin/cycle-entry', label: '週期進場', icon: '⌁' },
   { href: '/admin/social', label: '社群小編', icon: '❖' },
   { href: '/admin/subscribers', label: '訂閱名單', icon: '✉' },
   { href: '/admin/arena', label: '競技場', icon: '⚔' },

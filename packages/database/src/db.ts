@@ -424,7 +424,7 @@ function getSqliteDb(): Database.Database | null {
         PRIMARY KEY (edition_key, style)
       );
 
-      CREATE TABLE IF NOT EXISTS market_focus_subscribers (
+CREATE TABLE IF NOT EXISTS market_focus_subscribers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT NOT NULL UNIQUE,
         status TEXT NOT NULL DEFAULT 'active',
@@ -434,6 +434,46 @@ function getSqliteDb(): Database.Database | null {
         unsubscribed_at TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_market_focus_subscribers_status ON market_focus_subscribers(status);
+
+      CREATE TABLE IF NOT EXISTS cycle_entry_signals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        edition_date TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        name TEXT,
+        market_cap REAL,
+        signal_rank INTEGER,
+        price REAL,
+        entry_price_hint REAL,
+        score INTEGER NOT NULL DEFAULT 0,
+        matched_rules TEXT NOT NULL DEFAULT '',
+        cycle_stage TEXT,
+        pct_off_52w_high REAL,
+        pct_off_52w_low REAL,
+        rsi REAL,
+        ma20 REAL,
+        ma60 REAL,
+        macd_hist REAL,
+        llm_note TEXT,
+        bt_total_signals INTEGER DEFAULT 0,
+        bt_wins INTEGER DEFAULT 0,
+        bt_losses INTEGER DEFAULT 0,
+        bt_neutral INTEGER DEFAULT 0,
+        bt_win_rate REAL,
+        bt_avg_days REAL,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_cycle_entry_signals_date ON cycle_entry_signals(edition_date);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cycle_entry_signals_unique ON cycle_entry_signals(edition_date, symbol);
+
+      CREATE TABLE IF NOT EXISTS cycle_entry_meta (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        edition_date TEXT NOT NULL UNIQUE,
+        summary TEXT,
+        signal_count INTEGER NOT NULL DEFAULT 0,
+        generated_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_cycle_entry_meta_date ON cycle_entry_meta(edition_date);
+
     `)
 
     return _db
@@ -944,6 +984,51 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           unsubscribed_at DATETIME2
         );
         CREATE INDEX idx_market_focus_subscribers_status ON market_focus_subscribers(status);
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'cycle_entry_signals')
+      BEGIN
+        CREATE TABLE cycle_entry_signals (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          edition_date NVARCHAR(20) NOT NULL,
+          symbol NVARCHAR(30) NOT NULL,
+          name NVARCHAR(100),
+          market_cap FLOAT,
+          signal_rank INT,
+          price FLOAT,
+          entry_price_hint FLOAT,
+          score INT NOT NULL DEFAULT 0,
+          matched_rules NVARCHAR(50) NOT NULL DEFAULT '',
+          cycle_stage NVARCHAR(30),
+          pct_off_52w_high FLOAT,
+          pct_off_52w_low FLOAT,
+          rsi FLOAT,
+          ma20 FLOAT,
+          ma60 FLOAT,
+          macd_hist FLOAT,
+          llm_note NVARCHAR(2000),
+          bt_total_signals INT DEFAULT 0,
+          bt_wins INT DEFAULT 0,
+          bt_losses INT DEFAULT 0,
+          bt_neutral INT DEFAULT 0,
+          bt_win_rate FLOAT,
+          bt_avg_days FLOAT,
+          created_at DATETIME2 DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_cycle_entry_signals_date ON cycle_entry_signals(edition_date);
+        CREATE UNIQUE INDEX idx_cycle_entry_signals_unique ON cycle_entry_signals(edition_date, symbol);
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'cycle_entry_meta')
+      BEGIN
+        CREATE TABLE cycle_entry_meta (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          edition_date NVARCHAR(20) NOT NULL UNIQUE,
+          summary NVARCHAR(MAX),
+          signal_count INT NOT NULL DEFAULT 0,
+          generated_at DATETIME2 DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_cycle_entry_meta_date ON cycle_entry_meta(edition_date);
       END
     `)
 
@@ -2082,6 +2167,171 @@ export async function getMarketFocusMeta(): Promise<MarketFocusMeta | null> {
     'SELECT id, summary, generated_at FROM market_focus_meta ORDER BY id DESC LIMIT 1',
   )
   return rows[0] ?? null
+}
+
+// ─── Cycle Entry (週期進場模型預估) ───────────────────────────────
+export interface CycleEntrySignalRow {
+  id?: number
+  editionDate: string
+  symbol: string
+  name: string | null
+  marketCap: number | null
+  signalRank: number | null
+  price: number | null
+  entryPriceHint: number | null
+  score: number
+  matchedRules: string
+  cycleStage: string | null
+  pctOff52wHigh: number | null
+  pctOff52wLow: number | null
+  rsi: number | null
+  ma20: number | null
+  ma60: number | null
+  macdHist: number | null
+  llmNote: string | null
+  btTotalSignals: number | null
+  btWins: number | null
+  btLosses: number | null
+  btNeutral: number | null
+  btWinRate: number | null
+  btAvgDays: number | null
+  createdAt?: string
+}
+
+export interface CycleEntryMetaRow {
+  id?: number
+  editionDate: string
+  summary: string | null
+  signalCount: number
+  generatedAt: string | null
+}
+
+/** 置換指定版次的週期進場訊號清單（先清除同版次既有資料再寫入）。 */
+export async function saveCycleEntrySignals(
+  editionDate: string,
+  items: Omit<CycleEntrySignalRow, 'editionDate'>[],
+): Promise<void> {
+  await dbExecute('DELETE FROM cycle_entry_signals WHERE edition_date = @editionDate', { editionDate })
+  for (const it of items) {
+    await dbExecute(
+      `INSERT INTO cycle_entry_signals (
+        edition_date, symbol, name, market_cap, signal_rank, price, entry_price_hint,
+        score, matched_rules, cycle_stage, pct_off_52w_high, pct_off_52w_low,
+        rsi, ma20, ma60, macd_hist, llm_note,
+        bt_total_signals, bt_wins, bt_losses, bt_neutral, bt_win_rate, bt_avg_days
+      ) VALUES (
+        @editionDate, @symbol, @name, @marketCap, @signalRank, @price, @entryPriceHint,
+        @score, @matchedRules, @cycleStage, @pctOff52wHigh, @pctOff52wLow,
+        @rsi, @ma20, @ma60, @macdHist, @llmNote,
+        @btTotalSignals, @btWins, @btLosses, @btNeutral, @btWinRate, @btAvgDays
+      )`,
+      {
+        editionDate,
+        symbol: it.symbol.slice(0, 30),
+        name: it.name ? it.name.slice(0, 100) : null,
+        marketCap: it.marketCap,
+        signalRank: it.signalRank,
+        price: it.price,
+        entryPriceHint: it.entryPriceHint,
+        score: it.score,
+        matchedRules: it.matchedRules.slice(0, 50),
+        cycleStage: it.cycleStage ? it.cycleStage.slice(0, 30) : null,
+        pctOff52wHigh: it.pctOff52wHigh,
+        pctOff52wLow: it.pctOff52wLow,
+        rsi: it.rsi,
+        ma20: it.ma20,
+        ma60: it.ma60,
+        macdHist: it.macdHist,
+        llmNote: it.llmNote ? it.llmNote.slice(0, 2000) : null,
+        btTotalSignals: it.btTotalSignals ?? 0,
+        btWins: it.btWins ?? 0,
+        btLosses: it.btLosses ?? 0,
+        btNeutral: it.btNeutral ?? 0,
+        btWinRate: it.btWinRate,
+        btAvgDays: it.btAvgDays,
+      },
+    )
+  }
+}
+
+/** 讀取指定版次的週期進場訊號（依 signal_rank 排序）。 */
+export async function getCycleEntrySignalsByEdition(
+  editionDate: string,
+): Promise<CycleEntrySignalRow[]> {
+  return dbQueryAll<CycleEntrySignalRow>(
+    `SELECT id, edition_date AS editionDate, symbol, name, market_cap AS marketCap,
+            signal_rank AS signalRank, price, entry_price_hint AS entryPriceHint,
+            score, matched_rules AS matchedRules, cycle_stage AS cycleStage,
+            pct_off_52w_high AS pctOff52wHigh, pct_off_52w_low AS pctOff52wLow,
+            rsi, ma20, ma60, macd_hist AS macdHist, llm_note AS llmNote,
+            bt_total_signals AS btTotalSignals, bt_wins AS btWins, bt_losses AS btLosses,
+            bt_neutral AS btNeutral, bt_win_rate AS btWinRate, bt_avg_days AS btAvgDays,
+            created_at AS createdAt
+     FROM cycle_entry_signals WHERE edition_date = @editionDate
+     ORDER BY signal_rank ASC`,
+    { editionDate },
+  )
+}
+
+/** 覆寫指定版次的週期進場 meta（單列/版次，upsert）。 */
+export async function saveCycleEntryMeta(meta: {
+  editionDate: string
+  summary: string | null
+  signalCount: number
+  generatedAt: string
+}): Promise<void> {
+  await dbExecute('DELETE FROM cycle_entry_meta WHERE edition_date = @editionDate', {
+    editionDate: meta.editionDate,
+  })
+  await dbExecute(
+    'INSERT INTO cycle_entry_meta (edition_date, summary, signal_count, generated_at) VALUES (@editionDate, @summary, @signalCount, @generatedAt)',
+    {
+      editionDate: meta.editionDate,
+      summary: meta.summary ? meta.summary.slice(0, 20000) : null,
+      signalCount: meta.signalCount,
+      generatedAt: meta.generatedAt.slice(0, 100),
+    },
+  )
+}
+
+/** 讀取最新版次的 meta（供首頁/公開 API/健康檢查）。 */
+export async function getLatestCycleEntryMeta(): Promise<CycleEntryMetaRow | null> {
+  const rows = await dbQueryAll<CycleEntryMetaRow>(
+    `SELECT id, edition_date AS editionDate, summary, signal_count AS signalCount, generated_at AS generatedAt
+     FROM cycle_entry_meta ORDER BY edition_date DESC LIMIT 1`,
+  )
+  return rows[0] ?? null
+}
+
+/** 讀取指定版次的 meta。 */
+export async function getCycleEntryMetaByEdition(editionDate: string): Promise<CycleEntryMetaRow | null> {
+  const rows = await dbQueryAll<CycleEntryMetaRow>(
+    `SELECT id, edition_date AS editionDate, summary, signal_count AS signalCount, generated_at AS generatedAt
+     FROM cycle_entry_meta WHERE edition_date = @editionDate LIMIT 1`,
+    { editionDate },
+  )
+  return rows[0] ?? null
+}
+
+/** 列出歷史版次（後台瀏覽用）。 */
+export async function listCycleEntryEditions(limit = 20): Promise<
+  { editionDate: string; count: number; generatedAt: string | null }[]
+> {
+  return dbQueryAll(
+    `SELECT edition_date AS editionDate, COUNT(*) AS count,
+            MAX(created_at) AS generatedAt
+     FROM cycle_entry_signals
+     GROUP BY edition_date
+     ORDER BY edition_date DESC
+     LIMIT @limit`,
+    { limit: Number(limit) || 20 },
+  )
+}
+
+/** 統計全部訊號筆數（健康檢查用）。 */
+export async function countCycleEntrySignals(): Promise<number> {
+  const row = await dbQueryFirst<{ cnt: number }>('SELECT COUNT(*) AS cnt FROM cycle_entry_signals')
+  return row?.cnt ?? 0
 }
 
 // ─── Users / Auth / Quota ────────────────────────────────────────

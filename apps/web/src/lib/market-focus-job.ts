@@ -42,6 +42,9 @@ const JOBS = new Map<string, MarketFocusJob>()
 const MAX_KEPT_JOBS = 20
 let activeJobId: string | null = null
 
+/** Job 總逾時：25 分鐘（LLM 每次呼叫已有 180s abort，但 429 退避＋fallback 累積可能更久）。 */
+export const JOB_TIMEOUT_MS = 25 * 60 * 1000
+
 function makeJobId(): string {
   return `mf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
@@ -90,7 +93,19 @@ export function startMarketFocusJob(options: { kind: MarketFocusJobKind; alsoSoc
   }
   JOBS.set(job.id, job)
   activeJobId = job.id
-  void runJob(job)
+
+  // 總逾時看門狗：超過 JOB_TIMEOUT_MS 尚未完成即自動失敗（避免 LLM 退避累積卡死）
+  const watchdog = setTimeout(() => {
+    const current = JOBS.get(job.id)
+    if (current?.status === 'running') {
+      current.status = 'failed'
+      current.error = `Job 執行逾時（超過 ${Math.round(JOB_TIMEOUT_MS / 60000)} 分鐘），已中止。`
+      current.finishedAt = new Date().toISOString()
+      if (activeJobId === job.id) activeJobId = null
+    }
+  }, JOB_TIMEOUT_MS)
+
+  void runJob(job, watchdog)
   trimJobs()
   return job
 }
@@ -99,7 +114,7 @@ export function getMarketFocusJob(id: string): MarketFocusJob | null {
   return JOBS.get(id) ?? null
 }
 
-async function runJob(job: MarketFocusJob): Promise<void> {
+async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<void> {
   try {
     if (job.kind === 'dry') {
       const { items, summary } = await previewMarketFocus()
@@ -148,6 +163,7 @@ async function runJob(job: MarketFocusJob): Promise<void> {
       } catch {}
     }
   } finally {
+    clearTimeout(watchdog)
     if (activeJobId === job.id) activeJobId = null
   }
 }

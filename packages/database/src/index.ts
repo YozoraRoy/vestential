@@ -11,6 +11,9 @@ export {
   searchStocksByName, fuzzySearchStocksByName, damerauLevenshtein,
   deleteAnalysisRecord,
   saveMarketFocus, getMarketFocus, saveMarketFocusMeta, getMarketFocusMeta,
+  saveCycleEntrySignals, getCycleEntrySignalsByEdition,
+  saveCycleEntryMeta, getLatestCycleEntryMeta, getCycleEntryMetaByEdition,
+  listCycleEntryEditions, countCycleEntrySignals,
   ARENA_MAX_AGENTS_PER_USER,
   saveArenaSeason, getArenaSeasonById, getActiveArenaSeason, ensureActiveArenaSeason, ensureSystemArenaAgents, listArenaSeasons, updateArenaSeasonStatus,
   createArenaAgent, getActiveArenaAgentByOwner, countArenaAgentsByOwner,
@@ -38,7 +41,8 @@ export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalG
   ArenaIntradayPriceRow, ArenaMarketBriefingRow, ArenaDecisionLogRow, ArenaDiscussionRow,
   SocialPostRow, SocialPostInput, SocialPostPlatform, SocialPostStatus,
   AgentSettingRow, UserUsageReportRow,
-  MarketFocusSubscriberRow, MarketFocusSubscriberStatus } from './db.js'
+  MarketFocusSubscriberRow, MarketFocusSubscriberStatus,
+  CycleEntrySignalRow, CycleEntryMetaRow } from './db.js'
 export { exportSyncData, mergeExports, applySyncMerge, applySyncImport, SYNC_TABLES } from './sync.js'
 export type { SyncExport, SyncRow, MergedExport, SyncTableName, TaggedRow, RowSource } from './sync.js'
 export type { Database } from 'better-sqlite3'

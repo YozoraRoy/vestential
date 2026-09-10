@@ -3,7 +3,7 @@ import {
   PieChart,
   Wallet,
   Activity,
-  BarChart3,
+  TrendingUp,
   Bot,
   Newspaper,
   Sparkles,
@@ -115,6 +115,14 @@ export default async function Home() {
       developing: false,
     },
     {
+      href: '/cycle-entry',
+      icon: TrendingUp,
+      title: dict.home.cycleEntryTitle,
+      desc: dict.home.cycleEntryDesc,
+      accent: 'green',
+      developing: false,
+    },
+    {
       href: '/portfolio',
       icon: Wallet,
       title: dict.home.portfolioTitle,
@@ -137,14 +145,6 @@ export default async function Home() {
       desc: dict.home.agentDesc,
       accent: 'violet',
       developing: false,
-    },
-    {
-      href: null,
-      icon: BarChart3,
-      title: dict.home.optionsTitle,
-      desc: dict.home.optionsDesc,
-      accent: 'accent',
-      developing: true,
     },
   ] as const
 
