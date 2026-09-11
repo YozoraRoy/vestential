@@ -25,7 +25,7 @@ export const en: Dict = {
     analyze: 'AI Smart Analysis',
     oddLot: 'Odd Lots',
     portfolio: 'Portfolio',
-    backtest: 'Cycle Entry Model',
+    backtest: 'Backtest Lab',
     marketFocus: 'Market Focus',
     agentArena: 'AI Arena',
   },

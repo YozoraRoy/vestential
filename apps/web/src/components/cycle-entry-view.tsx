@@ -190,7 +190,7 @@ export function CycleEntryView({ signals, dict, onSelect }: Props) {
                       <span className="text-white/40 group-hover:text-white/80 transition">
                         <HelpCircle className="w-3.5 h-3.5" />
                       </span>
-                      <span className="pointer-events-none absolute left-1/2 bottom-full z-50 mb-2 w-64 -translate-x-1/2 rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-2.5 py-1.5 text-[10px] leading-relaxed text-[var(--text-primary)] opacity-0 shadow-2xl transition-opacity duration-150 group-hover:opacity-100">
+                      <span className="pointer-events-none absolute right-0 bottom-full z-50 mb-2 w-64 rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-2.5 py-1.5 text-[10px] leading-relaxed text-[var(--text-primary)] opacity-0 shadow-2xl transition-opacity duration-150 group-hover:opacity-100">
                         {dict.colBacktestTooltip ?? '近 1 年多規則共振擬合回測，與回測實驗室的長區間乖離率算法不同'}
                       </span>
                     </span>
@@ -333,7 +333,7 @@ export function CycleEntryView({ signals, dict, onSelect }: Props) {
                       <span className="text-white/30 group-hover:text-white/60 transition">
                         <HelpCircle className="w-3 h-3" />
                       </span>
-                      <span className="pointer-events-none absolute left-1/2 bottom-full z-50 mb-2 w-64 -translate-x-1/2 rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-2.5 py-1.5 text-[10px] leading-relaxed text-[var(--text-primary)] opacity-0 shadow-2xl transition-opacity duration-150 group-hover:opacity-100">
+                      <span className="pointer-events-none absolute right-0 bottom-full z-50 mb-2 w-64 rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-2.5 py-1.5 text-[10px] leading-relaxed text-[var(--text-primary)] opacity-0 shadow-2xl transition-opacity duration-150 group-hover:opacity-100">
                         {dict.colBacktestTooltip ?? '近 1 年多規則共振擬合回測'}
                       </span>
                     </dt>

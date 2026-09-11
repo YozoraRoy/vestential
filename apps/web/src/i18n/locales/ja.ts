@@ -25,7 +25,7 @@ export const ja: Dict = {
     analyze: 'AI スマート分析',
     oddLot: '端株情報',
     portfolio: '損益',
-    backtest: 'サイクル参入モデル',
+    backtest: 'バックテストラボ',
     marketFocus: 'マーケットフォーカス',
     agentArena: 'AIアリーナ',
   },
