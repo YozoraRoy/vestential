@@ -485,6 +485,24 @@ export async function refreshMarketFocus(): Promise<MarketFocusItem[]> {
   return enriched
 }
 
+/** 回填近 4 天內缺少 AI 摘要的新聞（排程偶發 LLM 失敗留下的空摘要），於每次 job 收尾自動治癒。 */
+export async function backfillMissingSummaries(): Promise<number> {
+  try {
+    const recent = await getMarketFocus(40, 4)
+    const gaps = recent.filter((it) => !it.summary)
+    if (gaps.length === 0) return 0
+    const summaries = await generateArticleSummaries(gaps)
+    const filled = gaps
+      .map((it, i) => ({ ...it, summary: summaries[i] || null }))
+      .filter((it) => !!it.summary)
+    if (filled.length > 0) await saveMarketFocus(filled)
+    return filled.length
+  } catch (e) {
+    console.error('[MarketFocus] backfillMissingSummaries failed:', e)
+    return 0
+  }
+}
+
 /** 完整版市場焦點刷新：回傳新聞清單、總覽與是否真正產生新版版次 (hasNewEdition)。 */
 export async function refreshMarketFocusDetailed(): Promise<MarketFocusPipelineResult> {
   return runMarketFocusPipeline(false)

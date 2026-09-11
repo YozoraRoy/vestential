@@ -1,7 +1,7 @@
 import { revalidateTag } from 'next/cache'
 import type { MarketFocusItem } from '@stock/database'
 import { getMarketFocusMeta } from '@stock/database'
-import { refreshMarketFocusDetailed, previewMarketFocus } from '@/lib/market-focus'
+import { refreshMarketFocusDetailed, previewMarketFocus, backfillMissingSummaries } from '@/lib/market-focus'
 import { sendMarketFocusAlert, sendMarketFocusSummary, isSummaryFallback } from '@/lib/email'
 import { triggerSocialPublish } from '@/lib/social-trigger'
 import type { SocialPostPlatform } from '@stock/database'
@@ -133,6 +133,15 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
       job.timestamp = new Date().toISOString()
       job.summary = summary
       job.items = items.map((it: MarketFocusItem) => ({ title: it.title, source: it.source, reason: it.reason }))
+
+      // 回填先前 LLM 失敗留下的空摘要（與是否產新版次無關，每次收尾都治療）
+      if (job.kind === 'refresh' || job.kind === 'publish') {
+        const filled = await backfillMissingSummaries()
+        if (filled > 0) {
+          console.log(`[MarketFocusJob] backfilled ${filled} missing summaries`)
+          revalidateTag('market-focus')
+        }
+      }
 
       if (!hasNewEdition) {
         console.log(`[MarketFocusJob] 無新重大新聞通過門檻（新增: ${newCount} 則），保留上一版總覽，略過 Email 與社群發布。`)
