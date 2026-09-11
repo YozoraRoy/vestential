@@ -503,6 +503,49 @@ export async function backfillMissingSummaries(): Promise<number> {
   }
 }
 
+const BACKFILL_REASON_SYSTEM_PROMPT = `你是 Vestential 的台股主筆。以下新聞已收錄進「市場焦點」，請逐則補上它入選的價值投資理由：聚焦基本面、財報、股利、總體經濟或市場週期其一，每則 30 字以內、說人話、直陳實質影響。
+只輸出純 JSON，不要任何其他文字：
+{"reasons":[{"index":0,"reason":"..."},{"index":1,"reason":"..."}]}`
+
+/** 回填近 4 天內缺少「價值投資遴選原因」的新聞（排程偶發 LLM 失敗留下的空理由）。 */
+export async function backfillMissingReasons(): Promise<number> {
+  try {
+    const recent = await getMarketFocus(40, 4)
+    const gaps = recent.filter((it) => !it.reason)
+    if (gaps.length === 0) return 0
+    const config = loadConfig()
+    const { llm } = createQuickLLM(config, { maxTokens: 1200 })
+    const list = gaps
+      .map(
+        (it, idx) =>
+          `[${idx}] 標題：${it.title}\n來源：${it.source ?? '未知'}${it.summary ? `\n摘要：${it.summary.slice(0, 200)}` : ''}`,
+      )
+      .join('\n\n')
+    const raw = await llm.generate(
+      BACKFILL_REASON_SYSTEM_PROMPT,
+      `請為以下 ${gaps.length} 則新聞補上價值投資遴選原因：\n\n${list}`,
+    )
+    const cleaned = raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()
+    const parsed = JSON.parse(cleaned) as { reasons?: { index: number; reason: string }[] }
+    const map = new Map<number, string>()
+    if (Array.isArray(parsed?.reasons)) {
+      for (const e of parsed.reasons) {
+        if (typeof e.index === 'number' && typeof e.reason === 'string' && e.reason.trim()) {
+          map.set(e.index, e.reason.trim())
+        }
+      }
+    }
+    const filled = gaps
+      .map((it, idx) => ({ ...it, reason: map.get(idx) || null }))
+      .filter((it) => !!it.reason)
+    if (filled.length > 0) await saveMarketFocus(filled)
+    return filled.length
+  } catch (e) {
+    console.error('[MarketFocus] backfillMissingReasons failed:', e)
+    return 0
+  }
+}
+
 /** 完整版市場焦點刷新：回傳新聞清單、總覽與是否真正產生新版版次 (hasNewEdition)。 */
 export async function refreshMarketFocusDetailed(): Promise<MarketFocusPipelineResult> {
   return runMarketFocusPipeline(false)

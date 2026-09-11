@@ -1,7 +1,7 @@
 import { revalidateTag } from 'next/cache'
 import type { MarketFocusItem } from '@stock/database'
 import { getMarketFocusMeta } from '@stock/database'
-import { refreshMarketFocusDetailed, previewMarketFocus, backfillMissingSummaries } from '@/lib/market-focus'
+import { refreshMarketFocusDetailed, previewMarketFocus, backfillMissingSummaries, backfillMissingReasons } from '@/lib/market-focus'
 import { sendMarketFocusAlert, sendMarketFocusSummary, isSummaryFallback } from '@/lib/email'
 import { triggerSocialPublish } from '@/lib/social-trigger'
 import type { SocialPostPlatform } from '@stock/database'
@@ -134,11 +134,11 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
       job.summary = summary
       job.items = items.map((it: MarketFocusItem) => ({ title: it.title, source: it.source, reason: it.reason }))
 
-      // 回填先前 LLM 失敗留下的空摘要（與是否產新版次無關，每次收尾都治療）
+      // 回填先前 LLM 失敗留下的空摘要／空遴選原因（與是否產新版次無關，每次收尾都治療）
       if (job.kind === 'refresh' || job.kind === 'publish') {
-        const filled = await backfillMissingSummaries()
+        const filled = (await backfillMissingSummaries()) + (await backfillMissingReasons())
         if (filled > 0) {
-          console.log(`[MarketFocusJob] backfilled ${filled} missing summaries`)
+          console.log(`[MarketFocusJob] backfilled ${filled} missing summaries/reasons`)
           revalidateTag('market-focus')
         }
       }
