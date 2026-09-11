@@ -1,4 +1,4 @@
-import { ArrowUpRight, Sparkles, FileText } from 'lucide-react'
+import { ArrowUpRight, Sparkles, FileText, ShieldCheck } from 'lucide-react'
 import type { MarketFocusItem } from '@stock/database'
 
 function formatDateTime(s: string): string {
@@ -16,7 +16,6 @@ interface NewsCardProps {
 /** 市場焦點新聞卡。出處：首頁市場焦點區塊、`app/market-focus/page.tsx`。 */
 export function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
   const href = item.source_url || item.url
-  const aiSummary = item.summary || item.reason
 
   return (
     <li className="bg-[var(--bg-card)] rounded-xl p-5 border border-white/5 hover:border-white/10 transition">
@@ -35,13 +34,33 @@ export function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
       </div>
 
       {/* AI 說人話重點摘要（核心主體） */}
-      {aiSummary && (
+      {item.summary && (
         <div className="mt-3 pt-3 border-t border-white/5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--accent)] mb-1.5">
             <Sparkles className="w-3.5 h-3.5" />
             <span>AI 重點摘要</span>
           </div>
-          <p className="text-sm text-[var(--text-primary)] leading-relaxed">{aiSummary}</p>
+          <p className="text-sm text-[var(--text-primary)] leading-relaxed">{item.summary}</p>
+        </div>
+      )}
+
+      {/* 價值投資遴選原因 */}
+      {item.reason && (
+        <div className="mt-3 pt-3 border-t border-white/5">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--accent-green)] mb-1.5">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>價值投資遴選原因</span>
+          </div>
+          <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{item.reason}</p>
+        </div>
+      )}
+
+      {/* 摘要與遴選原因皆缺時的最小兜底 */}
+      {!item.summary && !item.reason && (
+        <div className="mt-3 pt-3 border-t border-white/5">
+          <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+            AI 摘要與遴選原因尚在整理中，請前往原文閱讀詳情。
+          </p>
         </div>
       )}
 
