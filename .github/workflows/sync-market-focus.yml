@@ -1,4 +1,4 @@
-﻿name: Sync market focus (AI-filtered news)
+name: Sync market focus (AI-filtered news)
 
 on:
   schedule:
@@ -9,7 +9,7 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -21,9 +21,8 @@ jobs:
           CODE=$(curl -s -o /tmp/mf_resp.json -w "%{http_code}" \
             --max-time 60 \
             -X POST \
--H "Authorization: Bearer $SYNC_TOKEN" \
+            -H "Authorization: Bearer $SYNC_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{"skipSocial":true}' \
             "https://vestential.com/api/market-focus/refresh")
           echo "HTTP $CODE"
           cat /tmp/mf_resp.json
@@ -46,7 +45,8 @@ jobs:
           SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
           JOB_ID: ${{ steps.trigger.outputs.jobId }}
         run: |
-          for i in $(seq 1 110); do
+          # 後台 job 最長 25 分鐘；輪詢 160 次 × 10s ≈ 27 分鐘，涵蓋完整 job 生命週期
+          for i in $(seq 1 160); do
             CODE=$(curl -s -o /tmp/mf_status.json -w "%{http_code}" --max-time 30 \
               -H "Authorization: Bearer $SYNC_TOKEN" \
               "https://vestential.com/api/market-focus/refresh/status?jobId=$JOB_ID" || echo "000")
@@ -63,7 +63,7 @@ jobs:
               exit 0
             fi
             if [ "$STATUS" = "failed" ]; then
-              echo "::error::market-focus refresh failed: $(python3 -c "import sys,json;d=json.load(open('/tmp/mf_status.json'));print(d['job'].get('error',''))")"
+              echo "::error::market-focus refresh failed: $(python3 -c \"import sys,json;d=json.load(open('/tmp/mf_status.json'));print(d['job'].get('error',''))\")"
               exit 1
             fi
             sleep 10

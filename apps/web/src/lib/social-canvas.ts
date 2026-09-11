@@ -59,11 +59,11 @@ export async function renderSocialCard(data: SocialCardData, opts: SocialCardOpt
     try {
       const bgImg = await loadImage(opts.backgroundImage)
       ctx.drawImage(bgImg, 0, 0, CARD_W, CARD_H)
-      // 疊上半透明科技暗化遮罩（兼顧微光科技線條與文字極致可讀性）
+      // 疊上半透明科技暗化遮罩（保留 FLUX 底圖細節，同時讓文字可讀）
       const overlay = ctx.createLinearGradient(0, 0, 0, CARD_H)
-      overlay.addColorStop(0, 'rgba(11, 13, 19, 0.82)')
-      overlay.addColorStop(0.4, 'rgba(11, 13, 19, 0.88)')
-      overlay.addColorStop(1, 'rgba(11, 13, 19, 0.94)')
+      overlay.addColorStop(0, 'rgba(11, 13, 19, 0.55)')
+      overlay.addColorStop(0.4, 'rgba(11, 13, 19, 0.62)')
+      overlay.addColorStop(1, 'rgba(11, 13, 19, 0.72)')
       ctx.fillStyle = overlay
       ctx.fillRect(0, 0, CARD_W, CARD_H)
       drawnBg = true
