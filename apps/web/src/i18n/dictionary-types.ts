@@ -57,8 +57,10 @@ export interface Dict {
     portfolioDesc: string
     backtestTitle: string
     backtestDesc: string
+    backtestCta: string
     cycleEntryTitle: string
     cycleEntryDesc: string
+    cycleEntryCta: string
     optionsTitle: string
     optionsDesc: string
     agentTitle: string
@@ -652,6 +654,40 @@ export interface Dict {
     btDiffNoticeTitle: string
     btDiffNoticeDesc: string
     colBacktestTooltip: string
+    openBacktestLab: string
+    detailTitle: string
+    detailSubtitle: string
+    detailClose: string
+    detailLoading: string
+    detailError: string
+    detailTabChart: string
+    detailTabTrades: string
+    detailTabRules: string
+    chartPriceTitle: string
+    chartEquityTitle: string
+    chartDate: string
+    chartClose: string
+    chartMA20: string
+    chartMA60: string
+    chartEntryDot: string
+    chartEquityValue: string
+    colSignalDate: string
+    colEntryDate: string
+    colExitDate: string
+    colExitPrice: string
+    colReturn: string
+    colHoldingDays: string
+    colExitReason: string
+    exitReasonTarget: string
+    exitReasonStop: string
+    exitReasonTimeout: string
+    tradesEmpty: string
+    winRateFormulaTitle: string
+    winRateFormulaText: string
+    ruleCheckTitle: string
+    ruleHit: string
+    ruleMiss: string
+    ruleThreshold: string
   }
   agentArena: {
     metaTitle: string

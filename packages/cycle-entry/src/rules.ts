@@ -1,4 +1,4 @@
-import type { OHLCV, RuleKey, CycleStage, EntryStats, EntryStatsParams } from './types.js'
+import type { OHLCV, RuleKey, CycleStage, EntryStats, EntryStatsParams, TradeRecord } from './types.js'
 import { computeSMA, computeRSI, computeMACD, compute52WeekRange } from './indicators.js'
 
 /** 最小可評估索引（需 MA60 + RSI + MACD warmup）。 */
@@ -155,7 +155,7 @@ function simulateTrade(
   startIdx: number,
   entryPrice: number,
   params: EntryStatsParams,
-): { outcome: 'win' | 'loss' | 'neutral'; daysToTarget: number | null } {
+): { outcome: 'win' | 'loss' | 'neutral'; daysToTarget: number | null; exitPrice: number | null; exitIndex: number | null } {
   const targetProfit = params.targetProfit ?? 0.08
   const maxDrawdown = params.maxDrawdown ?? 0.05
   const holdingDays = params.holdingDays ?? 40
@@ -167,29 +167,44 @@ function simulateTrade(
     const hitTarget = ohlcv[i].high >= targetPrice
     const hitStop = ohlcv[i].low <= stopPrice
     if (hitTarget && hitStop) {
-      return { outcome: 'loss', daysToTarget: null }
+      return { outcome: 'loss', daysToTarget: null, exitPrice: stopPrice, exitIndex: i }
     }
     if (hitTarget) {
-      return { outcome: 'win', daysToTarget: i - startIdx + 1 }
+      return { outcome: 'win', daysToTarget: i - startIdx + 1, exitPrice: targetPrice, exitIndex: i }
     }
     if (hitStop) {
-      return { outcome: 'loss', daysToTarget: null }
+      return { outcome: 'loss', daysToTarget: null, exitPrice: stopPrice, exitIndex: i }
     }
   }
-  return { outcome: 'neutral', daysToTarget: null }
+  // 到期（持有滿 holdingDays 或資料結束）未觸及停利/停損 → 以最後一根收盤視為出場
+  return {
+    outcome: 'neutral',
+    daysToTarget: null,
+    exitPrice: endIdx > 0 ? ohlcv[endIdx - 1].close : null,
+    exitIndex: endIdx - 1,
+  }
+}
+
+function toISODate(ts: number): string {
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toISOString().slice(0, 10)
 }
 
 /**
- * 進場後擬合回測：在歷史序列中，凡「訊號日規則比對通過門檻」即於次一交易日開盤進場，
- * 依 +8% / −5% / 40 日模擬，統計勝率、平均達成天數（非重疊交易鎖）。
+ * 進場後擬合回測（含逐筆交易紀錄）：在歷史序列中，凡「訊號日規則比對通過門檻」即於次一交易日開盤進場，
+ * 依 +8% / −5% / 40 日模擬，產出彙總統計與逐筆明細（非重疊交易鎖）。
  */
-export function runSignalBacktest(ohlcv: OHLCV[], params: EntryStatsParams = {}): EntryStats {
+export function runSignalBacktestDetail(
+  ohlcv: OHLCV[],
+  params: EntryStatsParams = {},
+): { stats: EntryStats; trades: TradeRecord[] } {
   const series = evaluateSeries(ohlcv)
   const holdingDays = params.holdingDays ?? 40
   const n = ohlcv.length
   const evalByIndex = new Map(series.map((s) => [s.index, s]))
 
-  const trades: { outcome: 'win' | 'loss' | 'neutral'; daysToTarget: number | null }[] = []
+  const trades: TradeRecord[] = []
   let i = 0
   while (i < n) {
     // 以「當日規則」為準：僅當該日通過門檻才進場，符合真實發布條件
@@ -198,7 +213,21 @@ export function runSignalBacktest(ohlcv: OHLCV[], params: EntryStatsParams = {})
     if (pass && i + 1 < n) {
       const entryPrice = ohlcv[i + 1].open
       if (entryPrice > 0) {
-        trades.push(simulateTrade(ohlcv, i + 1, entryPrice, params))
+        const res = simulateTrade(ohlcv, i + 1, entryPrice, params)
+        const exitIndex = res.exitIndex
+        const returnPct =
+          entryPrice > 0 && res.exitPrice != null ? (res.exitPrice - entryPrice) / entryPrice : null
+        trades.push({
+          signalDate: toISODate(ohlcv[i].timestamp),
+          entryDate: toISODate(ohlcv[i + 1].timestamp),
+          entryPrice,
+          exitDate: exitIndex != null ? toISODate(ohlcv[exitIndex].timestamp) : null,
+          exitPrice: res.exitPrice,
+          returnPct,
+          holdingDays: exitIndex != null ? (exitIndex < i + 1 ? null : exitIndex - (i + 1) + 1) : null,
+          outcome: res.outcome,
+          exitReason: res.outcome === 'win' ? 'target' : res.outcome === 'loss' ? 'stop' : 'timeout',
+        })
         i = Math.min(i + 1 + holdingDays, n)
         continue
       }
@@ -211,11 +240,23 @@ export function runSignalBacktest(ohlcv: OHLCV[], params: EntryStatsParams = {})
   const neutral = trades.filter((t) => t.outcome === 'neutral').length
   const decided = wins + losses
   const winRate = decided > 0 ? Math.round((wins / decided) * 1000) / 10 : null
-  const winTrades = trades.filter((t) => t.outcome === 'win' && t.daysToTarget != null)
+  const winTrades = trades.filter((t) => t.outcome === 'win' && t.holdingDays != null)
   const avgDaysToTarget =
     winTrades.length > 0
-      ? winTrades.reduce((s, t) => s + (t.daysToTarget ?? 0), 0) / winTrades.length
+      ? winTrades.reduce((s, t) => s + (t.holdingDays ?? 0), 0) / winTrades.length
       : null
 
-  return { totalSignals: trades.length, wins, losses, neutral, winRate, avgDaysToTarget }
+  return {
+    stats: { totalSignals: trades.length, wins, losses, neutral, winRate, avgDaysToTarget },
+    trades,
+  }
+}
+
+/**
+ * 進場後擬合回測：在歷史序列中，凡「訊號日規則比對通過門檻」即於次一交易日開盤進場，
+ * 依 +8% / −5% / 40 日模擬，統計勝率、平均達成天數（非重疊交易鎖）。
+ * 彙總結果與 runSignalBacktestDetail 完全一致。
+ */
+export function runSignalBacktest(ohlcv: OHLCV[], params: EntryStatsParams = {}): EntryStats {
+  return runSignalBacktestDetail(ohlcv, params).stats
 }

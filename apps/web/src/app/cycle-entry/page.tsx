@@ -5,7 +5,8 @@ import { localizePath } from '@/i18n/paths'
 import { buildAlternates } from '@/i18n/metadata'
 import { getLatestCycleEntryMeta, getCycleEntrySignalsByEdition } from '@stock/database'
 import { SectionHeading } from '@/components/section-heading'
-import { CycleEntryView, type CycleEntryDict } from '@/components/cycle-entry-view'
+import { CycleEntrySection } from '@/components/cycle-entry-section'
+import type { CycleEntryDict } from '@/components/cycle-entry-view'
 import { resolveStockName } from '@stock/cycle-entry'
 
 const BASE_URL = 'https://vestential.com'
@@ -76,6 +77,40 @@ export default async function CycleEntryPage() {
     exploreBacktestLab: ce.exploreBacktestLab,
     winRateLegend: ce.winRateLegend,
     colBacktestTooltip: ce.colBacktestTooltip,
+    openBacktestLab: ce.openBacktestLab,
+    detailTitle: ce.detailTitle,
+    detailSubtitle: ce.detailSubtitle,
+    detailClose: ce.detailClose,
+    detailLoading: ce.detailLoading,
+    detailError: ce.detailError,
+    detailTabChart: ce.detailTabChart,
+    detailTabTrades: ce.detailTabTrades,
+    detailTabRules: ce.detailTabRules,
+    chartPriceTitle: ce.chartPriceTitle,
+    chartEquityTitle: ce.chartEquityTitle,
+    chartDate: ce.chartDate,
+    chartClose: ce.chartClose,
+    chartMA20: ce.chartMA20,
+    chartMA60: ce.chartMA60,
+    chartEntryDot: ce.chartEntryDot,
+    chartEquityValue: ce.chartEquityValue,
+    colSignalDate: ce.colSignalDate,
+    colEntryDate: ce.colEntryDate,
+    colExitDate: ce.colExitDate,
+    colExitPrice: ce.colExitPrice,
+    colReturn: ce.colReturn,
+    colHoldingDays: ce.colHoldingDays,
+    colExitReason: ce.colExitReason,
+    exitReasonTarget: ce.exitReasonTarget,
+    exitReasonStop: ce.exitReasonStop,
+    exitReasonTimeout: ce.exitReasonTimeout,
+    tradesEmpty: ce.tradesEmpty,
+    winRateFormulaTitle: ce.winRateFormulaTitle,
+    winRateFormulaText: ce.winRateFormulaText,
+    ruleCheckTitle: ce.ruleCheckTitle,
+    ruleHit: ce.ruleHit,
+    ruleMiss: ce.ruleMiss,
+    ruleThreshold: ce.ruleThreshold,
   }
 
   const pageTitle = ce.pageTitle
@@ -145,10 +180,10 @@ export default async function CycleEntryPage() {
 
       {/* 已現進場點標的 */}
       <section aria-labelledby="entry-targets" className="mb-10">
-        <SectionHeading id="entry-targets" title={ce.pageTitle} badge={signals.length > 0 ? `${signals.length}` : undefined} />
+        <SectionHeading id="entry-targets" title={ce.pageTitle} />
 
         {signals.length > 0 ? (
-          <CycleEntryView signals={signals} dict={viewDict} />
+          <CycleEntrySection signals={signals} dict={viewDict} />
         ) : (
           <div className="rounded-xl border border-white/10 bg-white/[0.02] px-6 py-10 text-center">
             <TrendingUp className="w-8 h-8 mx-auto text-[var(--accent)]/40 mb-3" />
@@ -195,7 +230,7 @@ export default async function CycleEntryPage() {
             href={localizePath(locale, '/backtest')}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)]/15 hover:bg-[var(--accent)]/25 text-[var(--accent)] text-xs font-semibold whitespace-nowrap transition"
           >
-            {ce.viewBacktestChart} →
+            {ce.openBacktestLab} →
           </Link>
         </div>
         <div className="rounded-xl border border-[var(--accent-red)]/30 bg-[var(--accent-red)]/5 px-6 py-5">

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
 import { LayoutGrid, LayoutList, LineChart, Sparkles, HelpCircle } from 'lucide-react'
 import type { CycleEntrySignalRow } from '@stock/database'
 import { resolveStockName } from '@stock/cycle-entry'
@@ -33,6 +32,40 @@ export interface CycleEntryDict {
   exploreBacktestLab?: string
   winRateLegend?: string
   colBacktestTooltip?: string
+  openBacktestLab: string
+  detailTitle: string
+  detailSubtitle: string
+  detailClose: string
+  detailLoading: string
+  detailError: string
+  detailTabChart: string
+  detailTabTrades: string
+  detailTabRules: string
+  chartPriceTitle: string
+  chartEquityTitle: string
+  chartDate: string
+  chartClose: string
+  chartMA20: string
+  chartMA60: string
+  chartEntryDot: string
+  chartEquityValue: string
+  colSignalDate: string
+  colEntryDate: string
+  colExitDate: string
+  colExitPrice: string
+  colReturn: string
+  colHoldingDays: string
+  colExitReason: string
+  exitReasonTarget: string
+  exitReasonStop: string
+  exitReasonTimeout: string
+  tradesEmpty: string
+  winRateFormulaTitle: string
+  winRateFormulaText: string
+  ruleCheckTitle: string
+  ruleHit: string
+  ruleMiss: string
+  ruleThreshold: string
 }
 
 type ViewMode = 'list' | 'card'
@@ -59,23 +92,23 @@ const RULE_KEYS: Record<string, keyof CycleEntryDict> = {
   R5: 'ruleR5',
 }
 
-function ruleList(matchedRules: string, dict: CycleEntryDict) {
+export function ruleList(matchedRules: string, dict: CycleEntryDict) {
   return (matchedRules || '')
     .split(',')
     .filter((r) => RULE_KEYS[r])
     .map((r) => ({ key: r, label: dict[RULE_KEYS[r]] }))
 }
 
-function shortSymbol(symbol: string) {
+export function shortSymbol(symbol: string) {
   return symbol.replace(/\.(TW|TWO)$/, '')
 }
 
-function fmt(n: number | null | undefined, digits = 1) {
+export function fmt(n: number | null | undefined, digits = 1) {
   if (n == null || Number.isNaN(n)) return '—'
   return n.toLocaleString('zh-TW', { maximumFractionDigits: digits })
 }
 
-function formatWinRate(rate: number | null | undefined): string {
+export function formatWinRate(rate: number | null | undefined): string {
   if (rate == null || Number.isNaN(rate)) return '—'
   // 向下相容：若歷史版次資料庫仍存 0~1 小數（如 0.5），自動換算為百分比（50）
   const pct = rate > 0 && rate <= 1 ? rate * 100 : rate
@@ -103,9 +136,11 @@ function getWinRateStyle(rate: number | null | undefined): string {
 interface Props {
   signals: CycleEntrySignalRow[]
   dict: CycleEntryDict
+  /** 點擊任一標的入口（名稱／勝率／曲線圖與詳情）觸發詳情 Modal。 */
+  onSelect?: (signal: CycleEntrySignalRow) => void
 }
 
-export function CycleEntryView({ signals, dict }: Props) {
+export function CycleEntryView({ signals, dict, onSelect }: Props) {
   const [mode, setMode] = useState<ViewMode>('list')
 
   const btnClass = (active: boolean) =>
@@ -151,11 +186,13 @@ export function CycleEntryView({ signals, dict }: Props) {
                 <th className="px-3 py-2.5 font-medium">
                   <div className="flex items-center gap-1.5">
                     <span>{dict.colBacktest}</span>
-                    <span
-                      className="inline-flex items-center text-white/40 hover:text-white/80 cursor-help transition"
-                      title={dict.colBacktestTooltip ?? '近 1 年多規則共振擬合回測，與回測實驗室的長區間乖離率算法不同'}
-                    >
-                      <HelpCircle className="w-3.5 h-3.5" />
+                    <span className="group relative inline-flex items-center cursor-help">
+                      <span className="text-white/40 group-hover:text-white/80 transition">
+                        <HelpCircle className="w-3.5 h-3.5" />
+                      </span>
+                      <span className="pointer-events-none absolute left-1/2 bottom-full z-50 mb-2 w-64 -translate-x-1/2 rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-2.5 py-1.5 text-[10px] leading-relaxed text-[var(--text-primary)] opacity-0 shadow-2xl transition-opacity duration-150 group-hover:opacity-100">
+                        {dict.colBacktestTooltip ?? '近 1 年多規則共振擬合回測，與回測實驗室的長區間乖離率算法不同'}
+                      </span>
                     </span>
                   </div>
                 </th>
@@ -164,15 +201,16 @@ export function CycleEntryView({ signals, dict }: Props) {
             <tbody>
               {signals.map((s) => {
                 const rules = ruleList(s.matchedRules, dict)
-                const backtestHref = `/backtest?symbol=${encodeURIComponent(shortSymbol(s.symbol))}&preset=short`
+                const detailTitle = `${shortSymbol(s.symbol)} ${resolveStockName(s.symbol, s.name)} — ${dict.viewBacktestChart ?? '曲線圖與詳情'}`
                 return (
                   <tr key={s.symbol} className="border-b border-white/5 last:border-b-0 align-top hover:bg-white/[0.03]">
                     <td className="px-3 py-3 text-[var(--text-secondary)]">#{s.signalRank ?? '—'}</td>
                     <td className="px-3 py-3">
-                      <Link
-                        href={backtestHref}
-                        title={`${shortSymbol(s.symbol)} ${resolveStockName(s.symbol, s.name)} — 檢視回測曲線圖`}
-                        className="group inline-block"
+                      <button
+                        type="button"
+                        onClick={() => onSelect?.(s)}
+                        title={detailTitle}
+                        className="group block cursor-pointer text-left"
                       >
                         <div className="font-semibold text-[var(--text-primary)] group-hover:text-[var(--accent)] group-hover:underline flex items-center gap-1">
                           <span>{shortSymbol(s.symbol)}</span>
@@ -181,7 +219,7 @@ export function CycleEntryView({ signals, dict }: Props) {
                         <div className="text-xs text-[var(--text-secondary)] mt-0.5 group-hover:text-[var(--text-primary)] transition-colors">
                           {resolveStockName(s.symbol, s.name)}
                         </div>
-                      </Link>
+                      </button>
                     </td>
                     <td className="px-3 py-3">
                       {s.cycleStage ? (
@@ -207,16 +245,17 @@ export function CycleEntryView({ signals, dict }: Props) {
                     </td>
                     <td className="px-3 py-3">
                       <div className="mb-1">
-                        <Link
-                          href={backtestHref}
-                          title={`${shortSymbol(s.symbol)} ${dict.viewBacktestChart ?? '檢視回測曲線圖'}`}
-                          className="inline-flex items-center gap-1.5 text-xs hover:underline group"
+                        <button
+                          type="button"
+                          onClick={() => onSelect?.(s)}
+                          title={detailTitle}
+                          className="inline-flex items-center gap-1.5 text-xs hover:underline group cursor-pointer"
                         >
                           <span className={getWinRateStyle(s.btWinRate)}>
                             勝率 {formatWinRate(s.btWinRate)}
                           </span>
                           <LineChart className="w-3.5 h-3.5 text-[var(--accent)] opacity-70 group-hover:opacity-100 transition-opacity" />
-                        </Link>
+                        </button>
                       </div>
                       <div className="text-xs text-[var(--text-secondary)] whitespace-nowrap">
                         {dict.btSignals} {s.btTotalSignals ?? '—'}
@@ -225,13 +264,14 @@ export function CycleEntryView({ signals, dict }: Props) {
                         {dict.btAvgDays} {s.btAvgDays ?? '—'}
                       </div>
                       <div className="mt-1.5">
-                        <Link
-                          href={backtestHref}
-                          className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline whitespace-nowrap"
+                        <button
+                          type="button"
+                          onClick={() => onSelect?.(s)}
+                          className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline whitespace-nowrap cursor-pointer"
                         >
-                          <span>{dict.viewBacktestChart ?? '回測走勢'}</span>
+                          <span>{dict.viewBacktestChart ?? '曲線圖與詳情'}</span>
                           <span>→</span>
-                        </Link>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -244,15 +284,16 @@ export function CycleEntryView({ signals, dict }: Props) {
         <ul className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {signals.map((s) => {
             const rules = ruleList(s.matchedRules, dict)
-            const backtestHref = `/backtest?symbol=${encodeURIComponent(shortSymbol(s.symbol))}&preset=short`
+            const detailTitle = `${shortSymbol(s.symbol)} ${resolveStockName(s.symbol, s.name)} — ${dict.viewBacktestChart ?? '曲線圖與詳情'}`
             return (
               <li key={s.symbol} className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div>
-                    <Link
-                      href={backtestHref}
-                      title={`${shortSymbol(s.symbol)} ${resolveStockName(s.symbol, s.name)} — 檢視回測曲線圖`}
-                      className="group block"
+                    <button
+                      type="button"
+                      onClick={() => onSelect?.(s)}
+                      title={detailTitle}
+                      className="group block cursor-pointer text-left"
                     >
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-[var(--text-secondary)]">#{s.signalRank ?? '—'}</span>
@@ -266,7 +307,7 @@ export function CycleEntryView({ signals, dict }: Props) {
                       <div className="text-xs text-[var(--text-secondary)] mt-0.5 group-hover:text-[var(--text-primary)] transition-colors">
                         {resolveStockName(s.symbol, s.name)}
                       </div>
-                    </Link>
+                    </button>
                   </div>
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[var(--accent)]/15 text-[var(--accent)] font-semibold tabular-nums text-sm">
                     {s.score}
@@ -287,24 +328,27 @@ export function CycleEntryView({ signals, dict }: Props) {
                     <dd className="text-[var(--text-primary)] font-semibold tabular-nums mt-0.5">{fmt(s.price, 2)}</dd>
                   </div>
                   <div>
-                    <dt
-                      className="text-[var(--text-secondary)] flex items-center gap-1 cursor-help"
-                      title={dict.colBacktestTooltip ?? '近 1 年多規則共振擬合回測'}
-                    >
+                    <dt className="text-[var(--text-secondary)] flex items-center gap-1 cursor-help group relative">
                       <span>{dict.btWinRate}</span>
-                      <HelpCircle className="w-3 h-3 text-white/30" />
+                      <span className="text-white/30 group-hover:text-white/60 transition">
+                        <HelpCircle className="w-3 h-3" />
+                      </span>
+                      <span className="pointer-events-none absolute left-1/2 bottom-full z-50 mb-2 w-64 -translate-x-1/2 rounded-lg border border-white/10 bg-[var(--bg-secondary)] px-2.5 py-1.5 text-[10px] leading-relaxed text-[var(--text-primary)] opacity-0 shadow-2xl transition-opacity duration-150 group-hover:opacity-100">
+                        {dict.colBacktestTooltip ?? '近 1 年多規則共振擬合回測'}
+                      </span>
                     </dt>
                     <dd className="mt-0.5">
-                      <Link
-                        href={backtestHref}
-                        title={`${shortSymbol(s.symbol)} ${dict.viewBacktestChart ?? '檢視回測曲線圖'}`}
-                        className="inline-flex items-center gap-1 tabular-nums hover:underline group"
+                      <button
+                        type="button"
+                        onClick={() => onSelect?.(s)}
+                        title={detailTitle}
+                        className="inline-flex items-center gap-1 tabular-nums hover:underline group cursor-pointer"
                       >
                         <span className={getWinRateStyle(s.btWinRate)}>
                           {formatWinRate(s.btWinRate)}
                         </span>
                         <LineChart className="w-3 h-3 text-[var(--accent)] opacity-70 group-hover:opacity-100 transition-opacity" />
-                      </Link>
+                      </button>
                     </dd>
                   </div>
                   <div>
@@ -324,14 +368,15 @@ export function CycleEntryView({ signals, dict }: Props) {
                 ) : null}
 
                 <div className="flex items-center justify-end mt-3 pt-2 border-t border-white/5">
-                  <Link
-                    href={backtestHref}
-                    className="inline-flex items-center gap-1 text-xs text-[var(--accent)] hover:underline font-medium"
+                  <button
+                    type="button"
+                    onClick={() => onSelect?.(s)}
+                    className="inline-flex items-center gap-1 text-xs text-[var(--accent)] hover:underline font-medium cursor-pointer"
                   >
                     <LineChart className="w-3.5 h-3.5" />
-                    <span>{dict.viewBacktestChart ?? '檢視回測曲線圖'}</span>
+                    <span>{dict.viewBacktestChart ?? '曲線圖與詳情'}</span>
                     <span>→</span>
-                  </Link>
+                  </button>
                 </div>
               </li>
             )

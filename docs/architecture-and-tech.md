@@ -106,7 +106,7 @@ flowchart TB
 本平台同時支援輕量級本機開發與高可用雲端環境：
 
 - **本機開發與輕量佈署**：使用 SQLite（資料庫檔案預設位於 `stock.db` 或 Azure 永久儲存區 `/home/data/stock.db`）。
-- **正式雲端生產環境**：設定 `DATABASE_URL` 後自動啟用 Azure SQL Server 連線池。
+- **正式雲端生產環境**：設定 `DATABASE_URL` 後自動啟用 Azure SQL Server 連線池。生產庫為 `stockdb`（Server `sql-stock-platform`，**Basic / 5 DTU / 2 GB**）；用量監控與容量排錯見 `docs/deployment-and-ops.md` §4 Q3。
 - **防抹除保護 (Data Loss Prevention)**：所有資料表均透過 SQL 遷移檔案管理（`packages/database/migrations`），啟動時採 `IF NOT EXISTS` 或 `ALTER` 增量升級，絕不重置或清空已存在的用戶持股紀錄與分析歷史。
 
 ---

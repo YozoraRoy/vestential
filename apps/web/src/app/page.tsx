@@ -111,6 +111,7 @@ export default async function Home() {
       icon: Activity,
       title: dict.home.backtestTitle,
       desc: dict.home.backtestDesc,
+      cta: dict.home.backtestCta,
       accent: 'green',
       developing: false,
     },
@@ -119,6 +120,7 @@ export default async function Home() {
       icon: TrendingUp,
       title: dict.home.cycleEntryTitle,
       desc: dict.home.cycleEntryDesc,
+      cta: dict.home.cycleEntryCta,
       accent: 'green',
       developing: false,
     },
@@ -214,7 +216,7 @@ export default async function Home() {
                 </p>
                 {!f.developing && (
                   <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-[var(--accent)]">
-                    {dict.home.ctaUse}
+                    {'cta' in f ? f.cta : dict.home.ctaUse}
                     <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
                   </span>
                 )}

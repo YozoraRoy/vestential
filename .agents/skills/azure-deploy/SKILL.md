@@ -16,6 +16,8 @@ description: |
 | Resource Group | `rg-yuzora_roy_ai` |
 | App Name | `stock-platform-roy` |
 | App Service Plan | `asp-stock-platform` (B1, Linux) |
+| Azure SQL Server | `sql-stock-platform`（canadacentral） |
+| Azure SQL Database | `stockdb`（**Basic / 5 DTU / 2 GB**，2026-09-11 由 Free 32 MB 升級） |
 | Node Runtime | `NODE:20-lts` |
 | 訂閱 ID | `c1a88666-9a4e-4a0f-8335-2b6191c4f38c` |
 | 線上 URL | `https://stock-platform-roy.azurewebsites.net` |
@@ -153,6 +155,33 @@ az webapp config appsettings set --name stock-platform-roy --resource-group rg-y
   SCM_DO_BUILD_DURING_DEPLOYMENT=false
 ```
 然後重新觸發部署。
+
+---
+
+### ❌ 錯誤 5：資料庫容量爆掉（`size quota` / refresh 失敗）
+
+**症狀**：收到「Vestential 系統異常通知」email，內容為 `The database 'stockdb' has reached its size quota. Partition or delete data...`，某個 refresh 寫入失敗；或 `az sql db list-usages` 顯示 `database_size` 已逼近 `Limit`。
+
+**根因**：`stockdb` 曾是 **Azure SQL Free tier（上限僅 32 MB）**。資料量累積後任何 INSERT 都會失敗。
+
+**修復步驟**：
+1. 先確認現況（唯讀，控制層指令不用 DB 登入）：
+   ```powershell
+   az sql db list --resource-group rg-yuzora_roy_ai --server sql-stock-platform --output table
+   az sql db list-usages --resource-group rg-yuzora_roy_ai --server sql-stock-platform --name stockdb --output table
+   ```
+2. 升級階層立即止血（不刪任何資料）：
+   ```powershell
+   az sql db update --resource-group rg-yuzora_roy_ai --server sql-stock-platform --name stockdb `
+     --edition Basic --capacity 5 --max-size 2GB
+   ```
+3. 細看各表佔用（需 DB 登入 + 白名單 IP）：
+   ```powershell
+   cd packages/database; node scripts/diag-size.mjs
+   ```
+4. 如需從本機連線：先在 Azure portal / CLI 加**單一來源 IP** 防火牆規則（用完即刪），不要開放全網段。
+
+> 註：`apps/web/.env.azure` 的 `DATABASE_URL` 可能為過期密碼（`Login failed`）。實際有效連線字串以 GitHub Secret 為準。
 
 ---
 

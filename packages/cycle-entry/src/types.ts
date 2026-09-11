@@ -51,6 +51,27 @@ export interface EntryStats {
   avgDaysToTarget: number | null
 }
 
+/** 逐筆交易紀錄（由 runSignalBacktestDetail 產出，供前端明細表與圖表使用）。 */
+export interface TradeRecord {
+  /** 訊號日（ISO 日期，規則比對通過日） */
+  signalDate: string
+  /** 進場日（訊號日次一交易日，ISO 日期） */
+  entryDate: string
+  /** 進場價（進場日開盤價） */
+  entryPrice: number
+  /** 出場日（ISO 日期）；持有到期且資料終止時為最後一根交易日 */
+  exitDate: string | null
+  /** 出場價（停利 / 停損價或到期收盤價） */
+  exitPrice: number | null
+  /** 單筆報酬率（比值，如 0.08 = +8%、-0.05 = -5%） */
+  returnPct: number | null
+  /** 持有交易天數 */
+  holdingDays: number | null
+  outcome: 'win' | 'loss' | 'neutral'
+  /** 出場原因：target=達成目標停利 / stop=跌破停損 / timeout=持有到期 */
+  exitReason: 'target' | 'stop' | 'timeout'
+}
+
 /** 候選標的（通過門檻：score≥3 且 R1/R2 至少一項）。 */
 export interface CycleCandidate {
   symbol: string

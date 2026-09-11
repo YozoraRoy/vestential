@@ -41,6 +41,9 @@
 | `NOTIFY_TO` | 市場焦點總覽與異常告警接收信箱 | `NOTIFY_TO` |
 
 > 註：`AUTH_BASE_URL` 在部署工作流程中已固定為 `https://vestential.com`，無需重複設定。
+>
+> **生產資料庫（Azure SQL）**：Server `sql-stock-platform.database.windows.net`（canadacentral，Resource Group `rg-yuzora_roy_ai`）、Database `stockdb`。
+> 目前階層為 **Basic（5 DTU）／上限 2 GB**（於 2026-09-11 由「Free tier（僅 32 MB）」升級，原因與排除步驟見 §4 Q3）。
 
 ---
 
@@ -81,3 +84,16 @@
   Stop-Process -Id <pid> -Force
   npm run dev
   ```
+
+### Q3：收到「資料庫 size quota」異常通知或 refresh 失敗？
+- **症狀**：電子郵件告警出現 `The database 'stockdb' has reached its size quota. Partition or delete data...`，特定排程 refresh（如 `sync-data.yml` / `sync-market-focus.yml`）寫入失敗。
+- **原因**：生產 Azure SQL `stockdb` 曾為 **Free tier（上限僅 32 MB）**，資料一多 INSERT 即撞硬上限。
+- **立即排除**（保留所有資料，升級階層即可解除容量限制）：
+  ```powershell
+  az sql db list-usages --resource-group rg-yuzora_roy_ai --server sql-stock-platform --name stockdb
+  az sql db update --resource-group rg-yuzora_roy_ai --server sql-stock-platform --name stockdb `
+    --edition Basic --capacity 5 --max-size 2GB
+  ```
+- **監控用量**：可執行 `node scripts/diag-size.mjs`（`packages/database` 下，唯讀列出 DB 大小、各表佔用與行數；需 `DATABASE_URL` 與白名單 IP 才能連線）。
+- **防火牆注意**：Azure SQL 預設拒絕所有 IP。診斷連線前需在 portal / CLI 新增來源 IP 的防火牆規則，用完即刪；**切勿**開放整個網際網路範圍（`0.0.0.0/0`）。
+- **長期對策**：Basic 2 GB 對本平台目前資料量十分充裕；若未來再成長，可考慮 serverless（閒置自動暫停）或對大表（圖檔／分析紀錄）加保留期清理。
