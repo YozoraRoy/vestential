@@ -10,14 +10,22 @@ export const dynamic = 'force-dynamic'
  * 觸發市場焦點 refresh。整個管線（抓新聞→AI→摘要→總覽→email→社群）
  * 改為背景執行並立即回傳 jobId，呼叫端透過 GET .../refresh/status 輪詢，
  * 徹底避免同步執行超過 Azure 240s 網關逾時 (504)。
+ *
+ * POST body (JSON):
+ *   - skipSocial: true → 跳過社群發布（排程自動化用，縮短 pipeline）
  */
 export async function POST(req: Request) {
   if (!authorizeSync(req)) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   }
+  let skipSocial = false
+  try {
+    const body = await req.json().catch(() => ({}))
+    skipSocial = body.skipSocial === true
+  } catch {}
   try {
     await migrate()
-    const job = startMarketFocusJob({ kind: 'refresh' })
+    const job = startMarketFocusJob({ kind: 'refresh', skipSocial })
     return NextResponse.json({
       success: true,
       accepted: true,

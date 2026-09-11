@@ -25,6 +25,7 @@ export interface MarketFocusJob {
   kind: MarketFocusJobKind
   status: MarketFocusJobStatus
   alsoSocial: boolean
+  skipSocial: boolean
   startedAt: string
   finishedAt: string | null
   error: string | null
@@ -68,8 +69,9 @@ function trimJobs(): void {
  * - kind='publish'：寫入 DB + email，並依 alsoSocial 決定是否觸發社群（後台手動發布）。
  * - kind='dry'：僅乾跑預覽，不寫 DB（後台預覽）。
  * 若已有 Job 執行中，直接回傳該 Job，避免重疊執行。
+ * @param skipSocial 為 true 時跳過社群發布（適合排程自動化，縮短 pipeline 時間）。
  */
-export function startMarketFocusJob(options: { kind: MarketFocusJobKind; alsoSocial?: boolean }): MarketFocusJob {
+export function startMarketFocusJob(options: { kind: MarketFocusJobKind; alsoSocial?: boolean; skipSocial?: boolean }): MarketFocusJob {
   if (activeJobId) {
     const running = JOBS.get(activeJobId)
     if (running?.status === 'running') return running
@@ -81,6 +83,7 @@ export function startMarketFocusJob(options: { kind: MarketFocusJobKind; alsoSoc
     kind,
     status: 'running',
     alsoSocial: kind === 'refresh' ? true : !!options.alsoSocial,
+    skipSocial: !!options.skipSocial,
     startedAt: new Date().toISOString(),
     finishedAt: null,
     error: null,
@@ -145,8 +148,8 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
           console.error('[MarketFocusJob] email dispatch error:', e)
         }
 
-        // 社群：refresh 必發；publish 依勾選
-        if (job.kind === 'refresh' || job.alsoSocial) {
+        // 社群：refresh 必發；publish 依勾選；skipSocial=true 時跳過
+        if (!job.skipSocial && (job.kind === 'refresh' || job.alsoSocial)) {
           try {
             const social = await triggerSocialPublish()
             job.socialResults = social?.results ?? []

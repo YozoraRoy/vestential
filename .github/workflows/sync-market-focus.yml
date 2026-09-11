@@ -1,4 +1,4 @@
-name: Sync market focus (AI-filtered news)
+﻿name: Sync market focus (AI-filtered news)
 
 on:
   schedule:
@@ -21,8 +21,9 @@ jobs:
           CODE=$(curl -s -o /tmp/mf_resp.json -w "%{http_code}" \
             --max-time 60 \
             -X POST \
-            -H "Authorization: Bearer $SYNC_TOKEN" \
+-H "Authorization: Bearer $SYNC_TOKEN" \
             -H "Content-Type: application/json" \
+            -d '{"skipSocial":true}' \
             "https://vestential.com/api/market-focus/refresh")
           echo "HTTP $CODE"
           cat /tmp/mf_resp.json
