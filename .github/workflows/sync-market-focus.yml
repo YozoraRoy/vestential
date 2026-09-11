@@ -63,7 +63,8 @@ jobs:
               exit 0
             fi
             if [ "$STATUS" = "failed" ]; then
-              echo "::error::market-focus refresh failed: $(python3 -c \"import sys,json;d=json.load(open('/tmp/mf_status.json'));print(d['job'].get('error',''))\")"
+              FAIL_MSG=$(python3 -c "import sys,json;d=json.load(open('/tmp/mf_status.json'));print(d['job'].get('error',''))")
+              echo "::error::market-focus refresh failed: $FAIL_MSG"
               exit 1
             fi
             sleep 10
