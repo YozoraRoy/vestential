@@ -149,7 +149,7 @@ export default async function CycleEntryPage() {
   const schema = { '@context': 'https://schema.org', '@graph': graph }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-16">
+    <div className="max-w-6xl mx-auto px-4 py-16">
       <div className="flex items-center gap-2 mb-3">
         <TrendingUp className="w-6 h-6 text-[var(--accent-green)]" />
         <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-[var(--text-secondary)]">{ce.badge}</span>
