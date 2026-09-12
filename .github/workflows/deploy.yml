@@ -136,24 +136,25 @@ jobs:
             az webapp start --name stock-platform-roy --resource-group rg-yuzora_roy_ai || true
             exit 1
           fi
-          echo "Upload accepted. Starting app..."
-          az webapp start --name stock-platform-roy --resource-group rg-yuzora_roy_ai
+          echo "Upload accepted. Restarting app so it runs the freshly uploaded build..."
+          az webapp restart --name stock-platform-roy --resource-group rg-yuzora_roy_ai
 
       - name: Check app health
         run: |
           echo "Waiting for app to start from standalone build..."
           HEALTHY=0
           for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "https://stock-platform-roy.azurewebsites.net/login" 2>/dev/null || echo "000")
-            if [ "$CODE" = "200" ]; then
-              echo "App healthy (HTTP 200) after attempt $i"
+            BODY=$(curl -s --max-time 15 "https://stock-platform-roy.azurewebsites.net/api/health" 2>/dev/null || echo "")
+            MS=$(echo "$BODY" | jq -r '.checks.marketFocusLogs.retentionDays // empty' 2>/dev/null)
+            if [ "$MS" = "7" ] && [ "$(echo "$BODY" | jq -r '.ok // false' 2>/dev/null)" = "true" ]; then
+              echo "App healthy (new build confirmed: marketFocusLogs.retentionDays=7) after attempt $i"
               HEALTHY=1
               break
             fi
-            echo "Attempt $i: HTTP $CODE - waiting..."
+            echo "Attempt $i: not ready (marketFocusLogs check absent) - waiting..."
             sleep 15
           done
           if [ "$HEALTHY" = "0" ]; then
-            echo "::error::App did not become healthy after deployment"
+            echo "::error::App did not become healthy after deployment (new build marker marketFocusLogs not served)"
             exit 1
           fi
