@@ -1,4 +1,4 @@
-import { yahooFinanceProvider } from '@stock/market-data'
+import { yahooFinanceProvider, fetchBatchQuotes } from '@stock/market-data'
 import { searchStocksByName, fuzzySearchStocksByName } from '@stock/database'
 import { Converter } from 'opencc-js'
 
@@ -174,6 +174,25 @@ async function dbSearchTw(query: string): Promise<{ candidates: StockCandidate[]
 }
 
 /**
+ * Yahoo `search` 對純台股代號在資料中心 IP 常回空（尤其 OTC/.TWO，如 00687B）。
+ * 代號字形時直接 probe v7 批量報價（.TW/.TWO 各一），取的可用候選。
+ * 若 .TW 存在（上市）優先於 .TWO（上櫃）。
+ */
+async function probeTwSymbolById(id: string): Promise<StockCandidate[]> {
+  try {
+    const candidates = [`${id}.TW`, `${id}.TWO`]
+    const batch = await fetchBatchQuotes(candidates)
+    const hit =
+      batch.find((r) => r.symbol?.toUpperCase() === `${id}.TW`) ??
+      batch.find((r) => r.symbol?.toUpperCase() === `${id}.TWO`)
+    if (!hit) return []
+    return [{ symbol: normalizeSearchSymbol(hit.symbol), name: hit.name || hit.symbol, market: 'tw' as Market }]
+  } catch {
+    return []
+  }
+}
+
+/**
  * 依名稱或代號搜尋股票候選清單（供自動補齊與前端手動搜尋共用）。
  * - 台股：以本地 DB（TWSE 零股交易/股東會紀念品）的中文名稱查詢為主，
  *   Yahoo 對中文名稱搜尋極不可靠（實測 "星宇航空" 回空）；DB 沒有結果才 fallback 到 Yahoo。
@@ -186,6 +205,13 @@ export async function searchStockCandidates(q: string, market: Market): Promise<
     if (market === 'tw') {
       const { candidates } = await dbSearchTw(query)
       if (candidates.length) return candidates
+
+      // 純台股代號字形：先 probe 報價端（比 Yahoo search 對 OTC 代號可靠），再掉回 search。
+      if (/^\d{4}[A-Z0-9]{0,2}$/i.test(query)) {
+        const probed = await probeTwSymbolById(query)
+        if (probed.length) return probed
+      }
+
       const y = await yahooFinanceProvider.searchSymbols(query)
       const tw = y.filter(r => /\.(TW|TWO)$/i.test(r.symbol))
       if (tw.length) return tw.map(r => ({ symbol: normalizeSearchSymbol(r.symbol), name: r.name, market: 'tw' as Market }))
