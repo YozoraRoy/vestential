@@ -1098,10 +1098,25 @@ export function hasDb(): boolean {
  * SQLite keeps native LIMIT. Only applies when a trailing LIMIT n is present.
  */
 export function translateLimitForAzure(sqlStr: string): string {
-  return sqlStr.replace(
-    /^\s*SELECT\s+(DISTINCT\s+)?(.*)\s+LIMIT\s+(\d+|@\w+)\s*;?\s*$/is,
-    (_all, distinct, rest, n) => `SELECT ${distinct ?? ''}TOP (${n}) ${rest}`,
+  // SQLite → T-SQL: LIMIT n → TOP (n)
+  const applyTop = (sql: string): string =>
+    sql.replace(
+      /^\s*SELECT\s+(.*)\s+LIMIT\s+(\d+|@\w+)\s*;?\s*$/is,
+      (_all, rest, n) => `SELECT TOP (${n}) ${rest}`,
+    )
+
+  // `SELECT DISTINCT x ... ORDER BY ... LIMIT n` breaks in T-SQL
+  // (ORDER BY items must appear in the select list when DISTINCT is used).
+  // Fix by deduping inside a derived table and ordering outside of it.
+  const distinctWithOrder = sqlStr.match(
+    /^\s*SELECT\s+DISTINCT\s+([\s\S]+?)\s+FROM\s+([\s\S]*?)\s+ORDER\s+BY\s+([\s\S]+?)\s+LIMIT\s+(\d+|@\w+)\s*;?\s*$/is,
   )
+  if (distinctWithOrder) {
+    const [, cols, body, orderBy, n] = distinctWithOrder
+    return `SELECT TOP (${n}) * FROM (SELECT DISTINCT ${cols.trim()} FROM ${body.trim()}) t ORDER BY ${orderBy.trim()}`
+  }
+
+  return applyTop(sqlStr)
 }
 
 /**
