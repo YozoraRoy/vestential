@@ -11,6 +11,7 @@ export {
   searchStocksByName, fuzzySearchStocksByName, damerauLevenshtein,
   deleteAnalysisRecord,
   saveMarketFocus, getMarketFocus, saveMarketFocusMeta, getMarketFocusMeta,
+  logMarketFocusEvent, getLatestMarketFocusLog, listMarketFocusLogs, cleanupMarketFocusLogs,
   saveCycleEntrySignals, getCycleEntrySignalsByEdition,
   saveCycleEntryMeta, getLatestCycleEntryMeta, getCycleEntryMetaByEdition,
   listCycleEntryEditions, countCycleEntrySignals,
@@ -36,7 +37,7 @@ export {
   deleteMarketFocusSubscriber, listMarketFocusSubscribers, listActiveMarketFocusSubscribers,
   countMarketFocusSubscribers,
 } from './db.js'
-export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta,
+export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta, MarketFocusLogRow, MarketFocusLogInput,
   ArenaSeasonRow, ArenaAgentRow, ArenaHoldingRow, ArenaTradeRow, ArenaSnapshotRow, ArenaAgentInput, ArenaLeaderboardRow,
   ArenaIntradayPriceRow, ArenaMarketBriefingRow, ArenaDecisionLogRow, ArenaDiscussionRow,
   SocialPostRow, SocialPostInput, SocialPostPlatform, SocialPostStatus,

@@ -1,4 +1,4 @@
-import { dbQueryFirst, getMarketFocusMeta, getLatestCycleEntryMeta } from '@stock/database'
+import { dbQueryFirst, getMarketFocusMeta, getLatestCycleEntryMeta, cleanupMarketFocusLogs } from '@stock/database'
 import { getLastMarketTradingDay, isTaiwanMarketTradingDay, formatDateIso } from '@/utils/taiwan-calendar'
 import { FALLBACK_SUMMARY_PREFIX } from '@/lib/email'
 
@@ -156,6 +156,20 @@ export async function runHealthChecks(): Promise<HealthReport> {
   } catch (e: any) {
     checks.db = { ok: false, error: e.message }
     issues.push({ code: 'db_error', severity: 'error', message: `資料庫連線失敗: ${e.message}` })
+  }
+
+  // ── market_focus_logs 維護（保留最新 7 天）──────────────────────
+  // 由現有 health 排程（每 4 小時＋每日完整覆盤）代跑，超過 7 天的日誌定期刪除。
+  try {
+    const total = (await dbQueryFirst<{ cnt: number }>('SELECT COUNT(*) AS cnt FROM market_focus_logs'))?.cnt ?? 0
+    const pruned = await cleanupMarketFocusLogs(7)
+    const remaining = Math.max(0, total - pruned)
+    checks.marketFocusLogs = { total, pruned, remaining, retentionDays: 7 }
+    if (remaining > 5000) {
+      issues.push({ code: 'mf_logs_growing', severity: 'warn', message: `market_focus_logs 仍有 ${remaining} 筆（保留上限設定 7 天，可能清理未生效）` })
+    }
+  } catch (e: any) {
+    issues.push({ code: 'mf_logs_error', severity: 'error', message: `market_focus_logs 維護失敗: ${e.message}` })
   }
 
   // ── 核心套件 import ────────────────────────────────────────────

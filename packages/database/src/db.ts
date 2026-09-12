@@ -226,6 +226,19 @@ function getSqliteDb(): Database.Database | null {
         generated_at TEXT,
         created_at TEXT DEFAULT (datetime('now', 'localtime'))
       );
+      CREATE TABLE IF NOT EXISTS market_focus_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL,
+        level TEXT NOT NULL,
+        code TEXT,
+        job_id TEXT,
+        edition_key TEXT,
+        message TEXT NOT NULL,
+        detail TEXT,
+        created_at TEXT DEFAULT (datetime('now', 'localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_mf_logs_created ON market_focus_logs(created_at);
+      CREATE INDEX IF NOT EXISTS idx_mf_logs_source ON market_focus_logs(source);
       CREATE TABLE IF NOT EXISTS arena_seasons (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
@@ -744,6 +757,23 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           generated_at NVARCHAR(100),
           created_at   DATETIME DEFAULT GETDATE()
         );
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'market_focus_logs')
+      BEGIN
+        CREATE TABLE market_focus_logs (
+          id          INT IDENTITY(1,1) PRIMARY KEY,
+          source      NVARCHAR(60) NOT NULL,
+          level       NVARCHAR(10) NOT NULL,
+          code        NVARCHAR(60),
+          job_id      NVARCHAR(80),
+          edition_key NVARCHAR(100),
+          message     NVARCHAR(MAX) NOT NULL,
+          detail      NVARCHAR(MAX),
+          created_at  DATETIME DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_mf_logs_created ON market_focus_logs(created_at);
+        CREATE INDEX idx_mf_logs_source ON market_focus_logs(source);
       END
     `)
 
@@ -2167,6 +2197,117 @@ export async function getMarketFocusMeta(): Promise<MarketFocusMeta | null> {
     'SELECT id, summary, generated_at FROM market_focus_meta ORDER BY id DESC LIMIT 1',
   )
   return rows[0] ?? null
+}
+
+// ─── Market Focus 管線事件日誌（market_focus_logs）────────────────
+// 結構化記錄市場焦點管線的 LLM 失敗／兜底／回填等事件，供後續查詢診斷。
+// 與 Azure 容器 log 互補：Log Analytics / log stream 只有原始 stdout，實例回收即流失；
+// DB 層既可跨實例存活，也可直接餵進告警信與後台查詢。
+
+export interface MarketFocusLogRow {
+  id: number
+  source: string
+  level: 'info' | 'warn' | 'error'
+  code: string | null
+  job_id: string | null
+  edition_key: string | null
+  message: string
+  detail: string | null
+  created_at: string | null
+}
+
+export interface MarketFocusLogInput {
+  source: string
+  level: 'info' | 'warn' | 'error'
+  code?: string | null
+  jobId?: string | null
+  editionKey?: string | null
+  message: string
+  detail?: Record<string, unknown> | string | null
+}
+
+/** 記錄一筆市場焦點管線日誌。DB 失敗一律靜默吞掉，絕不影響主流程。 */
+export async function logMarketFocusEvent(input: MarketFocusLogInput): Promise<void> {
+  try {
+    const detail =
+      input.detail == null
+        ? null
+        : typeof input.detail === 'string'
+          ? input.detail
+          : JSON.stringify(input.detail)
+    await dbExecute(
+      `INSERT INTO market_focus_logs (source, level, code, job_id, edition_key, message, detail)
+       VALUES (@source, @level, @code, @job_id, @edition_key, @message, @detail)`,
+      {
+        source: input.source,
+        level: input.level,
+        code: input.code ?? null,
+        job_id: input.jobId ?? null,
+        edition_key: input.editionKey ?? null,
+        message: input.message,
+        detail,
+      },
+    )
+  } catch (e) {
+    console.error(`[DB] logMarketFocusEvent failed (${input.source}/${input.level}):`, e)
+  }
+}
+
+/** 取出某來源最近一筆日誌（同來源依時間新到舊）。 */
+export async function getLatestMarketFocusLog(source: string, level?: 'info' | 'warn' | 'error'): Promise<MarketFocusLogRow | null> {
+  const cond = level ? 'source = @source AND level = @level' : 'source = @source'
+  const rows = await dbQueryAll<MarketFocusLogRow>(
+    `SELECT id, source, level, code, job_id, edition_key, message, detail, created_at
+     FROM market_focus_logs WHERE ${cond} ORDER BY id DESC LIMIT 1`,
+    level ? { source, level } : { source },
+  )
+  return rows[0] ?? null
+}
+
+/** 列出最近 N 筆市場焦點管線日誌（新到舊），供後台／健康檢查查詢。 */
+export async function listMarketFocusLogs(limit = 50, opts?: { level?: 'info' | 'warn' | 'error'; source?: string }): Promise<MarketFocusLogRow[]> {
+  const conds: string[] = []
+  const params: Record<string, any> = {}
+  if (opts?.level) {
+    conds.push('level = @level')
+    params.level = opts.level
+  }
+  if (opts?.source) {
+    conds.push('source = @source')
+    params.source = opts.source
+  }
+  const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : ''
+  return dbQueryAll<MarketFocusLogRow>(
+    `SELECT id, source, level, code, job_id, edition_key, message, detail, created_at
+     FROM market_focus_logs${where} ORDER BY id DESC LIMIT ${Math.max(1, Math.min(limit, 500))}`,
+    params,
+  )
+}
+
+/** 清理超過 retentionDays（預設 7）天前的日誌，回傳刪除筆數。保留最新 retentionDays 天。 */
+export async function cleanupMarketFocusLogs(retentionDays = 7): Promise<number> {
+  try {
+    const n = Math.max(1, Math.floor(retentionDays))
+    let deleted = 0
+    if (isAzureSql) {
+      const pool = await getAzurePool()
+      if (!pool) return 0
+      const r = await pool
+        .request()
+        .input('days', sql.Int, n)
+        .query('DELETE FROM market_focus_logs WHERE created_at < DATEADD(day, @days, GETDATE()); SELECT @@ROWCOUNT AS n')
+      deleted = r.recordset?.[0]?.n ?? 0
+    } else {
+      const db = getSqliteDb()
+      if (!db) return 0
+      const r = db.prepare(`DELETE FROM market_focus_logs WHERE created_at < datetime('now','localtime','-${n} days')`).run()
+      deleted = r.changes
+    }
+    return deleted
+  } catch (e) {
+    console.error('[DB] cleanupMarketFocusLogs failed:', e)
+    return 0
+  }
 }
 
 // ─── Cycle Entry (週期進場模型預估) ───────────────────────────────

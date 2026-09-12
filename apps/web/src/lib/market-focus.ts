@@ -3,7 +3,7 @@ import { createQuickLLM } from '@stock/ai-engine'
 import { loadConfig } from '@stock/core'
 import { getAgentSetting } from '@stock/database'
 import type { MarketFocusItem } from '@stock/database'
-import { saveMarketFocus, saveMarketFocusMeta, getMarketFocus, getMarketFocusMeta } from '@stock/database'
+import { saveMarketFocus, saveMarketFocusMeta, getMarketFocus, getMarketFocusMeta, logMarketFocusEvent } from '@stock/database'
 
 // ─── 候選新聞來源設定 (多來源聚合池) ─────────────────────────────
 // 1. 鉅亨網 (Anue Cnyes)：台股、外匯、頭條
@@ -23,6 +23,21 @@ const USER_AGENT = 'Mozilla/5.0 (Vestential MultiSource MarketFocus/1.0)'
 const MAX_CANDIDATES = 60
 const RECENT_DAYS = 2
 const MAX_CONTENT_CHARS = 4000
+
+/** 把 LLM 例外轉成可寫入日誌的結構（個別欄位截斷避免塞爆 detail 欄位）。 */
+function formatErrorDetail(e: unknown): Record<string, unknown> {
+  const err = (e ?? {}) as { message?: string; code?: string; stack?: string; status?: unknown }
+  const part: Record<string, unknown> = {
+    type: typeof e === 'object' && e !== null ? (e as { constructor?: { name?: string } }).constructor?.name ?? 'unknown' : typeof e,
+  }
+  if (typeof err.message === 'string' && err.message) part.message = err.message.slice(0, 800)
+  if (typeof err.code === 'string' && err.code) part.code = err.code
+  if (err.status != null) part.status = String(err.status)
+  if (typeof err.stack === 'string' && err.stack) {
+    part.stack = err.stack.split('\n').slice(0, 6).join('\n').slice(0, 1200)
+  }
+  return part
+}
 
 // ─── 候選池解析器 (JSON-LD & RSS) ────────────────────────────────
 function parseCnyesJsonLd(html: string): NewsCandidate[] {
@@ -320,6 +335,7 @@ export const SUMMARY_SYSTEM_PROMPT = `你是 Vestential 的市場焦點主筆。
 
 /** 依精選新聞生成當日市場總覽;失敗時以新聞標題兜底。 */
 export async function generateDailySummary(items: MarketFocusItem[]): Promise<string> {
+  let threw = false
   try {
     const config = loadConfig()
     // 透過 createQuickLLM 帶上 fallback chain:primary(OpenAI)被配額 429 封鎖時自動切換備援模型
@@ -334,7 +350,23 @@ export async function generateDailySummary(items: MarketFocusItem[]): Promise<st
     const summary = typeof parsed?.summary === 'string' ? parsed.summary.trim() : ''
     if (summary) return summary
   } catch (e) {
+    threw = true
     console.error('[MarketFocus] daily summary failed, falling back to headlines:', e)
+    await logMarketFocusEvent({
+      source: 'daily_summary',
+      level: 'error',
+      code: 'LLM_FALLBACK',
+      message: '每日總覽 LLM 主模型與備援皆失敗，以新聞標題拼接呈現（isSummaryFallback 會為 true）',
+      detail: formatErrorDetail(e),
+    })
+  }
+  if (!threw) {
+    await logMarketFocusEvent({
+      source: 'daily_summary',
+      level: 'warn',
+      code: 'LLM_EMPTY_RESULT',
+      message: '每日總覽 LLM 回傳空值或 JSON 缺 summary 欄位，以新聞標題拼接呈現',
+    })
   }
   return `當日市場焦點：${items.map((it) => it.title).join('；')}`
 }
@@ -377,6 +409,7 @@ interface SelectEntry {
 /** 依「價值投資」精神用 LLM 過濾候選新聞;失敗時回傳原始前 N 則(理由為空)當兜底。 */
 export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<MarketFocusItem[]> {
   if (candidates.length === 0) return []
+  let threw = false
   try {
     const config = loadConfig()
     const { llm } = createQuickLLM(config, { maxTokens: 2048 })
@@ -405,7 +438,23 @@ export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<Marke
     }
     if (items.length > 0) return items
   } catch (e) {
+    threw = true
     console.error('[MarketFocus] LLM filter failed, falling back to raw headlines:', e)
+    await logMarketFocusEvent({
+      source: 'filter',
+      level: 'error',
+      code: 'LLM_FALLBACK',
+      message: 'LLM 精選新聞過濾失敗，退回原始新聞前 N 則（無遴選原因）',
+      detail: formatErrorDetail(e),
+    })
+  }
+  if (!threw) {
+    await logMarketFocusEvent({
+      source: 'filter',
+      level: 'warn',
+      code: 'LLM_EMPTY_RESULT',
+      message: 'LLM 未回傳有效選取結果，退回原始新聞前 N 則（無遴選原因）',
+    })
   }
   const rawCount2 = (await getAgentSetting('market_focus.select_count').catch(() => null)) ?? ''
   const fallbackCount = (rawCount2 && Number(rawCount2) > 0 && Number(rawCount2)) || 10
@@ -468,6 +517,13 @@ export async function generateArticleSummaries(
     })
   } catch (err) {
     console.error('[MarketFocus] generateArticleSummaries failed, falling back:', err)
+    await logMarketFocusEvent({
+      source: 'article_summary',
+      level: 'error',
+      code: 'LLM_FALLBACK',
+      message: '逐則新聞摘要 LLM 失敗，退回精選理由短述',
+      detail: formatErrorDetail(err),
+    })
     return items.map((it) => (it.reason ? `核心重點：${it.reason}` : ''))
   }
 }
@@ -499,6 +555,13 @@ export async function backfillMissingSummaries(): Promise<number> {
     return filled.length
   } catch (e) {
     console.error('[MarketFocus] backfillMissingSummaries failed:', e)
+    await logMarketFocusEvent({
+      source: 'backfill_summary',
+      level: 'error',
+      code: 'LLM_FAILED',
+      message: '回填缺失新聞摘要（backfillMissingSummaries）失敗',
+      detail: formatErrorDetail(e),
+    })
     return 0
   }
 }
@@ -542,6 +605,13 @@ export async function backfillMissingReasons(): Promise<number> {
     return filled.length
   } catch (e) {
     console.error('[MarketFocus] backfillMissingReasons failed:', e)
+    await logMarketFocusEvent({
+      source: 'backfill_reason',
+      level: 'error',
+      code: 'LLM_FAILED',
+      message: '回填缺失「價值投資遴選原因」（backfillMissingReasons）失敗',
+      detail: formatErrorDetail(e),
+    })
     return 0
   }
 }

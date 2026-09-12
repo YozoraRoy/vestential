@@ -1,6 +1,6 @@
 import { revalidateTag } from 'next/cache'
 import type { MarketFocusItem } from '@stock/database'
-import { getMarketFocusMeta } from '@stock/database'
+import { getMarketFocusMeta, logMarketFocusEvent, getLatestMarketFocusLog } from '@stock/database'
 import { refreshMarketFocusDetailed, previewMarketFocus, backfillMissingSummaries, backfillMissingReasons } from '@/lib/market-focus'
 import { sendMarketFocusAlert, sendMarketFocusSummary, isSummaryFallback } from '@/lib/email'
 import { triggerSocialPublish } from '@/lib/social-trigger'
@@ -149,7 +149,27 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
         // Email：回退偵測同原流程
         try {
           if (meta?.summary && isSummaryFallback(meta.summary)) {
-            await sendMarketFocusAlert('LLM 每日總覽回退', '主模型與備援皆失敗,每日總覽以新聞標題拼接呈現。')
+            // 把 DB 日誌中最新一筆總覽失敗的細節帶進告警信，取代過去固定的無資訊訊息。
+            const lastSummaryLog = await getLatestMarketFocusLog('daily_summary', 'error').catch(() => null)
+            let alertMsg = '主模型與備援皆失敗，每日總覽以新聞標題拼接呈現。'
+            if (lastSummaryLog?.message) alertMsg += `\n[message] ${lastSummaryLog.message}`
+            if (lastSummaryLog?.detail) {
+              let detail = lastSummaryLog.detail
+              try {
+                const parsed = JSON.parse(detail) as { message?: string; code?: string; stack?: string }
+                detail = [parsed.message, parsed.code ? `code=${parsed.code}` : '', parsed.stack ? `stack=${parsed.stack}` : ''].filter(Boolean).join('\n') || detail
+              } catch {}
+              alertMsg += `\n[detail] ${detail.slice(0, 1200)}`
+            }
+            await logMarketFocusEvent({
+              source: 'job',
+              level: 'warn',
+              code: 'EDITION_SUMMARY_FALLBACK',
+              jobId: job.id,
+              editionKey: job.editionKey ?? null,
+              message: '已偵測每日總覽為標題拼接 fallback，寄出 LLM 回退告警',
+            })
+            await sendMarketFocusAlert('LLM 每日總覽回退', alertMsg)
           } else {
             await sendMarketFocusSummary(job.editionKey ?? undefined)
           }
@@ -176,6 +196,15 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
     job.error = (e?.message ?? String(e)).slice(0, 500)
     job.finishedAt = new Date().toISOString()
     if (job.kind === 'refresh' || job.kind === 'publish') {
+      await logMarketFocusEvent({
+        source: 'job',
+        level: 'error',
+        code: 'JOB_FAILED',
+        jobId: job.id,
+        editionKey: job.editionKey ?? null,
+        message: `market-focus job 失敗（${job.kind}）：${job.error}`,
+        detail: { reason: e?.message ?? String(e) },
+      })
       try {
         await sendMarketFocusAlert('refresh 失敗', job.error ?? '')
       } catch {}
