@@ -185,8 +185,23 @@ async function probeTwSymbolById(id: string): Promise<StockCandidate[]> {
     const hit =
       batch.find((r) => r.symbol?.toUpperCase() === `${id}.TW`) ??
       batch.find((r) => r.symbol?.toUpperCase() === `${id}.TWO`)
-    if (!hit) return []
-    return [{ symbol: normalizeSearchSymbol(hit.symbol), name: hit.name || hit.symbol, market: 'tw' as Market }]
+    if (hit) {
+      return [{ symbol: normalizeSearchSymbol(hit.symbol), name: hit.name || hit.symbol, market: 'tw' as Market }]
+    }
+  } catch {
+    // v7 報價需要 crumb/cookie，雲端 IP 可能被擋 → 掉到底下 chart 報價 probe。
+  }
+
+  try {
+    const yahooSymbol = await resolveYahooSymbol(id, 'tw')
+    if (!/\.(TW|TWO)$/.test(yahooSymbol)) return []
+    let name = id
+    try {
+      const profile = await yahooFinanceProvider.getProfile(yahooSymbol, 'tw')
+      const pn = profile?.name?.trim()
+      if (pn && pn.toUpperCase() !== yahooSymbol.toUpperCase()) name = pn
+    } catch {}
+    return [{ symbol: normalizeSearchSymbol(yahooSymbol), name, market: 'tw' as Market }]
   } catch {
     return []
   }
