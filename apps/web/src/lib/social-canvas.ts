@@ -32,15 +32,26 @@ function ensureFont() {
   console.warn('[SocialCanvas] Noto Sans CJK TC not found; card text may render as boxes')
 }
 
+/** 依基底透明度的由上而下漸層遮罩（effect 底色越淺＝越保留 FLUX 構圖細節）。 */
+function createMask(ctx: any, base: number) {
+  const overlay = ctx.createLinearGradient(0, 0, 0, CARD_H)
+  overlay.addColorStop(0, `rgba(11, 13, 19, ${base})`)
+  overlay.addColorStop(0.4, `rgba(11, 13, 19, ${Math.min(base + 0.07, 0.95)})`)
+  overlay.addColorStop(1, `rgba(11, 13, 19, ${Math.min(base + 0.17, 0.95)})`)
+  return overlay
+}
+
 export interface SocialCardData {
   meta: MarketFocusMeta
   items: MarketFocusItem[]
 }
 
+export type SocialCardStyle = 'classic' | 'meme' | 'ai'
+
 export interface SocialCardOptions {
-  /** classic＝品牌資訊卡；meme＝梗圖大字版式。 */
-  style?: 'classic' | 'meme'
-  /** style=meme 時的梗圖內容。 */
+  /** classic＝品牌資訊卡；meme＝梗圖大字版式；ai＝FLUX 專屬藝術圖＋大字 Hero。 */
+  style?: SocialCardStyle
+  /** style=meme 或 style=ai 時的梗圖內容。 */
   meme?: { title: string; punchline: string } | null
   /** AI 生成的高品質科技底圖 Buffer（選填，未傳入或失敗時使用純色漸層兜底）。 */
   backgroundImage?: Buffer | null
@@ -54,16 +65,13 @@ export async function renderSocialCard(data: SocialCardData, opts: SocialCardOpt
   const ctx = canvas.getContext('2d')
 
   // ── 背景：若有傳入底圖則繪製並疊上深色遮罩，否則使用深色純色漸層 ──────
+  // AI 全圖卡全幅展示藝術構圖，遮罩最淺；classic/meme 以可讀性優先，遮罩較深。
   let drawnBg = false
   if (opts.backgroundImage && opts.backgroundImage.length > 0) {
     try {
       const bgImg = await loadImage(opts.backgroundImage)
       ctx.drawImage(bgImg, 0, 0, CARD_W, CARD_H)
-      // 疊上半透明科技暗化遮罩（保留 FLUX 底圖細節，同時讓文字可讀）
-      const overlay = ctx.createLinearGradient(0, 0, 0, CARD_H)
-      overlay.addColorStop(0, 'rgba(11, 13, 19, 0.55)')
-      overlay.addColorStop(0.4, 'rgba(11, 13, 19, 0.62)')
-      overlay.addColorStop(1, 'rgba(11, 13, 19, 0.72)')
+      const overlay = createMask(ctx, style === 'ai' ? 0.2 : 0.55)
       ctx.fillStyle = overlay
       ctx.fillRect(0, 0, CARD_W, CARD_H)
       drawnBg = true
@@ -103,6 +111,8 @@ export async function renderSocialCard(data: SocialCardData, opts: SocialCardOpt
 
   if (style === 'meme' && opts.meme) {
     renderMeme(ctx, opts.meme, maxWidth, CARD_H)
+  } else if (style === 'ai' && opts.meme) {
+    renderAiCard(ctx, opts.meme, maxWidth, CARD_H)
   } else {
     renderClassic(ctx, data, maxWidth)
   }
@@ -171,6 +181,36 @@ function renderMeme(ctx: any, meme: { title: string; punchline: string }, maxWid
     ctx.fillText(line, 72, y)
     y += 64
   }
+
+  drawCtaBottom(ctx)
+}
+
+function renderAiCard(ctx: any, meme: { title: string; punchline: string }, maxWidth: number, CARD_H: number) {
+  // ── Hero 主標題：大字全幅置於上方預留區（FLUX prompt 已保留 upper-third 大字區）──
+  ctx.save()
+  ctx.textAlign = 'left'
+  ctx.shadowColor = 'rgba(0,0,0,0.55)'
+  ctx.shadowBlur = 18
+  ctx.font = `700 92px "${FONT_NAME}"`
+  ctx.fillStyle = '#ffffff'
+  const lines = wrapText(ctx, meme.title, maxWidth, 3)
+  let y = 320
+  const lineH = 124
+  for (const line of lines) {
+    ctx.fillText(line, 72, y)
+    y += lineH
+  }
+
+  // ── punchline：品牌綠，帶陰影確保在亮色構圖上可讀 ──────────────
+  ctx.font = `400 54px "${FONT_NAME}"`
+  ctx.fillStyle = '#22c55e'
+  const punch = wrapText(ctx, meme.punchline, maxWidth, 2)
+  y += 40
+  for (const line of punch) {
+    ctx.fillText(line, 72, y)
+    y += 72
+  }
+  ctx.restore()
 
   drawCtaBottom(ctx)
 }

@@ -3,10 +3,12 @@
 import { useEffect, useState } from 'react'
 import { btn, btnGhost, Card, Help, input, post, ResultBanner, SectionPageWrapper, type Result } from './_components'
 
+type SocialCardStyle = 'classic' | 'meme' | 'ai'
+
 interface DryRunResult {
   editionKey?: string | null
-  cardStyle?: 'classic' | 'meme'
-  cards?: { classic: string; meme: string }
+  cardStyle?: SocialCardStyle
+  cards?: { classic: string; meme: string; ai: string }
   captions?: { instagram: string; threads: string }
   meme?: { title: string; punchline: string } | null
   results?: Array<{ platform: string; status: string; error?: string | null }>
@@ -37,8 +39,8 @@ export function SocialClient() {
   const [busy, setBusy] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [platforms, setPlatforms] = useState<SocialPlatform[]>(['instagram', 'threads'])
-  const [igCardStyle, setIgCardStyle] = useState<'classic' | 'meme'>('meme')
-  const [threadsCardStyle, setThreadsCardStyle] = useState<'classic' | 'meme'>('classic')
+  const [igCardStyle, setIgCardStyle] = useState<SocialCardStyle>('meme')
+  const [threadsCardStyle, setThreadsCardStyle] = useState<SocialCardStyle>('classic')
   const [draftIg, setDraftIg] = useState('')
   const [draftThreads, setDraftThreads] = useState('')
   const [bgPreset, setBgPreset] = useState('auto')
@@ -327,6 +329,16 @@ export function SocialClient() {
                         />
                         品牌資訊卡
                       </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="igCardStyle"
+                          checked={igCardStyle === 'ai'}
+                          onChange={() => setIgCardStyle('ai')}
+                          className="accent-[var(--accent)]"
+                        />
+                        🎨 AI 全圖卡
+                      </label>
                     </div>
                   </div>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -381,6 +393,16 @@ export function SocialClient() {
                           className="accent-[var(--accent)]"
                         />
                         梗圖大字卡
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="threadsCardStyle"
+                          checked={threadsCardStyle === 'ai'}
+                          onChange={() => setThreadsCardStyle('ai')}
+                          className="accent-[var(--accent)]"
+                        />
+                        🎨 AI 全圖卡
                       </label>
                     </div>
                   </div>

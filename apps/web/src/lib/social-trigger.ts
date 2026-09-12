@@ -1,8 +1,8 @@
 import { getMarketFocusMeta, getMarketFocus, getAgentSetting, saveSocialCardImage, getSocialCardImage } from '@stock/database'
 import type { SocialPostPlatform } from '@stock/database'
 import { generateSocialCaptions, generateMemeConcept, type SocialCaptions } from '@/lib/social'
-import { renderSocialCard } from '@/lib/social-canvas'
-import { generateSocialBackgroundImage } from '@/lib/social-ai-image'
+import { renderSocialCard, type SocialCardStyle } from '@/lib/social-canvas'
+import { generateSocialBackgroundImage, generateSocialArtworkImage } from '@/lib/social-ai-image'
 import { publishSocialPost, alreadyPosted } from '@/lib/social-publish'
 import { sendMarketFocusAlert } from '@/lib/email'
 
@@ -19,9 +19,9 @@ export interface SocialPublishOutcome {
   message?: string
   results?: { platform: SocialPostPlatform; status: string; error?: string | null }[]
   /** 僅 dryRun 時回傳：目前 social.card_style 設定值（作為預設選卡）。 */
-  cardStyle?: 'classic' | 'meme'
-  /** 僅 dryRun 時回傳：classic 品牌卡 + meme 梗圖大字卡，各一張 data URL。 */
-  cards?: { classic: string; meme: string }
+  cardStyle?: SocialCardStyle
+  /** 僅 dryRun 時回傳：classic 品牌卡 + meme 梗圖大字卡 + ai 全圖藝術卡，各一張 data URL。 */
+  cards?: { classic: string; meme: string; ai: string }
   captions?: SocialCaptions
   meme?: { title: string; punchline: string } | null
   error?: string
@@ -57,25 +57,28 @@ export async function triggerSocialPublish(
   const editionKey = meta.generated_at
   const items = await getMarketFocus(6, 2)
 
-  // 乾跑保持單純：不讀去重、不寫任何發布狀態。固定產生 classic＋meme 兩版圖卡供選。
+  // 乾跑保持單純：不讀去重、不寫任何發布狀態。固定產生 classic＋meme＋ai 三版圖卡供選。
   if (dryRun) {
     const [captions, meme, bgImage] = await Promise.all([
       generateSocialCaptions(meta, items),
       generateMemeConcept(meta, items),
       generateSocialBackgroundImage({ headline: items[0]?.title, summary: meta.summary, items }).catch(() => null),
     ])
-    const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'classic') as 'classic' | 'meme'
+    // ai 全圖卡：依梗圖主軸另生成專屬不打字藝術構圖（無梗圖或生圖失敗時以一般底圖兜底）
+    const aiArt = meme?.title ? await generateSocialArtworkImage(meme).catch(() => null) : null
+    const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'classic') as SocialCardStyle
     const toDataUrl = (buf: Buffer) => `data:image/jpeg;base64,${buf.toString('base64')}`
-    const [classicBuf, memeBuf] = await Promise.all([
+    const [classicBuf, memeBuf, aiBuf] = await Promise.all([
       renderSocialCard({ meta, items }, { style: 'classic', backgroundImage: bgImage }),
       renderSocialCard({ meta, items }, { style: 'meme', meme, backgroundImage: bgImage }),
+      renderSocialCard({ meta, items }, { style: 'ai', meme, backgroundImage: aiArt ?? bgImage }),
     ])
     return {
       triggered: true,
       editionKey,
       dryRun: true,
       cardStyle,
-      cards: { classic: toDataUrl(classicBuf), meme: toDataUrl(memeBuf) },
+      cards: { classic: toDataUrl(classicBuf), meme: toDataUrl(memeBuf), ai: toDataUrl(aiBuf) },
       captions,
       meme,
       results: platforms.map((p) => ({ platform: p, status: 'dry_run', error: null })),
@@ -159,11 +162,11 @@ export async function triggerSocialPublish(
   return { triggered: true, editionKey, dryRun: false, results }
 }
 
-export function buildImageUrl(editionKey: string, style: 'classic' | 'meme' = 'classic'): string {
+export function buildImageUrl(editionKey: string, style: SocialCardStyle = 'classic'): string {
   return `${SITE_BASE}/api/social/og?edition=${encodeURIComponent(editionKey)}&style=${style}`
 }
 
 /** 手動發布用的圖卡快照 URL（乾跑後選定上傳的那張，與預覽完全一致）。 */
-export function buildCardImageUrl(editionKey: string, style: 'classic' | 'meme'): string {
+export function buildCardImageUrl(editionKey: string, style: SocialCardStyle): string {
   return `${SITE_BASE}/api/social/card-image?edition=${encodeURIComponent(editionKey)}&style=${style}`
 }

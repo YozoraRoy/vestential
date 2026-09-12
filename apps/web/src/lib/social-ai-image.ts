@@ -91,32 +91,15 @@ export const BACKGROUND_PRESETS = [
 ] as const
 
 /**
- * 呼叫 Cloudflare Workers AI FLUX.1-schnell 生成科技底圖 Buffer。
- * 包含超時控制與容錯降級（失敗時回傳 null，圖卡將平滑回退至純色漸層）。
+ * Cloudflare Workers AI FLUX.1-schnell 生圖核心：認證、12 秒逾時、錯誤降級。
+ * 失敗回傳 null，由呼叫端決定承接方式。
  */
-export async function generateSocialBackgroundImage(
-  ctx: SocialAiImageContext,
-  options?: { prompt?: string; preset?: string },
-): Promise<Buffer | null> {
-  if (options?.preset === 'none') {
-    return null
-  }
-
+async function callFluxImage(prompt: string): Promise<Buffer | null> {
   if (!CF_ACCOUNT_ID || !CF_AI_TOKEN) {
-    console.warn('[SocialAiImage] 缺少 Cloudflare Workers AI 憑證，跳過底圖生成')
+    console.warn('[SocialAiImage] 缺少 Cloudflare Workers AI 憑證，跳過生圖')
     return null
   }
-
-  let prompt = options?.prompt?.trim()
-  if (!prompt && options?.preset && options.preset !== 'auto') {
-    const matched = BACKGROUND_PRESETS.find((p) => p.id === options.preset)
-    if (matched?.prompt) {
-      prompt = matched.prompt
-    }
-  }
-  if (!prompt) {
-    prompt = buildPromptForMarketFocus(ctx)
-  }
+  if (!prompt) return null
 
   try {
     const controller = new AbortController()
@@ -150,14 +133,89 @@ export async function generateSocialBackgroundImage(
       return null
     }
 
-    const buffer = Buffer.from(data.result.image, 'base64')
-    return buffer
+    return Buffer.from(data.result.image, 'base64')
   } catch (err: any) {
     if (err.name === 'AbortError') {
       console.warn('[SocialAiImage] Cloudflare Workers AI 生圖逾時 (12s)')
     } else {
-      console.warn('[SocialAiImage] 生成底圖失敗，使用漸層兜底:', err.message || err)
+      console.warn('[SocialAiImage] 生成圖像失敗，使用兜底:', err.message || err)
     }
     return null
   }
+}
+
+/**
+ * 呼叫 Cloudflare Workers AI FLUX.1-schnell 生成科技底圖 Buffer。
+ * 包含超時控制與容錯降級（失敗時回傳 null，圖卡將平滑回退至純色漸層）。
+ */
+export async function generateSocialBackgroundImage(
+  ctx: SocialAiImageContext,
+  options?: { prompt?: string; preset?: string },
+): Promise<Buffer | null> {
+  if (options?.preset === 'none') {
+    return null
+  }
+
+  let prompt = options?.prompt?.trim()
+  if (!prompt && options?.preset && options.preset !== 'auto') {
+    const matched = BACKGROUND_PRESETS.find((p) => p.id === options.preset)
+    if (matched?.prompt) {
+      prompt = matched.prompt
+    }
+  }
+  if (!prompt) {
+    prompt = buildPromptForMarketFocus(ctx)
+  }
+
+  return callFluxImage(prompt)
+}
+
+/**
+ * 依梗圖概念（主標題＋punchline）智能推導適合 FLUX 生圖的「全圖藝術構圖」英文 Prompt。
+ * 刻意不打字：重點新聞主題構圖，並在上方預留大字排版區，由 canvas 疊上精準中文。
+ */
+export function buildArtPromptForMeme(meme: { title: string; punchline: string }): string {
+  const combined = [meme.title, meme.punchline].join(' ')
+
+  // 1. 半導體 / 晶圓 / 封裝
+  if (/半導體|晶片|晶圓|台積電|聯發科|封裝|CoWoS|製程|ASML|IC/i.test(combined)) {
+    return 'dramatic editorial poster of a glowing advanced microchip wafer, dark emerald green circuits and light beams, sleek modern semiconductor sculpture, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
+  }
+
+  // 2. AI / 伺服器 / 運算
+  if (/AI|人工智慧|伺服器|算力|資料中心|散熱|輝達|NVIDIA|黃仁勳|機器學習/i.test(combined)) {
+    return 'dramatic editorial poster of a futuristic AI brain built from glowing emerald fiber optics and data streams, abstract neural network sculpture, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
+  }
+
+  // 3. 綠能 / 重電 / 儲能 / 電網
+  if (/綠能|重電|儲能|電網|風電|太陽能|台電|電力|核能/i.test(combined)) {
+    return 'dramatic editorial poster of a towering smart energy power grid at twilight, glowing emerald electricity arcs and wind turbines, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
+  }
+
+  // 4. 航運 / 海運 / 貨櫃
+  if (/航運|海運|貨櫃|長榮|陽明|萬海|紅海|運價/i.test(combined)) {
+    return 'dramatic editorial poster of a massive container ship crossing dark ocean swells, glowing emerald navigation lights and radar waves, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
+  }
+
+  // 5. 車用 / 電動車
+  if (/車用|電動車|特斯拉|Tesla|電池|車廠/i.test(combined)) {
+    return 'dramatic editorial poster of a sleek electric vehicle silhouette charging with glowing emerald energy lines, high-tech automotive sculpture, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
+  }
+
+  // 6. 金融 / 指數 / 大盤
+  if (/金融|銀行|降息|升息|聯準會|Fed|ETF|外資|大盤|指數|期貨/i.test(combined)) {
+    return 'dramatic editorial poster of a glowing emerald candlestick chart rising through dark reflective glass with network nodes, abstract fintech sculpture, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
+  }
+
+  // 預設：Vestential 品牌高階科技投資風格
+  return 'dramatic editorial poster of elegant glowing emerald circuit patterns and flowing data streams on deep dark luxury tech background, abstract financial art sculpture, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
+}
+
+/**
+ * 呼叫 Cloudflare Workers AI FLUX.1-schnell 生成「AI 全圖卡」專屬藝術構圖 Buffer。
+ * 依梗圖主軸產出不打字的完整海報式構圖，再由 canvas 疊上精準中文文案。
+ * 失敗回傳 null，呼叫端以一般底圖或純色漸層兜底。
+ */
+export async function generateSocialArtworkImage(meme: { title: string; punchline: string }): Promise<Buffer | null> {
+  return callFluxImage(buildArtPromptForMeme(meme))
 }

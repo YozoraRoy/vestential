@@ -19,10 +19,10 @@ export async function POST(req: NextRequest) {
     const editionKey = String(body?.editionKey ?? '').trim()
     const style = String(body?.style ?? '').trim()
     const dataUrl = String(body?.dataUrl ?? '')
-    if (!editionKey || !style || !/^(classic|meme)$/.test(style)) {
+    if (!editionKey || !style || !/^(classic|meme|ai)$/.test(style)) {
       return NextResponse.json({ success: false, error: 'editionKey/style 不正確' }, { status: 400 })
     }
-    const cardStyle = style as 'classic' | 'meme'
+    const cardStyle = style as 'classic' | 'meme' | 'ai'
     const comma = dataUrl.indexOf(',')
     if (comma < 0) {
       return NextResponse.json({ success: false, error: 'dataUrl 格式不正確' }, { status: 400 })

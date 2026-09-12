@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server'
 import { migrate, getMarketFocus, getMarketFocusMeta } from '@stock/database'
 import { getCurrentUserFromReq, isAdminUser } from '@/lib/auth'
 import { renderSocialCard } from '@/lib/social-canvas'
-import { generateSocialBackgroundImage, BACKGROUND_PRESETS } from '@/lib/social-ai-image'
+import { generateSocialBackgroundImage, generateSocialArtworkImage, BACKGROUND_PRESETS } from '@/lib/social-ai-image'
 import { generateMemeConcept } from '@/lib/social'
 
 export const runtime = 'nodejs'
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       meme = await generateMemeConcept(meta, items).catch(() => null)
     }
 
-    // 生成底圖（若 preset === 'none' 則為 null）
+// 生成底圖（若 preset === 'none' 則為 null）
     const bgImage = await generateSocialBackgroundImage(
       {
         headline: items[0]?.title,
@@ -43,10 +43,14 @@ export async function POST(req: NextRequest) {
       { prompt, preset },
     )
 
+    // ai 全圖卡：依梗圖主軸另生成專屬不打字藝術構圖（無梗圖或生圖失敗時以一般底圖兜底）
+    const aiArt = meme?.title ? await generateSocialArtworkImage(meme).catch(() => null) : null
+
     // 重新渲染圖卡
-    const [classicBuf, memeBuf] = await Promise.all([
+    const [classicBuf, memeBuf, aiBuf] = await Promise.all([
       renderSocialCard({ meta, items }, { style: 'classic', backgroundImage: bgImage }),
       renderSocialCard({ meta, items }, { style: 'meme', meme, backgroundImage: bgImage }),
+      renderSocialCard({ meta, items }, { style: 'ai', meme, backgroundImage: aiArt ?? bgImage }),
     ])
 
     const toDataUrl = (buf: Buffer) => `data:image/jpeg;base64,${buf.toString('base64')}`
@@ -56,6 +60,7 @@ export async function POST(req: NextRequest) {
       cards: {
         classic: toDataUrl(classicBuf),
         meme: toDataUrl(memeBuf),
+        ai: toDataUrl(aiBuf),
       },
       preset,
       prompt,

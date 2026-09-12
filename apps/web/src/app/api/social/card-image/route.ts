@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSocialCardImage, getMarketFocus, getMarketFocusMeta } from '@stock/database'
-import { renderSocialCard } from '@/lib/social-canvas'
+import { renderSocialCard, type SocialCardStyle } from '@/lib/social-canvas'
 import { getFallbackMemeConcept } from '@/lib/social'
 
 export const runtime = 'nodejs'
@@ -15,14 +15,14 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const edition = searchParams.get('edition')?.trim() ?? ''
     const styleParam = searchParams.get('style')?.trim() ?? 'classic'
-    const style: 'classic' | 'meme' = styleParam === 'meme' ? 'meme' : 'classic'
+    const style: SocialCardStyle = styleParam === 'meme' ? 'meme' : styleParam === 'ai' ? 'ai' : 'classic'
 
     let buf = await getSocialCardImage(edition, style).catch(() => null)
     if (!buf || buf.length === 0) {
       const meta = await getMarketFocusMeta().catch(() => null)
       if (meta?.summary) {
         const items = await getMarketFocus(6, 2).catch(() => [])
-        const meme = style === 'meme' ? getFallbackMemeConcept(items) : null
+        const meme = style === 'classic' ? null : getFallbackMemeConcept(items)
         buf = await renderSocialCard({ meta, items }, { style, meme }).catch(() => null)
       }
     }
