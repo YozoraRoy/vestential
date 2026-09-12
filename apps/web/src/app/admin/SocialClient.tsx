@@ -235,7 +235,7 @@ export function SocialClient() {
             強制重發選定平台（清去重）
           </button>
           <div className="flex items-center">
-            <Help text="IG 預設搭配「梗圖大字卡」，Threads 預設搭配「品牌資訊卡」，亦可選「AI 全圖卡」。乾跑只產出預覽，不呼叫 Meta API 也不寫去重。" />
+            <Help text="IG 預設搭配「梗圖大字卡」，Threads 預設搭配「品牌資訊卡」，亦可選「AI 吉祥物全圖卡」。乾跑只產出預覽，不呼叫 Meta API 也不寫去重。" />
           </div>
         </div>
         {busy && (
@@ -337,7 +337,7 @@ export function SocialClient() {
                           onChange={() => setIgCardStyle('ai')}
                           className="accent-[var(--accent)]"
                         />
-                        🎨 AI 全圖卡
+                        🎨 AI 吉祥物全圖卡
                       </label>
                     </div>
                   </div>
@@ -402,7 +402,7 @@ export function SocialClient() {
                           onChange={() => setThreadsCardStyle('ai')}
                           className="accent-[var(--accent)]"
                         />
-                        🎨 AI 全圖卡
+                        🎨 AI 吉祥物全圖卡
                       </label>
                     </div>
                   </div>

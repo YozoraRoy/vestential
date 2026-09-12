@@ -171,44 +171,60 @@ export async function generateSocialBackgroundImage(
 }
 
 /**
- * 依梗圖概念（主標題＋punchline）智能推導適合 FLUX 生圖的「全圖藝術構圖」英文 Prompt。
- * 刻意不打字：重點新聞主題構圖，並在上方預留大字排版區，由 canvas 疊上精準中文。
+ * 依梗圖概念（主標題＋punchline）判斷行情情緒，回傳吉祥物表情段落。
+ * 跌勢最優先（恐慌）、再來是事件（緊張），接著漲勢（開心），其餘（理性）。
+ */
+function detectRobotEmotion(combined: string): 'panic' | 'stress' | 'bull' | 'neutral' {
+  if (/跌|崩|重挫|大跌|跳水|破底|下修|利空|下殺|走弱|暴跌|狂跌/i.test(combined)) return 'panic'
+  if (/戰|衝突|制裁|地震|颱風|危機|缺電|召回|罷工|斷鏈|封鎖|動盪/i.test(combined)) return 'stress'
+  if (/漲|噴|飆|創高|新高|大漲|暴漲|上漲|突破|利多|放量|獲利|上調/i.test(combined)) return 'bull'
+  return 'neutral'
+}
+
+const ROBOT_EMOTIONS: Record<'panic' | 'stress' | 'bull' | 'neutral', string> = {
+  bull: 'the cute mascot robot jumping with joy raising its little arms, sparkles and golden coins floating around, a huge bright green rising arrow behind it',
+  panic: 'the cute mascot robot with enormous shocked eyes, sweat drops flying in panic, desperately clinging to a tiny broken candlestick chart',
+  stress: 'the cute mascot robot wearing a tiny hard hat, worried but determined, staring at a glowing holographic warning screen',
+  neutral: 'the cute mascot robot calmly analyzing floating holographic stock charts, glowing data streams swirling around it',
+}
+
+/** Vestential 品牌吉祥物：圓潤 chibi 投資機器人，綠光護目鏡，命名 Vesty。 */
+const VESTY = 'the recurring cute chibi fintech mascot robot named Vesty, round chunky metal body, glowing emerald visor eyes, small antenna'
+
+/** 依產業關鍵字挑出吉祥物所在的「世界」構圖（不直接含情緒，情緒另外疊加）。 */
+function pickRobotScene(combined: string): string {
+  if (/半導體|晶片|晶圓|台積電|聯發科|封裝|CoWoS|製程|ASML|IC/i.test(combined)) {
+    return 'standing proudly beside a giant glowing microchip wafer with emerald circuit light beams'
+  }
+  if (/AI|人工智慧|伺服器|算力|資料中心|散熱|輝達|NVIDIA|黃仁勳|機器學習/i.test(combined)) {
+    return 'surrounded by a colossal glowing AI neural network brain built from fiber optics and data streams'
+  }
+  if (/綠能|重電|儲能|電網|風電|太陽能|台電|電力|核能/i.test(combined)) {
+    return 'standing before a tower of glowing emerald electricity arcs and spinning wind turbines'
+  }
+  if (/航運|海運|貨櫃|長榮|陽明|萬海|紅海|運價/i.test(combined)) {
+    return 'on the bridge of a massive container ship crossing dark ocean swells with glowing navigational lights'
+  }
+  if (/車用|電動車|特斯拉|Tesla|電池|車廠/i.test(combined)) {
+    return "high-fiving a sleek electric sports car with glowing emerald charging cables"
+  }
+  if (/金融|銀行|降息|升息|聯準會|Fed|ETF|外資|大盤|指數|期貨/i.test(combined)) {
+    return 'riding a wave of glowing emerald candlesticks surging upward through dark reflective glass'
+  }
+  return 'floating in a luxurious dark data-trading room woven with emerald circuit patterns and flowing data streams'
+}
+
+/**
+ * 依梗圖概念（主標題＋punchline）智能推導適合 FLUX 生圖的「吉祥物全圖」英文 Prompt。
+ * 由 Vesty 機器人主角＋行業世界＋行情情緒組成一張角色向漫畫構圖，
+ * 刻意不打字：上方保留大字排版區，由 canvas 疊上精準中文。
  */
 export function buildArtPromptForMeme(meme: { title: string; punchline: string }): string {
   const combined = [meme.title, meme.punchline].join(' ')
+  const emotion = ROBOT_EMOTIONS[detectRobotEmotion(combined)]
+  const scene = pickRobotScene(combined)
 
-  // 1. 半導體 / 晶圓 / 封裝
-  if (/半導體|晶片|晶圓|台積電|聯發科|封裝|CoWoS|製程|ASML|IC/i.test(combined)) {
-    return 'dramatic editorial poster of a glowing advanced microchip wafer, dark emerald green circuits and light beams, sleek modern semiconductor sculpture, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
-  }
-
-  // 2. AI / 伺服器 / 運算
-  if (/AI|人工智慧|伺服器|算力|資料中心|散熱|輝達|NVIDIA|黃仁勳|機器學習/i.test(combined)) {
-    return 'dramatic editorial poster of a futuristic AI brain built from glowing emerald fiber optics and data streams, abstract neural network sculpture, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
-  }
-
-  // 3. 綠能 / 重電 / 儲能 / 電網
-  if (/綠能|重電|儲能|電網|風電|太陽能|台電|電力|核能/i.test(combined)) {
-    return 'dramatic editorial poster of a towering smart energy power grid at twilight, glowing emerald electricity arcs and wind turbines, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
-  }
-
-  // 4. 航運 / 海運 / 貨櫃
-  if (/航運|海運|貨櫃|長榮|陽明|萬海|紅海|運價/i.test(combined)) {
-    return 'dramatic editorial poster of a massive container ship crossing dark ocean swells, glowing emerald navigation lights and radar waves, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
-  }
-
-  // 5. 車用 / 電動車
-  if (/車用|電動車|特斯拉|Tesla|電池|車廠/i.test(combined)) {
-    return 'dramatic editorial poster of a sleek electric vehicle silhouette charging with glowing emerald energy lines, high-tech automotive sculpture, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
-  }
-
-  // 6. 金融 / 指數 / 大盤
-  if (/金融|銀行|降息|升息|聯準會|Fed|ETF|外資|大盤|指數|期貨/i.test(combined)) {
-    return 'dramatic editorial poster of a glowing emerald candlestick chart rising through dark reflective glass with network nodes, abstract fintech sculpture, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
-  }
-
-  // 預設：Vestential 品牌高階科技投資風格
-  return 'dramatic editorial poster of elegant glowing emerald circuit patterns and flowing data streams on deep dark luxury tech background, abstract financial art sculpture, cinematic contrast, bright focal area in the upper third reserved for bold typography, full-frame artwork, no text, 8k'
+  return `${VESTY} ${scene}, ${emotion}, bold modern vector comic panel illustration with thick clean outlines, vivid emerald and dark teal palette on deep dark background, kawaii chibi proportions, cinematic contrast, bright empty upper third reserved for bold caption, no text, 8k`
 }
 
 /**

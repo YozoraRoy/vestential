@@ -186,31 +186,52 @@ function renderMeme(ctx: any, meme: { title: string; punchline: string }, maxWid
 }
 
 function renderAiCard(ctx: any, meme: { title: string; punchline: string }, maxWidth: number, CARD_H: number) {
-  // ── Hero 主標題：大字全幅置於上方預留區（FLUX prompt 已保留 upper-third 大字區）──
+  // ── 角落小徽章：VESTY 吉祥物 ───────────────────────────────
   ctx.save()
-  ctx.textAlign = 'left'
-  ctx.shadowColor = 'rgba(0,0,0,0.55)'
-  ctx.shadowBlur = 18
-  ctx.font = `700 92px "${FONT_NAME}"`
-  ctx.fillStyle = '#ffffff'
+  ctx.translate(0, 0)
+  ctx.rotate(-Math.PI / 24)
+  ctx.font = `700 30px "${FONT_NAME}"`
+  ctx.fillStyle = '#22c55e'
+  ctx.fillText('VESTY ROBOT', 48, 150)
+  ctx.restore()
+
+  // ── Hero 主標題：FLUX 已繪出吉祥物主角場景，文字區加半透明深色圓角底襯確保可讀 ──
+  ctx.font = `700 72px "${FONT_NAME}"`
   const lines = wrapText(ctx, meme.title, maxWidth, 3)
-  let y = 320
-  const lineH = 124
+  const lineH = 100
+  const titleH = lines.length * lineH
+
+  ctx.font = `400 46px "${FONT_NAME}"`
+  const punch = wrapText(ctx, meme.punchline, maxWidth, 2)
+  const punchH = punch.length * 64
+
+  const blockTop = 248
+  const blockBottom = blockTop + titleH + punchH + 90
+  ctx.save()
+  ctx.globalAlpha = 0.66
+  ctx.fillStyle = '#0c0e13'
+  roundRect(ctx, 40, blockTop - 60, CARD_W - 80, blockBottom - blockTop + 60, 26)
+  ctx.fill()
+  ctx.restore()
+
+  // 主標題
+  ctx.textAlign = 'left'
+  ctx.font = `700 72px "${FONT_NAME}"`
+  ctx.fillStyle = '#ffffff'
+  let y = blockTop + lineH - 24
   for (const line of lines) {
     ctx.fillText(line, 72, y)
     y += lineH
   }
 
   // ── punchline：品牌綠，帶陰影確保在亮色構圖上可讀 ──────────────
-  ctx.font = `400 54px "${FONT_NAME}"`
+  ctx.font = `400 46px "${FONT_NAME}"`
   ctx.fillStyle = '#22c55e'
-  const punch = wrapText(ctx, meme.punchline, maxWidth, 2)
-  y += 40
+  y += 26
   for (const line of punch) {
     ctx.fillText(line, 72, y)
-    y += 72
+    y += 64
   }
-  ctx.restore()
 
   drawCtaBottom(ctx)
 }
