@@ -40,7 +40,7 @@ export default async function AgentArenaPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto w-full px-4 py-8 md:py-10">
+    <div className="max-w-5xl mx-auto w-full px-4 py-8 md:py-10">
       <div className="flex items-center gap-2 mb-3">
         <Bot className="w-6 h-6 text-[var(--accent-violet)]" />
         <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-violet)]/15 text-[var(--accent-violet)]">AI Arena</span>

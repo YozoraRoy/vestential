@@ -81,14 +81,14 @@ export default async function MarketFocusPage() {
   const schema = { '@context': 'https://schema.org', '@graph': graph }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-16">
+    <div className="max-w-5xl mx-auto w-full px-4 py-8 md:py-10">
       <div className="flex items-center gap-2 mb-3">
         <Newspaper className="w-6 h-6 text-[var(--accent)]" />
         <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-[var(--text-secondary)]">AI 精選</span>
       </div>
       <h1 className="text-3xl font-bold mb-3">市場焦點</h1>
       <div className="mb-6 w-16 h-1 rounded-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-green)]" />
-      <p className="text-base text-[var(--text-secondary)] leading-relaxed mb-10">
+      <p className="max-w-2xl text-base text-[var(--text-secondary)] leading-relaxed mb-10">
         由 AI 依「價值投資、長期累積、紀律」的精神，從近期台股新聞中篩選重點，並整理當日市場總覽。內容僅供參考，不構成任何投資建議。
       </p>
 
@@ -125,7 +125,7 @@ export default async function MarketFocusPage() {
         <SectionHeading id="market-news" title="精選新聞" badge="近 2 天" />
 
         {focus.length > 0 ? (
-          <ul className="grid grid-cols-1 gap-4">
+          <ul className="grid grid-cols-1 gap-4 md:gap-5 lg:grid-cols-2">
             {focus.map((item) => (
               <NewsCard key={item.id} item={item} variant="full" />
             ))}
