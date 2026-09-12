@@ -1099,8 +1099,8 @@ export function hasDb(): boolean {
  */
 export function translateLimitForAzure(sqlStr: string): string {
   return sqlStr.replace(
-    /^\s*(SELECT\s+)(.*)\s+LIMIT\s+(\d+|@\w+)\s*;?\s*$/is,
-    (_all, select, rest, n) => `SELECT TOP (${n}) ${rest}`,
+    /^\s*SELECT\s+(DISTINCT\s+)?(.*)\s+LIMIT\s+(\d+|@\w+)\s*;?\s*$/is,
+    (_all, distinct, rest, n) => `SELECT ${distinct ?? ''}TOP (${n}) ${rest}`,
   )
 }
 
