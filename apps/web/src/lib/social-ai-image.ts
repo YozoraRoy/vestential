@@ -114,7 +114,6 @@ async function callFluxImage(prompt: string): Promise<Buffer | null> {
       },
       body: JSON.stringify({
         prompt,
-        num_steps: 4,
       }),
       signal: controller.signal,
     })
