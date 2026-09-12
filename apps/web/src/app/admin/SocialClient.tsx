@@ -226,7 +226,7 @@ export function SocialClient() {
         </div>
         <div className="flex flex-wrap gap-3">
           <button className={btn} onClick={() => run(true, false)} disabled={busy}>
-            {busy ? '處理中…' : '乾跑預覽（文案＋圖卡×2）'}
+            {busy ? '處理中…' : '乾跑預覽（文案＋圖卡×3）'}
           </button>
           <button className={btnGhost} onClick={() => run(false, false)} disabled={busy || platforms.length === 0}>
             直接發布（僅未發布平台）
@@ -235,16 +235,16 @@ export function SocialClient() {
             強制重發選定平台（清去重）
           </button>
           <div className="flex items-center">
-            <Help text="IG 預設搭配「梗圖大字卡」，Threads 預設搭配「品牌資訊卡」。乾跑只產出預覽，不呼叫 Meta API 也不寫去重。" />
+            <Help text="IG 預設搭配「梗圖大字卡」，Threads 預設搭配「品牌資訊卡」，亦可選「AI 全圖卡」。乾跑只產出預覽，不呼叫 Meta API 也不寫去重。" />
           </div>
         </div>
         {busy && (
           <p className="mt-4 text-sm text-[var(--text-secondary)]">
-            ⏳ 呼叫 AI 生成文案與兩種圖卡中…（已等待 {elapsed} 秒，通常需 30~120 秒）。完成前請勿關閉頁面。
+            ⏳ 呼叫 AI 生成文案與三種圖卡中…（已等待 {elapsed} 秒，通常需 30~120 秒）。完成前請勿關閉頁面。
           </p>
         )}
         {!preview && !busy && (
-          <p className="mt-4 text-sm text-[var(--text-secondary)]">尚未乾跑。按下「乾跑預覽」會產出 Instagram（梗圖大字卡）與 Threads（品牌資訊卡）圖卡與文案。</p>
+          <p className="mt-4 text-sm text-[var(--text-secondary)]">尚未乾跑。按下「乾跑預覽」會產出 Instagram（梗圖大字卡）與 Threads（品牌資訊卡）以及可複選的「AI 全圖卡」三種圖卡與文案。</p>
         )}
       </Card>
 
