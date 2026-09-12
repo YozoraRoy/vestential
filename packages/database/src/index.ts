@@ -29,7 +29,7 @@ export {
   getArenaTradesByRound, getArenaTradesAllByRound,
   insertArenaDecisionLog, getArenaDecisionLogs, getArenaRoundDecisionLogs,
   saveArenaDiscussion, getArenaDiscussion,
-  hasSocialPosted, createSocialPost, updateSocialPost, listSocialPosts, deleteSocialPostByEdition,
+  hasSocialPosted, countSocialPublishedPosts, createSocialPost, updateSocialPost, listSocialPosts, deleteSocialPostByEdition,
   saveSocialCardImage, getSocialCardImage,
   getAgentSetting, setAgentSetting, listAgentSettings,
   getUserUsageReport,

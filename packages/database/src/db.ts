@@ -4142,6 +4142,15 @@ export async function hasSocialPosted(platform: string, editionKey: string): Pro
   return (row?.n ?? 0) > 0
 }
 
+/** 計算該平台已「成功發布」的總數（只算 published），用於 IG 圖卡風格的每 N 則輪換。 */
+export async function countSocialPublishedPosts(platform: string): Promise<number> {
+  const row = await dbQueryFirst<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM social_posts WHERE platform = @platform AND status = 'published'`,
+    { platform },
+  )
+  return row?.n ?? 0
+}
+
 /** 建立一筆發文紀錄。若同 (platform, edition_key) 已存在則回傳既有紀錄，不重複插入。 */
 export async function createSocialPost(input: SocialPostInput): Promise<SocialPostRow> {
   const existing = await dbQueryFirst<SocialPostRow>(

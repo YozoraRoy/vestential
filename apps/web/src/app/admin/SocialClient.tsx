@@ -8,6 +8,7 @@ type SocialCardStyle = 'classic' | 'meme' | 'ai'
 interface DryRunResult {
   editionKey?: string | null
   cardStyle?: SocialCardStyle
+  igCardStyle?: 'ai' | 'meme'
   cards?: { classic: string; meme: string; ai: string }
   captions?: { instagram: string; threads: string }
   meme?: { title: string; punchline: string } | null
@@ -39,7 +40,7 @@ export function SocialClient() {
   const [busy, setBusy] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [platforms, setPlatforms] = useState<SocialPlatform[]>(['instagram', 'threads'])
-  const [igCardStyle, setIgCardStyle] = useState<SocialCardStyle>('meme')
+  const [igCardStyle, setIgCardStyle] = useState<SocialCardStyle>('ai')
   const [threadsCardStyle, setThreadsCardStyle] = useState<SocialCardStyle>('classic')
   const [draftIg, setDraftIg] = useState('')
   const [draftThreads, setDraftThreads] = useState('')
@@ -73,7 +74,7 @@ export function SocialClient() {
     if (r.ok && r.body.success) {
       if (dryRun) {
         setPreview(r.body as DryRunResult)
-        setIgCardStyle('meme')
+        setIgCardStyle(r.body.igCardStyle ?? 'ai')
         setThreadsCardStyle('classic')
         setDraftIg(r.body.captions?.instagram ?? '')
         setDraftThreads(r.body.captions?.threads ?? '')
@@ -235,7 +236,7 @@ export function SocialClient() {
             強制重發選定平台（清去重）
           </button>
           <div className="flex items-center">
-            <Help text="IG 預設搭配「梗圖大字卡」，Threads 預設搭配「品牌資訊卡」，亦可選「AI 吉祥物全圖卡」。乾跑只產出預覽，不呼叫 Meta API 也不寫去重。" />
+            <Help text="IG 預設搭配「AI 吉祥物全圖卡」，每 2 則發文後自動交換為「梗圖大字卡」（則數按已發布數計算）；Threads 預設搭配「品牌資訊卡」。乾跑只產出預覽，不呼叫 Meta API 也不寫去重。" />
           </div>
         </div>
         {busy && (
@@ -244,7 +245,7 @@ export function SocialClient() {
           </p>
         )}
         {!preview && !busy && (
-          <p className="mt-4 text-sm text-[var(--text-secondary)]">尚未乾跑。按下「乾跑預覽」會產出 Instagram（梗圖大字卡）與 Threads（品牌資訊卡）以及可複選的「AI 全圖卡」三種圖卡與文案。</p>
+          <p className="mt-4 text-sm text-[var(--text-secondary)]">尚未乾跑。按下「乾跑預覽」會產出 Instagram（AI 吉祥物全圖卡為預設，每 2 則交換梗圖大字卡）與 Threads（品牌資訊卡）三種圖卡與文案。</p>
         )}
       </Card>
 
@@ -313,11 +314,21 @@ export function SocialClient() {
                         <input
                           type="radio"
                           name="igCardStyle"
+                          checked={igCardStyle === 'ai'}
+                          onChange={() => setIgCardStyle('ai')}
+                          className="accent-[var(--accent)]"
+                        />
+                        🤖 AI 吉祥物全圖卡 (預設)
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="igCardStyle"
                           checked={igCardStyle === 'meme'}
                           onChange={() => setIgCardStyle('meme')}
                           className="accent-[var(--accent)]"
                         />
-                        梗圖大字卡 (預設)
+                        梗圖大字卡
                       </label>
                       <label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -328,16 +339,6 @@ export function SocialClient() {
                           className="accent-[var(--accent)]"
                         />
                         品牌資訊卡
-                      </label>
-                      <label className="flex items-center gap-1.5 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="igCardStyle"
-                          checked={igCardStyle === 'ai'}
-                          onChange={() => setIgCardStyle('ai')}
-                          className="accent-[var(--accent)]"
-                        />
-                        🎨 AI 吉祥物全圖卡
                       </label>
                     </div>
                   </div>

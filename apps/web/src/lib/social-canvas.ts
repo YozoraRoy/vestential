@@ -188,49 +188,68 @@ function renderMeme(ctx: any, meme: { title: string; punchline: string }, maxWid
 function renderAiCard(ctx: any, meme: { title: string; punchline: string }, maxWidth: number, CARD_H: number) {
   // ── 角落小徽章：VESTY 吉祥物 ───────────────────────────────
   ctx.save()
-  ctx.translate(0, 0)
   ctx.rotate(-Math.PI / 24)
-  ctx.font = `700 30px "${FONT_NAME}"`
+  ctx.font = `700 28px "${FONT_NAME}"`
   ctx.fillStyle = '#22c55e'
   ctx.fillText('VESTY ROBOT', 48, 150)
   ctx.restore()
 
-  // ── Hero 主標題：FLUX 已繪出吉祥物主角場景，文字區加半透明深色圓角底襯確保可讀 ──
-  ctx.font = `700 72px "${FONT_NAME}"`
-  const lines = wrapText(ctx, meme.title, maxWidth, 3)
-  const lineH = 100
-  const titleH = lines.length * lineH
+  // ── 自適應縮放：字級由大而小收斂，確保標題＋punchline 不跳出圖卡 ──
+  const maxTitleLines = 3
+  const maxPunchLines = 2
+  const blockTop = 236
+  const availBottom = 852 // CTA 之上
 
-  ctx.font = `400 46px "${FONT_NAME}"`
-  const punch = wrapText(ctx, meme.punchline, maxWidth, 2)
-  const punchH = punch.length * 64
+  let titleSize = 74
+  let titleLH = 102
+  let punchSize = 46
+  let punchLH = 64
+  let lines: string[] = []
+  let punch: string[] = []
+  for (;;) {
+    ctx.font = `700 ${titleSize}px "${FONT_NAME}"`
+    lines = wrapText(ctx, meme.title, maxWidth, maxTitleLines)
+    ctx.font = `400 ${punchSize}px "${FONT_NAME}"`
+    punch = wrapText(ctx, meme.punchline, maxWidth, maxPunchLines)
+    const totalH = lines.length * titleLH + punch.length * punchLH + 88
+    if (blockTop + totalH <= availBottom) break
+    if (titleSize <= 52 && punchSize <= 32) break
+    titleSize = Math.max(52, titleSize - 6)
+    titleLH = Math.max(74, titleLH - 8)
+    punchSize = Math.max(32, punchSize - 4)
+    punchLH = Math.max(46, punchLH - 6)
+  }
 
-  const blockTop = 248
-  const blockBottom = blockTop + titleH + punchH + 90
+  // ── 半透明深色圓角底襯（大小依最終行數）──────────────────────
+  const titleH = lines.length * titleLH
+  const punchH = punch.length * punchLH
+  const pad = 40
+  const scrimTop = blockTop - pad
+  const scrimH = Math.min(titleH + punchH + pad * 2 + 30, availBottom - scrimTop + 20)
   ctx.save()
   ctx.globalAlpha = 0.66
   ctx.fillStyle = '#0c0e13'
-  roundRect(ctx, 40, blockTop - 60, CARD_W - 80, blockBottom - blockTop + 60, 26)
+  roundRect(ctx, 40, scrimTop, CARD_W - 80, scrimH, 26)
   ctx.fill()
   ctx.restore()
 
-  // 主標題
+  // ── Hero 主標題 ─────────────────────────────────────────────
   ctx.textAlign = 'left'
-  ctx.font = `700 72px "${FONT_NAME}"`
+  ctx.font = `700 ${titleSize}px "${FONT_NAME}"`
   ctx.fillStyle = '#ffffff'
-  let y = blockTop + lineH - 24
+  let y = scrimTop + pad + titleLH - 8
   for (const line of lines) {
     ctx.fillText(line, 72, y)
-    y += lineH
+    y += titleLH
   }
 
-  // ── punchline：品牌綠，帶陰影確保在亮色構圖上可讀 ──────────────
-  ctx.font = `400 46px "${FONT_NAME}"`
+  // ── punchline：品牌綠 ───────────────────────────────────────
+  ctx.font = `400 ${punchSize}px "${FONT_NAME}"`
   ctx.fillStyle = '#22c55e'
-  y += 26
+  y += 12
   for (const line of punch) {
     ctx.fillText(line, 72, y)
-    y += 64
+    y += punchLH
   }
 
   drawCtaBottom(ctx)
