@@ -190,9 +190,13 @@ V1 實作 `LightweightStrategist`：單次 quick LLM `generateObject`，輸出 z
 
 ## 9. 排程與維運
 
-- 每日 tick：`packages/database/seed/scheduler.ts` 加 step（TW 每交易日 15:20 後），呼叫 arena 每日一輪。
+- **主要時鐘（準時）**：App Service 內建 `instrumentation.ts`（`ARENA_CRON_ENABLED=true` 才啟動）以台灣時間準時觸發五階段
+  （盤前 09:00 / slot0 09:35 / slot1 10:35 / slot2 11:35 / slot3 13:05 / 收盤 15:30），呼叫 `/api/agent-arena/tick`（走 `SYNC_TOKEN`）。
+- **備援（冪等補跑）**：`.github/workflows/arena-tick.yml` 保留相同時間表。注意 GitHub Actions 的 `schedule` 事件常有 **4~5 小時佇列延遲**，
+  因此不應作為唯一時鐘；雙軌並存時由 `runArenaTick` 的 `alreadyRun`/`getArenaRoundProgress` 防呆，重複觸發安全。
+- 每日 tick：`runArenaTick`（`lib/arena.ts`）＋ `api/agent-arena/tick`。後台總覽的空進度會退回顯示上一交易日進度。
 - env（`.env.example` + Azure App Settings + deploy.yml）：
-  `ARENA_UNIVERSE`（預設內建 30 檔）、`ARENA_REPLAY_DAYS`（開賽重播天數）、`ARENA_SLIPPAGE`、`ARENA_MAX_TOKENS`、`ARENA_MAX_AGENTS_PER_USER`、`ARENA_MAX_ADJUST_PER_SEASON`、`ARENA_SEASON_DAYS`、`ARENA_REGISTRATION_WINDOW_DAYS`、`ARENA_TICK_HOUR`。
+  `ARENA_UNIVERSE`（預設內建 30 檔）、`ARENA_REPLAY_DAYS`（開賽重播天數）、`ARENA_SLIPPAGE`、`ARENA_MAX_TOKENS`、`ARENA_MAX_AGENTS_PER_USER`、`ARENA_MAX_ADJUST_PER_SEASON`、`ARENA_SEASON_DAYS`、`ARENA_REGISTRATION_WINDOW_DAYS`、`ARENA_TICK_HOUR`、`ARENA_CRON_ENABLED`（in-process 排程開關）。
 - 錯誤輪次與 LLM 失敗計入 agent 卡（透明）；tick idempotent，duplicate run 安全。
 
 ## 10. 里程碑

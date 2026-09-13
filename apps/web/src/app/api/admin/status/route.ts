@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 import { dbQueryFirst, listArenaRoundProgress, getUserUsageReport, migrate } from '@stock/database'
 import { runHealthChecks } from '@/lib/health'
 import { isAdminUser, getCurrentUserFromReq } from '@/lib/auth'
+import { isTaiwanMarketTradingDay, getLastMarketTradingDay } from '@/utils/taiwan-calendar'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -40,13 +41,23 @@ export async function GET(req: NextRequest) {
       counts(),
       getUserUsageReport().catch(() => []),
     ])
-    const progress = await listArenaRoundProgress(twDateStr(new Date())).catch(() => [] as any[])
+    const todayTw = new Date(`${twDateStr(new Date())}T00:00:00`)
+    let progressDate = twDateStr(new Date())
+    let progress = await listArenaRoundProgress(progressDate).catch(() => [] as any[])
+    if (progress.length === 0) {
+      const lastTrading = twDateStr(getLastMarketTradingDay(todayTw))
+      progress = await listArenaRoundProgress(lastTrading).catch(() => [] as any[])
+      if (progress.length > 0) progressDate = lastTrading
+    }
+
     return NextResponse.json({
       success: true,
       generatedAt: new Date().toISOString(),
       health,
       summary,
       arenaProgress: progress,
+      arenaProgressDate: progressDate,
+      todayIsTradingDay: isTaiwanMarketTradingDay(todayTw),
       usage: {
         totalUsers: usage.length,
       },

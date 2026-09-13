@@ -12,6 +12,8 @@ interface StatusData {
   }
   summary?: Record<string, number>
   arenaProgress?: Array<{ phase: string; note: string | null; created_at: string | null }>
+  arenaProgressDate?: string
+  todayIsTradingDay?: boolean
   usage?: { totalUsers: number }
 }
 
@@ -41,6 +43,9 @@ export function OverviewClient() {
       : hasWarn
         ? 'warn'
         : 'ok'
+
+  const todayTw = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const showingFallback = !!status?.arenaProgressDate && status.arenaProgressDate !== todayTw
 
   return (
     <SectionPageWrapper title="後台總覽" subtitle="系統狀態・統計・今日競技場進度">
@@ -79,16 +84,29 @@ export function OverviewClient() {
         {!status ? (
           <p className="text-sm text-[var(--text-secondary)]">載入中…</p>
         ) : (status?.arenaProgress?.length ?? 0) === 0 ? (
-          <p className="text-sm text-[var(--text-secondary)]">今日尚未有階段完成</p>
+          status.todayIsTradingDay ? (
+            <p className="text-sm text-[var(--text-secondary)]">
+              今日 (交易日) 尚未有階段完成 — 若已過盤中時段，可能是排程延遲或執行中。
+            </p>
+          ) : (
+            <p className="text-sm text-[var(--text-secondary)]">今日為非交易日，無階段進度。</p>
+          )
         ) : (
-          <ul className="text-sm space-y-1">
-            {status!.arenaProgress!.map((p) => (
-              <li key={p.phase}>
-                <code className="text-[var(--accent)]">{p.phase}</code>{' '}
-                <span className="text-[var(--text-secondary)]">— {p.note ?? ''}（{p.created_at}）</span>
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-1">
+            {showingFallback && (
+              <p className="text-xs text-[var(--text-secondary)]">
+                顯示上一交易日 ({status.arenaProgressDate}) 的階段進度
+              </p>
+            )}
+            <ul className="text-sm space-y-1">
+              {status!.arenaProgress!.map((p) => (
+                <li key={p.phase}>
+                  <code className="text-[var(--accent)]">{p.phase}</code>{' '}
+                  <span className="text-[var(--text-secondary)]">— {p.note ?? ''}（{p.created_at}）</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </Card>
     </SectionPageWrapper>
