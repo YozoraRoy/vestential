@@ -72,6 +72,39 @@ export interface Dict {
     ctaUse: string
     disclaimerShort: string
   }
+  marketFocus: {
+    metaTitle: string
+    metaDesc: string
+    title: string
+    aiPickBadge: string
+    intro: string
+    summaryTitle: string
+    updatedLabel: string
+    selectedTitle: string
+    selectedBadge: string
+    empty: string
+    methodTitle: string
+    methodDesc: string
+    riskDesc: string
+    termsLink: string
+    backHome: string
+    subscribeTitle: string
+    subscribeDesc: string
+    subscribePlaceholder: string
+    subscribeButton: string
+    subscribeLoading: string
+    subscribeInvalid: string
+    subscribeSent: string
+    subscribeError: string
+    subscribeOptIn: string
+    followUs: string
+    followDaily: string
+    newsAiSummary: string
+    newsValueReason: string
+    newsFallback: string
+    newsExcerptToggle: string
+    newsReadOriginal: string
+  }
   about: {
     metaTitle: string
     metaDesc: string
@@ -109,8 +142,9 @@ export interface Dict {
     step3Desc: string
     step3Cta: string
     closing: string
-    openSourceTitle: string
-    openSourceDesc: string
+    contactTitle: string
+    contactDesc: string
+    contactSuffix: string
     disclaimerTitle: string
     disclaimerDesc: string
     disclaimerLink: string
@@ -145,6 +179,7 @@ export interface Dict {
     s5p1: string
     s6Title: string
     s6p1: string
+    s6Suffix: string
     s7Title: string
     s7p1: string
     updated: string
@@ -171,6 +206,7 @@ export interface Dict {
     s6p1: string
     s7Title: string
     s7p1: string
+    s7Suffix: string
     updated: string
   }
   oddLot: {

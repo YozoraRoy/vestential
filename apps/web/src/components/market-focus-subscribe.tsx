@@ -2,6 +2,8 @@
 
 import { Instagram, Mail, MessageCircle } from 'lucide-react'
 import { useState } from 'react'
+import { useI18n } from '@/i18n/LanguageProvider'
+import type { Dict } from '@/i18n/dictionaries'
 
 type SubscribeState = 'idle' | 'loading' | 'done' | 'error'
 
@@ -14,9 +16,13 @@ export interface MarketFocusSocialLinks {
 
 interface MarketFocusSubscribeProps {
   socialLinks?: MarketFocusSocialLinks
+  /** Server 端注入的語系文案（避免 client 初始 SSR 用預設語系造成 flash）。 */
+  t?: Dict['marketFocus']
 }
 
-export function MarketFocusSubscribe({ socialLinks }: MarketFocusSubscribeProps) {
+export function MarketFocusSubscribe({ socialLinks, t: tProp }: MarketFocusSubscribeProps) {
+  const { dict } = useI18n()
+  const t = tProp ?? dict.marketFocus
   const [email, setEmail] = useState('')
   const [state, setState] = useState<SubscribeState>('idle')
   const [message, setMessage] = useState('')
@@ -26,7 +32,7 @@ export function MarketFocusSubscribe({ socialLinks }: MarketFocusSubscribeProps)
     const value = email.trim()
     if (!value || !EMAIL_RE.test(value) || value.length > 255) {
       setState('error')
-      setMessage('請輸入有效的 Email 地址。')
+      setMessage(t.subscribeInvalid)
       return
     }
     setState('loading')
@@ -38,10 +44,10 @@ export function MarketFocusSubscribe({ socialLinks }: MarketFocusSubscribeProps)
     const body = (await res?.json().catch(() => ({}))) as { success?: boolean; error?: string }
     if (res?.ok && body.success) {
       setState('done')
-      setMessage('確認信已寄出！請到信箱點擊信中連結完成訂閱。')
+      setMessage(t.subscribeSent)
     } else {
       setState('error')
-      setMessage(body?.error ?? '訂閱失敗，請稍後再試。')
+      setMessage(body?.error ?? t.subscribeError)
     }
   }
 
@@ -51,11 +57,11 @@ export function MarketFocusSubscribe({ socialLinks }: MarketFocusSubscribeProps)
         <div className="flex items-center gap-2 mb-2">
           <Mail className="w-4 h-4 text-[var(--accent)]" />
           <h2 id="newsletter-title" className="text-base font-semibold text-[var(--text-primary)]">
-            訂閱市場焦點電子報
+            {t.subscribeTitle}
           </h2>
         </div>
         <p className="text-sm text-[var(--text-secondary)] leading-relaxed mb-4">
-          留下 Email，最新一期「市場焦點」總覽更新時自動寄給您，免費且可隨時一鍵退訂。
+          {t.subscribeDesc}
         </p>
         {state === 'done' ? (
           <p className="text-sm text-[var(--accent-green)] font-medium">{message}</p>
@@ -73,7 +79,7 @@ export function MarketFocusSubscribe({ socialLinks }: MarketFocusSubscribeProps)
                   setMessage('')
                 }
               }}
-              placeholder="you@example.com"
+              placeholder={t.subscribePlaceholder}
               aria-label="Email"
               className="flex-1 px-3.5 py-2.5 rounded-lg bg-white/5 border border-white/10 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/60 focus:outline-none focus:border-[var(--accent)]/60"
             />
@@ -82,17 +88,17 @@ export function MarketFocusSubscribe({ socialLinks }: MarketFocusSubscribeProps)
               disabled={state === 'loading' || email.trim().length === 0}
               className="px-5 py-2.5 rounded-lg bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition"
             >
-              {state === 'loading' ? '訂閱中…' : '訂閱'}
+              {state === 'loading' ? t.subscribeLoading : t.subscribeButton}
             </button>
           </form>
         )}
         {state === 'error' && <p className="mt-3 text-sm text-[var(--accent-red)]">{message}</p>}
         <p className="mt-3 text-xs text-[var(--text-secondary)]/80">
-          訂閱採雙重驗證（double opt-in）：提交後會收到一封確認信，點擊確認才算完成訂閱。完成後您可隨時使用信件內文退訂連結取消。
+          {t.subscribeOptIn}
         </p>
         {(socialLinks?.instagram || socialLinks?.threads) && (
           <div className="mt-4 pt-3 border-t border-white/10 text-xs text-[var(--text-secondary)]/80 flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span>追蹤我們：</span>
+            <span>{t.followUs}</span>
             {socialLinks.instagram && (
               <a
                 href={socialLinks.instagram}
@@ -115,7 +121,7 @@ export function MarketFocusSubscribe({ socialLinks }: MarketFocusSubscribeProps)
                 Threads
               </a>
             )}
-            <span className="text-[var(--text-secondary)]/60">每日市場焦點不漏接</span>
+            <span className="text-[var(--text-secondary)]/60">{t.followDaily}</span>
           </div>
         )}
       </div>

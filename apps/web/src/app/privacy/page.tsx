@@ -54,7 +54,13 @@ export default async function PrivacyPage() {
 
         <section>
           <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">{d.s6Title}</h2>
-          <p>{d.s6p1}</p>
+          <p>
+            {d.s6p1}{' '}
+            <a href="mailto:service@vestential.com" className="text-[var(--accent)] hover:underline">
+              service@vestential.com
+            </a>
+            {d.s6Suffix}
+          </p>
         </section>
 
         <section>

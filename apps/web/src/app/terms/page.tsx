@@ -65,6 +65,7 @@ export default async function TermsPage() {
             <a href="mailto:service@vestential.com" className="text-[var(--accent)] hover:underline">
               service@vestential.com
             </a>
+            {d.s7Suffix}
           </p>
         </section>
 

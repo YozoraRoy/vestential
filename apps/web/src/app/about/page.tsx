@@ -90,9 +90,11 @@ export default async function AboutPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-3">{d.openSourceTitle}</h2>
+          <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-3">{d.contactTitle}</h2>
           <p>
-            {d.openSourceDesc} <a href="https://github.com/YozoraRoy/vestential" target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] hover:underline">GitHub</a>
+            {d.contactDesc}{' '}
+            <a href="mailto:service@vestential.com" className="text-[var(--accent)] hover:underline">service@vestential.com</a>
+            {d.contactSuffix}
           </p>
         </section>
 

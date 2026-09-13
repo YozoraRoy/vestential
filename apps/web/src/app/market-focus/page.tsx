@@ -1,6 +1,6 @@
 import { Newspaper, Sparkles, RefreshCw } from 'lucide-react'
 import Link from 'next/link'
-import { getLocale } from '@/i18n/server'
+import { getDict, getLocale } from '@/i18n/server'
 import { localizePath } from '@/i18n/paths'
 import { buildAlternates } from '@/i18n/metadata'
 import { getMarketFocus, getMarketFocusMeta } from '@stock/database'
@@ -9,19 +9,19 @@ import { NewsCard } from '@/components/news-card'
 import { MarketFocusSubscribe } from '@/components/market-focus-subscribe'
 
 const BASE_URL = 'https://vestential.com'
-const PAGE_TITLE = '市場焦點 | Vestential'
-const PAGE_DESC = 'Vestential「市場焦點」：由 AI 依價值投資精神篩選的近期台股重點新聞，提供當日總覽、新聞摘錄與全文閱讀。'
 
 export async function generateMetadata() {
+  const dict = await getDict()
   const locale = await getLocale()
   const alts = buildAlternates(locale, '/market-focus')
+  const title = `${dict.marketFocus.title} | Vestential`
   return {
-    title: PAGE_TITLE,
-    description: PAGE_DESC,
+    title,
+    description: dict.marketFocus.metaDesc,
     alternates: alts,
     openGraph: {
-      title: PAGE_TITLE,
-      description: PAGE_DESC,
+      title,
+      description: dict.marketFocus.metaDesc,
       url: alts.canonical,
       siteName: 'Vestential',
       type: 'website',
@@ -31,13 +31,14 @@ export async function generateMetadata() {
   }
 }
 
-function formatDateTime(s: string): string {
+function formatDateTime(s: string, locale: string): string {
   const dt = new Date(s)
   if (Number.isNaN(dt.getTime())) return s
-  return dt.toLocaleDateString('zh-TW') + ' ' + dt.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })
+  return dt.toLocaleDateString(locale) + ' ' + dt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 }
 
 export default async function MarketFocusPage() {
+  const dict = await getDict()
   const locale = await getLocale()
   const [focus, meta] = await Promise.all([getMarketFocus(20, 2), getMarketFocusMeta()])
 
@@ -46,7 +47,7 @@ export default async function MarketFocusPage() {
       '@type': 'WebSite',
       name: 'Vestential',
       url: BASE_URL,
-      description: PAGE_DESC,
+      description: dict.marketFocus.metaDesc,
       inLanguage: ['zh-TW', 'en', 'ja'],
     },
     {
@@ -57,9 +58,9 @@ export default async function MarketFocusPage() {
     },
     {
       '@type': 'WebPage',
-      name: PAGE_TITLE,
-      description: PAGE_DESC,
-      url: `${BASE_URL}/market-focus`,
+      name: dict.marketFocus.title,
+      description: dict.marketFocus.metaDesc,
+      url: `${BASE_URL}${localizePath(locale, '/market-focus')}`,
       inLanguage: locale,
       isPartOf: { '@type': 'WebSite', name: 'Vestential', url: BASE_URL },
       dateModified: focus[0]?.published_at ? new Date(focus[0].published_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
@@ -68,7 +69,7 @@ export default async function MarketFocusPage() {
   if (focus.length > 0) {
     graph.push({
       '@type': 'ItemList',
-      name: '市場焦點',
+      name: dict.marketFocus.title,
       itemListElement: focus.map((item, i) => ({
         '@type': 'ListItem',
         position: i + 1,
@@ -84,12 +85,12 @@ export default async function MarketFocusPage() {
     <div className="max-w-5xl mx-auto w-full px-4 py-8 md:py-10">
       <div className="flex items-center gap-2 mb-3">
         <Newspaper className="w-6 h-6 text-[var(--accent)]" />
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-[var(--text-secondary)]">AI 精選</span>
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-[var(--text-secondary)]">{dict.marketFocus.aiPickBadge}</span>
       </div>
-      <h1 className="text-3xl font-bold mb-3">市場焦點</h1>
+      <h1 className="text-3xl font-bold mb-3">{dict.marketFocus.title}</h1>
       <div className="mb-6 w-16 h-1 rounded-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-green)]" />
       <p className="max-w-2xl text-base text-[var(--text-secondary)] leading-relaxed mb-10">
-        由 AI 依「價值投資、長期累積、紀律」的精神，從近期台股新聞中篩選重點，並整理當日市場總覽。內容僅供參考，不構成任何投資建議。
+        {dict.marketFocus.intro}
       </p>
 
       {/* 當日 AI 總覽 */}
@@ -98,14 +99,14 @@ export default async function MarketFocusPage() {
           <div className="rounded-xl border border-[var(--accent)]/30 bg-[var(--accent)]/5 px-6 py-5">
             <div className="flex items-center gap-2 mb-2.5">
               <Sparkles className="w-4 h-4 text-[var(--accent)]" />
-              <h2 id="market-summary" className="text-base font-semibold text-[var(--text-primary)]">今日 AI 市場總覽</h2>
+              <h2 id="market-summary" className="text-base font-semibold text-[var(--text-primary)]">{dict.marketFocus.summaryTitle}</h2>
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-[var(--text-secondary)]">AI</span>
             </div>
             <p className="text-sm leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap">{meta.summary}</p>
             {meta.generated_at && (
               <p className="flex items-center gap-1.5 mt-3 text-xs text-[var(--text-secondary)]">
                 <RefreshCw className="w-3.5 h-3.5" />
-                更新時間：{formatDateTime(meta.generated_at)}
+                {dict.marketFocus.updatedLabel}{formatDateTime(meta.generated_at, locale)}
               </p>
             )}
           </div>
@@ -114,6 +115,7 @@ export default async function MarketFocusPage() {
 
       {/* 電子報訂閱 */}
       <MarketFocusSubscribe
+        t={dict.marketFocus}
         socialLinks={{
           instagram: process.env.INSTAGRAM_PROFILE_URL || undefined,
           threads: process.env.THREADS_PROFILE_URL || undefined,
@@ -122,7 +124,7 @@ export default async function MarketFocusPage() {
 
       {/* 精選新聞 */}
       <section aria-labelledby="market-news" className="mb-10">
-        <SectionHeading id="market-news" title="精選新聞" badge="近 2 天" />
+        <SectionHeading id="market-news" title={dict.marketFocus.selectedTitle} badge={dict.marketFocus.selectedBadge} />
 
         {focus.length > 0 ? (
           <ul className="grid grid-cols-1 gap-4 md:gap-5 lg:grid-cols-2">
@@ -131,25 +133,23 @@ export default async function MarketFocusPage() {
             ))}
           </ul>
         ) : (
-          <p className="text-sm text-[var(--text-secondary)]">資訊整理中，稍後再來看看…</p>
+          <p className="text-sm text-[var(--text-secondary)]">{dict.marketFocus.empty}</p>
         )}
       </section>
 
       {/* 方法與免責 */}
       <section aria-labelledby="market-method" className="mb-10">
-        <SectionHeading id="market-method" title="方法說明" />
+        <SectionHeading id="market-method" title={dict.marketFocus.methodTitle} />
         <p className="text-sm text-[var(--text-secondary)] leading-relaxed mb-4">
-          本頁新聞由 AI 依價值投資精神（基本面、財報、股利與除息、總體經濟、市場週期）從近期台股重點新聞中篩選，
-          並由 AI 依「說人話」規範閱讀全文後提煉重點摘要，直陳核心數據與實質影響；同時每日定時更新當日市場總覽。
+          {dict.marketFocus.methodDesc}
         </p>
         <div className="rounded-xl border border-[var(--accent-red)]/30 bg-[var(--accent-red)]/5 px-6 py-5">
           <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
-            本頁內容（含 AI 總覽、新聞重點摘要與評論）僅供資訊參考，不構成任何投資建議。AI 可能出錯或遲延，
-            投資決策請自行判斷並審慎評估風險。新聞原始全文與著作權均屬原始出處媒體所有。
+            {dict.marketFocus.riskDesc}
           </p>
           <div className="mt-3 pt-3 border-t border-[var(--accent-red)]/20">
             <Link href={localizePath(locale, '/terms')} className="text-xs text-[var(--accent)] hover:underline inline-flex items-center gap-1 font-medium">
-              服務條款 &rarr;
+              {dict.marketFocus.termsLink}
             </Link>
           </div>
         </div>
@@ -157,7 +157,7 @@ export default async function MarketFocusPage() {
 
       <div>
         <Link href={localizePath(locale, '/')} className="text-sm text-[var(--accent)] hover:underline">
-          ← 返回首頁
+          {dict.marketFocus.backHome}
         </Link>
       </div>
 

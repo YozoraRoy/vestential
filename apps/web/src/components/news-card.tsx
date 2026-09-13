@@ -1,10 +1,11 @@
 import { ArrowUpRight, Sparkles, FileText, ShieldCheck } from 'lucide-react'
 import type { MarketFocusItem } from '@stock/database'
+import { getDict, getLocale } from '@/i18n/server'
 
-function formatDateTime(s: string): string {
+function formatDateTime(s: string, locale: string): string {
   const dt = new Date(s)
   if (Number.isNaN(dt.getTime())) return s
-  return dt.toLocaleDateString('zh-TW') + ' ' + dt.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })
+  return dt.toLocaleDateString(locale) + ' ' + dt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 }
 
 interface NewsCardProps {
@@ -14,7 +15,9 @@ interface NewsCardProps {
 }
 
 /** 市場焦點新聞卡。出處：首頁市場焦點區塊、`app/market-focus/page.tsx`。 */
-export function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
+export async function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
+  const dict = await getDict()
+  const locale = await getLocale()
   const href = item.source_url || item.url
 
   return (
@@ -30,7 +33,7 @@ export function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
       </a>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)] mt-2">
         {item.source && <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">{item.source}</span>}
-        {item.published_at && <span>{formatDateTime(item.published_at)}</span>}
+        {item.published_at && <span>{formatDateTime(item.published_at, locale)}</span>}
       </div>
 
       {/* AI 說人話重點摘要（核心主體） */}
@@ -38,7 +41,7 @@ export function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
         <div className="mt-3 pt-3 border-t border-white/5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--accent)] mb-1.5">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>AI 重點摘要</span>
+            <span>{dict.marketFocus.newsAiSummary}</span>
           </div>
           <p className="text-sm text-[var(--text-primary)] leading-relaxed">{item.summary}</p>
         </div>
@@ -49,7 +52,7 @@ export function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
         <div className="mt-3 pt-3 border-t border-white/5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--accent-green)] mb-1.5">
             <ShieldCheck className="w-3.5 h-3.5" />
-            <span>價值投資遴選原因</span>
+            <span>{dict.marketFocus.newsValueReason}</span>
           </div>
           <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{item.reason}</p>
         </div>
@@ -59,7 +62,7 @@ export function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
       {!item.summary && !item.reason && (
         <div className="mt-3 pt-3 border-t border-white/5">
           <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-            AI 摘要與遴選原因尚在整理中，請前往原文閱讀詳情。
+            {dict.marketFocus.newsFallback}
           </p>
         </div>
       )}
@@ -70,7 +73,7 @@ export function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
             <details className="group text-xs">
               <summary className="cursor-pointer text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition select-none inline-flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5" />
-                <span>查看新聞原文摘錄（參考）</span>
+                <span>{dict.marketFocus.newsExcerptToggle}</span>
               </summary>
               <p className="mt-2 text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap bg-white/[0.02] p-3 rounded-lg border border-white/5 max-h-48 overflow-y-auto">
                 {item.content}
@@ -85,7 +88,7 @@ export function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
             >
-              前往新聞出處閱讀原文
+              {dict.marketFocus.newsReadOriginal}
               <ArrowUpRight className="w-3.5 h-3.5" />
             </a>
           </div>

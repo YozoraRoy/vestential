@@ -36,5 +36,5 @@ export async function GET(req: Request) {
   if (ok) {
     return renderPage('已成功退訂', 'Vestential 市場焦點', `您的信箱 ${email} 已從市場焦點電子報中移除，之後不會再收到我們的電子報。若想重新訂閱，隨時可以回到市場焦點頁面再次訂閱。`)
   }
-  return renderPage('退訂連結無效', 'Vestential 市場焦點', '無法完成退訂：連結可能已失效，或該信箱已非有效訂閱狀態。若持續遇到問題，請寄信至 service@vestential.com。')
+  return renderPage('退訂連結無效', 'Vestential 市場焦點', '無法完成退訂：連結可能已失效，或該信箱已非有效訂閱狀態。若持續遇到問題，請寄信至 <a href="mailto:service@vestential.com">service@vestential.com</a>。')
 }
