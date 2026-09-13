@@ -119,6 +119,17 @@ async function findOwnThreadByShortcode(shortcode: string): Promise<ThreadsPostI
   }
 }
 
+/** 刪除一則自家 Threads media（回覆也適用）。注意 endpoint 是 /{media-id}，不要帶 user-id。 */
+export async function deleteThreadsMedia(mediaId: string): Promise<void> {
+  const token = process.env.THREADS_ACCESS_TOKEN
+  if (!token) throw new Error('THREADS_ACCESS_TOKEN 未設定')
+  const res = await fetch(`${THREADS_API}/${mediaId}?access_token=${encodeURIComponent(token)}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Threads 刪除失敗（HTTP ${res.status}）：${body.slice(0, 200)}`)
+  }
+}
+
 /** 以 LLM 依「品牌語氣」順話題擬一則回覆。 */
 export async function draftThreadReply(post: ThreadsPostInfo, existingReplies: string[] = []): Promise<string> {
   const config = loadConfig()
