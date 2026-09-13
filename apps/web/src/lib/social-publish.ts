@@ -1,11 +1,13 @@
 import { hasSocialPosted, createSocialPost, updateSocialPost, deleteSocialPostByEdition } from '@stock/database'
 import type { SocialPostRow, SocialPostPlatform } from '@stock/database'
 
-// ─── IG / Threads 發布層 ─────────────────────────────────────────
-// 一律 two-step：建立 container → 輪詢/發布。token 全部從 env 讀，不落 DB。
+// ─── IG / Threads / Facebook 發布層 ───────────────────────────────
+// IG/Threads 一律 two-step：建立 container → 輪詢/發布；FB 單步直發。
+// token 全部從 env 讀，不落 DB。
 
 const IG_API = 'https://graph.instagram.com/v21.0'
 const THREADS_API = 'https://graph.threads.net/v1.0'
+const FB_API = 'https://graph.facebook.com/v21.0'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -16,6 +18,10 @@ export interface PublishConfig {
     userId?: string
     appId?: string
     appSecret?: string
+  }
+  facebook?: {
+    accessToken?: string
+    pageId?: string
   }
 }
 
@@ -30,6 +36,10 @@ function getPublishConfig(): PublishConfig {
       userId: process.env.THREADS_USER_ID,
       appId: process.env.THREADS_APP_ID,
       appSecret: process.env.THREADS_APP_SECRET,
+    },
+    facebook: {
+      accessToken: process.env.FB_ACCESS_TOKEN,
+      pageId: process.env.FB_PAGE_ID,
     },
   }
 }
@@ -95,6 +105,9 @@ export async function publishSocialPost(
   try {
     if (platform === 'instagram') {
       return await publishInstagram(row, env as NonNullable<PublishConfig['instagram']>, imageUrl)
+    }
+    if (platform === 'facebook') {
+      return await publishFacebook(row, env as NonNullable<PublishConfig['facebook']>, imageUrl)
     }
     return await publishThreads(row, env as NonNullable<PublishConfig['threads']>, imageUrl)
   } catch (e: any) {
@@ -201,6 +214,51 @@ async function publishThreads(
   return { platform: 'threads', status: 'published', containerId, externalId }
 }
 
+// ─── Facebook：單步驟直發（photos / feed）────────────────────────
+async function publishFacebook(
+  row: SocialPostRow,
+  env: NonNullable<PublishConfig['facebook']>,
+  imageUrl: string | null,
+): Promise<PublishResult> {
+  const { accessToken, pageId } = env
+  if (!accessToken) throw new Error('FB_ACCESS_TOKEN 未設定')
+  if (!pageId) throw new Error('FB_PAGE_ID 未設定')
+
+  // 系統使用者 token 不能直接貼文：先 /me/accounts 換出粉專的 page access token。
+  const pageToken = await resolveFbPageToken(accessToken, pageId)
+
+  // 有圖 → POST /{pageId}/photos（url＋message）；無圖 → POST /{pageId}/feed（純文字）。
+  const endpoint = imageUrl ? `${FB_API}/${pageId}/photos` : `${FB_API}/${pageId}/feed`
+  const params = new URLSearchParams({ access_token: pageToken, message: row.content })
+  if (imageUrl) params.set('url', imageUrl)
+
+  const pub = await graphPost(`${endpoint}?${params.toString()}`, {})
+  const externalId = pub.post_id || pub.id ? String(pub.post_id || pub.id) : null
+  await updateSocialPost(row.id, {
+    status: 'published',
+    external_id: externalId,
+    error: null,
+    published_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+  })
+  return { platform: 'facebook', status: 'published', externalId }
+}
+
+/** 用 FB system user token 換出粉專專用的 page access token（自動配對 FB_PAGE_ID）。 */
+async function resolveFbPageToken(systemUserToken: string, pageId: string): Promise<string> {
+  const res = await fetch(
+    `${FB_API}/me/accounts?fields=id,access_token&access_token=${encodeURIComponent(systemUserToken)}`,
+  )
+  const json = await res.json()
+  if (!res.ok) {
+    throw new Error(`FB /me/accounts fail: ${json?.error?.message || res.status}`)
+  }
+  const page = (json?.data || []).find((p: any) => String(p?.id) === String(pageId))
+  if (!page?.access_token) {
+    throw new Error(`FB 找不到粉專 ${pageId}（system user 未指派此粉專）`)
+  }
+  return page.access_token
+}
+
 // ─── 輔助 ─────────────────────────────────────────────────────────
 
 /** 解析 IG token 對應的 user id（/me），作為 user_id 未設定時的 fallback。 */
@@ -216,7 +274,7 @@ export async function resolveIgUserId(accessToken: string): Promise<string> {
 }
 
 /** 輪詢 container 狀態直到就緒（FINISHED）或失敗。 */
-async function waitForContainer(
+export async function waitForContainer(
   userId: string,
   containerId: string,
   accessToken: string,
@@ -246,7 +304,7 @@ async function waitForContainer(
 }
 
 /** 簡易 Graph POST（回傳 JSON body）。 */
-async function graphPost(url: string, body: Record<string, string>): Promise<any> {
+export async function graphPost(url: string, body: Record<string, string>): Promise<any> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

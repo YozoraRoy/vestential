@@ -21,8 +21,8 @@ export async function POST(req: Request) {
   const dryRun = searchParams.get('dryRun') === 'true'
   const platforms = (searchParams.get('platforms') ?? 'instagram,threads')
     .split(',')
-    .map((p) => p.trim() as 'instagram' | 'threads')
-    .filter((p) => p === 'instagram' || p === 'threads')
+    .map((p) => p.trim() as 'instagram' | 'threads' | 'facebook')
+    .filter((p) => p === 'instagram' || p === 'threads' || p === 'facebook')
 
   try {
     await migrate()

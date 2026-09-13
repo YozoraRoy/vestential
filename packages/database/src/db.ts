@@ -4105,7 +4105,7 @@ export function getArenaDiscussion(roundDate: string): Promise<ArenaDiscussionRo
 }
 
 // ─── 社群小編 (social_posts) ─────────────────────────────────────
-export type SocialPostPlatform = 'instagram' | 'threads'
+export type SocialPostPlatform = 'instagram' | 'threads' | 'facebook'
 export type SocialPostStatus = 'pending' | 'container_created' | 'published' | 'failed' | 'dry_run'
 
 export interface SocialPostRow {

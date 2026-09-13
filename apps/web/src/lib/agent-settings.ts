@@ -47,6 +47,12 @@ export const DEFAULT_AGENT_SETTINGS: Record<string, AgentSettingMeta> = {
     defaultValue: '',
     help: '覆寫 Threads 文案生成提示詞；空白＝用內建預設。',
   },
+  'social.fb_prompt': {
+    category: 'social',
+    label: 'Facebook 文案 System Prompt',
+    defaultValue: '',
+    help: '覆寫 Facebook 文案生成提示詞；空白＝用內建預設。',
+  },
   'social.ig_max_chars': {
     category: 'social',
     label: 'IG 上限字數',
@@ -60,6 +66,13 @@ export const DEFAULT_AGENT_SETTINGS: Record<string, AgentSettingMeta> = {
     defaultValue: '500',
     editable: false,
     help: 'Threads 平台文案上限，為硬性限制，不可調整。',
+  },
+  'social.fb_max_chars': {
+    category: 'social',
+    label: 'Facebook 上限字數',
+    defaultValue: '2200',
+    editable: false,
+    help: 'Facebook 平台文案上限，為硬性限制，不可調整。',
   },
   'social.card_style': {
     category: 'social',

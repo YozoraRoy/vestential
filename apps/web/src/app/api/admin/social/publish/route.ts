@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     body = await req.json()
   } catch {}
   const platforms = (body.platforms ?? ['instagram', 'threads']).filter(
-    (p): p is SocialPostPlatform => p === 'instagram' || p === 'threads',
+    (p): p is SocialPostPlatform => p === 'instagram' || p === 'threads' || p === 'facebook',
   )
   try {
     const outcome = await triggerSocialPublish({

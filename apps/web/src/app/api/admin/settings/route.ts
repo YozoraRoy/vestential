@@ -15,6 +15,7 @@ const BUILTIN_PROMPTS: Record<string, string | undefined> = {
   'market_focus.summary_prompt': MARKET_SUMMARY_PROMPT,
   'social.ig_prompt': DEFAULT_SOCIAL_PROMPT,
   'social.threads_prompt': DEFAULT_SOCIAL_PROMPT,
+  'social.fb_prompt': DEFAULT_SOCIAL_PROMPT,
   'social.meme_prompt': DEFAULT_MEME_PROMPT,
 }
 

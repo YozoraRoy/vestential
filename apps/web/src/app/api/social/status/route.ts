@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   try {
     await migrate()
     const { searchParams } = new URL(req.url)
-    const platform = (searchParams.get('platform') ?? undefined) as 'instagram' | 'threads' | undefined
+    const platform = (searchParams.get('platform') ?? undefined) as 'instagram' | 'threads' | 'facebook' | undefined
     const limit = Math.min(100, Number(searchParams.get('limit')) || 20)
     const rows = await listSocialPosts(platform, limit)
     return NextResponse.json({ success: true, count: rows.length, posts: rows })

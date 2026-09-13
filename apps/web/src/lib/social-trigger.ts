@@ -1,4 +1,4 @@
-import { getMarketFocusMeta, getMarketFocus, getAgentSetting, saveSocialCardImage, getSocialCardImage, countSocialPublishedPosts } from '@stock/database'
+import { getMarketFocusMeta, getMarketFocus, getAgentSetting, saveSocialCardImage, getSocialCardImage } from '@stock/database'
 import type { SocialPostPlatform } from '@stock/database'
 import { generateSocialCaptions, generateMemeConcept, type SocialCaptions } from '@/lib/social'
 import { renderSocialCard, type SocialCardStyle } from '@/lib/social-canvas'
@@ -11,14 +11,6 @@ import { sendMarketFocusAlert } from '@/lib/email'
 
 const SITE_BASE = process.env.AUTH_BASE_URL ?? 'https://vestential.com'
 
-/**
- * IG 圖卡風格輪換：每 2 則發文為一區間，交錯使用 ai → meme。
- * 已發布數 0、1 → ai；2、3 → meme；4、5 → ai …（只計算 published）。
- */
-export function pickIgCardStyle(postCount: number): 'ai' | 'meme' {
-  return Math.floor(postCount / 2) % 2 === 0 ? 'ai' : 'meme'
-}
-
 export interface SocialPublishOutcome {
   triggered: boolean
   skipped?: boolean
@@ -28,7 +20,7 @@ export interface SocialPublishOutcome {
   results?: { platform: SocialPostPlatform; status: string; error?: string | null }[]
   /** 僅 dryRun 時回傳：目前 social.card_style 設定值（作為預設選卡）。 */
   cardStyle?: SocialCardStyle
-  /** 僅 dryRun 時回傳：依 IG 已發布數輪換建議的 IG 圖卡風格（ai | meme）。 */
+  /** 僅 dryRun 時回傳：IG 一律使用 AI 吉祥物全圖卡（ai）。 */
   igCardStyle?: 'ai' | 'meme'
   /** 僅 dryRun 時回傳：classic 品牌卡 + meme 梗圖大字卡 + ai 全圖藝術卡，各一張 data URL。 */
   cards?: { classic: string; meme: string; ai: string }
@@ -77,7 +69,7 @@ export async function triggerSocialPublish(
     // ai 全圖卡：依梗圖主軸另生成專屬不打字藝術構圖（無梗圖或生圖失敗時以一般底圖兜底）
     const aiArt = meme?.title ? await generateSocialArtworkImage(meme).catch(() => null) : null
     const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'classic') as SocialCardStyle
-    const igCardStyle = pickIgCardStyle(await countSocialPublishedPosts('instagram').catch(() => 0))
+    const igCardStyle: 'ai' | 'meme' = 'ai'
     const toDataUrl = (buf: Buffer) => `data:image/jpeg;base64,${buf.toString('base64')}`
     const [classicBuf, memeBuf, aiBuf] = await Promise.all([
       renderSocialCard({ meta, items }, { style: 'classic', backgroundImage: bgImage }),
@@ -112,11 +104,11 @@ export async function triggerSocialPublish(
   const contentByPlatform = manual ? options.captions! : await generateSocialCaptions(meta, items)
 
   // 確保自動發布所需的圖卡快照皆已預先繪製並快取至 DB，避免 Meta API 抓取時動態調用 LLM 導致逾時 (9004)
-  const igDefaultStyle = pickIgCardStyle(await countSocialPublishedPosts('instagram').catch(() => 0))
+  // IG 一律用 AI 吉祥物全圖卡（ai）；Threads 固定 classic 品牌資訊卡；Facebook 固定 classic 品牌資訊卡
   const stylesNeeded = new Set<SocialCardStyle>()
   for (const { platform } of unresolved) {
     if (!options.imageUrls?.[platform] && !options.imageUrl) {
-      stylesNeeded.add(platform === 'instagram' ? igDefaultStyle : 'classic')
+      stylesNeeded.add(platform === 'instagram' ? 'ai' : 'classic')
     }
   }
 
@@ -156,9 +148,9 @@ export async function triggerSocialPublish(
 
   const results: SocialPublishOutcome['results'] = []
   for (const { platform } of unresolved) {
-    const content = platform === 'instagram' ? contentByPlatform.instagram : contentByPlatform.threads
-    // IG 依已發布數輪換 ai / meme；Threads 固定 classic 品牌資訊卡
-    const defaultStyle: SocialCardStyle = platform === 'instagram' ? igDefaultStyle : 'classic'
+    const content = platform === 'instagram' ? contentByPlatform.instagram : platform === 'facebook' ? contentByPlatform.facebook : contentByPlatform.threads
+    // IG 一律 AI 吉祥物全圖卡；Threads / Facebook 固定 classic 品牌資訊卡
+    const defaultStyle: SocialCardStyle = platform === 'instagram' ? 'ai' : 'classic'
     const imageUrl =
       options.imageUrls?.[platform] ??
       options.imageUrl ??
