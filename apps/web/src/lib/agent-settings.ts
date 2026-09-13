@@ -77,7 +77,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<string, AgentSettingMeta> = {
   'social.card_style': {
     category: 'social',
     label: '圖卡樣式',
-    defaultValue: 'classic',
+    defaultValue: 'ai',
     help: 'classic＝品牌資訊卡；meme＝經濟/科技梗圖大字版式。',
   },
   'social.meme_prompt': {

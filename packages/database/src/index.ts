@@ -12,6 +12,7 @@ export {
   deleteAnalysisRecord,
   saveMarketFocus, getMarketFocus, saveMarketFocusMeta, getMarketFocusMeta,
   logMarketFocusEvent, getLatestMarketFocusLog, listMarketFocusLogs, cleanupMarketFocusLogs,
+  cleanupSocialCardImages,
   saveCycleEntrySignals, getCycleEntrySignalsByEdition,
   saveCycleEntryMeta, getLatestCycleEntryMeta, getCycleEntryMetaByEdition,
   listCycleEntryEditions, countCycleEntrySignals,

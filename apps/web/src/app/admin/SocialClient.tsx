@@ -41,8 +41,8 @@ export function SocialClient() {
   const [busy, setBusy] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [platforms, setPlatforms] = useState<SocialPlatform[]>(['instagram', 'threads', 'facebook'])
-  const [threadsCardStyle, setThreadsCardStyle] = useState<SocialCardStyle>('classic')
-  const [fbCardStyle, setFbCardStyle] = useState<SocialCardStyle>('classic')
+  const [threadsCardStyle, setThreadsCardStyle] = useState<SocialCardStyle>('ai')
+  const [fbCardStyle, setFbCardStyle] = useState<SocialCardStyle>('ai')
   const [draftIg, setDraftIg] = useState('')
   const [draftThreads, setDraftThreads] = useState('')
   const [draftFb, setDraftFb] = useState('')
@@ -85,8 +85,8 @@ export function SocialClient() {
     if (r.ok && r.body.success) {
       if (dryRun) {
         setPreview(r.body as DryRunResult)
-        setThreadsCardStyle('classic')
-        setFbCardStyle('classic')
+        setThreadsCardStyle('ai')
+        setFbCardStyle('ai')
         setDraftIg(r.body.captions?.instagram ?? '')
         setDraftThreads(r.body.captions?.threads ?? '')
         setDraftFb(r.body.captions?.facebook ?? '')
@@ -277,7 +277,7 @@ export function SocialClient() {
                 : '確認發布（僅 Facebook）'
 
   return (
-    <SectionPageWrapper title="社群小編" subtitle="IG (AI 吉祥物全圖卡)、Threads 與 Facebook (品牌資訊卡) 文案＋圖卡預覽與發布">
+    <SectionPageWrapper title="社群小編" subtitle="IG、Threads 與 Facebook (AI 吉祥物全圖卡) 文案＋圖卡預覽與發布">
       <ResultBanner result={result} onDismiss={() => setResult(null)} />
       <Card title="操作">
         <div className="mb-4 flex flex-wrap items-center gap-5 pb-3 border-b border-[var(--border)]">
@@ -328,7 +328,7 @@ export function SocialClient() {
             強制重發選定平台（清去重）
           </button>
           <div className="flex items-center">
-            <Help text="IG 一律搭配「AI 吉祥物全圖卡」；Threads 與 Facebook 預設搭配「品牌資訊卡」。乾跑只產出預覽，不呼叫 Meta API 也不寫去重。" />
+            <Help text="FB／IG／Threads 一律搭配「AI 吉祥物全圖卡」。乾跑只產出預覽，不呼叫 Meta API 也不寫去重。" />
           </div>
         </div>
         {busy && (
@@ -337,7 +337,7 @@ export function SocialClient() {
           </p>
         )}
         {!preview && !busy && (
-          <p className="mt-4 text-sm text-[var(--text-secondary)]">尚未乾跑。按下「乾跑預覽」會產出 Instagram（固定 AI 吉祥物全圖卡）與 Threads／Facebook（品牌資訊卡），外加梗圖大字卡供選，共三種圖卡與文案。</p>
+          <p className="mt-4 text-sm text-[var(--text-secondary)]">尚未乾跑。按下「乾跑預覽」會產出 FB／IG／Threads（AI 吉祥物全圖卡）＋梗圖大字卡供選，共三種圖卡與文案。</p>
         )}
       </Card>
 
@@ -444,7 +444,7 @@ export function SocialClient() {
                           onChange={() => setThreadsCardStyle('classic')}
                           className="accent-[var(--accent)]"
                         />
-                        品牌資訊卡 (預設)
+                        品牌資訊卡
                       </label>
                       <label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -464,7 +464,7 @@ export function SocialClient() {
                           onChange={() => setThreadsCardStyle('ai')}
                           className="accent-[var(--accent)]"
                         />
-                        🎨 AI 吉祥物全圖卡
+                        🎨 AI 吉祥物全圖卡 (預設)
                       </label>
                     </div>
                   </div>
@@ -509,7 +509,7 @@ export function SocialClient() {
                           onChange={() => setFbCardStyle('classic')}
                           className="accent-[var(--accent)]"
                         />
-                        品牌資訊卡 (預設)
+                        品牌資訊卡
                       </label>
                       <label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -529,7 +529,7 @@ export function SocialClient() {
                           onChange={() => setFbCardStyle('ai')}
                           className="accent-[var(--accent)]"
                         />
-                        🎨 AI 吉祥物全圖卡
+                        🎨 AI 吉祥物全圖卡 (預設)
                       </label>
                     </div>
                   </div>

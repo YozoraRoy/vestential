@@ -2325,6 +2325,49 @@ export async function cleanupMarketFocusLogs(retentionDays = 7): Promise<number>
   }
 }
 
+/** 清理社交圖卡快照：只保留最近 keepEditions（預設 30）個 edition，其餘（每版最多 3 張 BLOB）刪除。回傳刪除筆數。 */
+export async function cleanupSocialCardImages(keepEditions = 30): Promise<number> {
+  try {
+    const n = Math.max(1, Math.floor(keepEditions))
+    let deleted = 0
+    if (isAzureSql) {
+      const pool = await getAzurePool()
+      if (!pool) return 0
+      const r = await pool
+        .request()
+        .input('keep', sql.Int, n)
+        .query(
+          `DELETE FROM social_card_images
+           WHERE edition_key NOT IN (
+             SELECT TOP (@keep) edition_key FROM (
+               SELECT DISTINCT edition_key FROM social_card_images
+             ) t ORDER BY edition_key DESC
+           );
+           SELECT @@ROWCOUNT AS n`,
+        )
+      deleted = r.recordset?.[0]?.n ?? 0
+    } else {
+      const db = getSqliteDb()
+      if (!db) return 0
+      const r = db
+        .prepare(
+          `DELETE FROM social_card_images
+           WHERE edition_key NOT IN (
+             SELECT edition_key FROM (
+               SELECT DISTINCT edition_key FROM social_card_images ORDER BY edition_key DESC LIMIT @keep
+             )
+           )`,
+        )
+        .run({ keep: n })
+      deleted = r.changes
+    }
+    return deleted
+  } catch (e) {
+    console.error('[DB] cleanupSocialCardImages failed:', e)
+    return 0
+  }
+}
+
 // ─── Cycle Entry (週期進場模型預估) ───────────────────────────────
 export interface CycleEntrySignalRow {
   id?: number

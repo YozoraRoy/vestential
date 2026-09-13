@@ -1,6 +1,6 @@
 import { revalidateTag } from 'next/cache'
 import type { MarketFocusItem } from '@stock/database'
-import { getMarketFocusMeta, logMarketFocusEvent, getLatestMarketFocusLog } from '@stock/database'
+import { getMarketFocusMeta, logMarketFocusEvent, getLatestMarketFocusLog, cleanupMarketFocusLogs, cleanupSocialCardImages } from '@stock/database'
 import { refreshMarketFocusDetailed, previewMarketFocus, backfillMissingSummaries, backfillMissingReasons } from '@/lib/market-focus'
 import { sendMarketFocusAlert, sendMarketFocusSummary, isSummaryFallback } from '@/lib/email'
 import { triggerSocialPublish } from '@/lib/social-trigger'
@@ -212,5 +212,19 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
   } finally {
     clearTimeout(watchdog)
     if (activeJobId === job.id) activeJobId = null
+    if (job.status === 'done') {
+      // 每次成功收尾順帶清理：日誌保留 7 天、圖卡快照僅留最近 30 版（避免 Azure SQL 配額累積）
+      void (async () => {
+        try {
+          const logs = await cleanupMarketFocusLogs(7)
+          const cards = await cleanupSocialCardImages(30)
+          if (logs > 0 || cards > 0) {
+            console.log(`[MarketFocusJob] cleanup done: logs=${logs} cards=${cards}`)
+          }
+        } catch (e: any) {
+          console.warn('[MarketFocusJob] cleanup failed:', e?.message ?? e)
+        }
+      })()
+    }
   }
 }

@@ -48,7 +48,7 @@ export async function triggerSocialPublish(
 ): Promise<SocialPublishOutcome> {
   const dryRun = options.dryRun ?? false
   const force = options.force ?? false
-  const platforms = options.platforms?.length ? options.platforms : (['instagram', 'threads'] as SocialPostPlatform[])
+  const platforms = options.platforms?.length ? options.platforms : (['instagram', 'threads', 'facebook'] as SocialPostPlatform[])
   const manual = !!((options.imageUrl || options.imageUrls) && options.captions)
 
   const meta = await getMarketFocusMeta()
@@ -68,7 +68,7 @@ export async function triggerSocialPublish(
     ])
     // ai 全圖卡：依梗圖主軸另生成專屬不打字藝術構圖（無梗圖或生圖失敗時以一般底圖兜底）
     const aiArt = meme?.title ? await generateSocialArtworkImage(meme).catch(() => null) : null
-    const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'classic') as SocialCardStyle
+    const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'ai') as SocialCardStyle
     const igCardStyle: 'ai' | 'meme' = 'ai'
     const toDataUrl = (buf: Buffer) => `data:image/jpeg;base64,${buf.toString('base64')}`
     const [classicBuf, memeBuf, aiBuf] = await Promise.all([
@@ -104,11 +104,11 @@ export async function triggerSocialPublish(
   const contentByPlatform = manual ? options.captions! : await generateSocialCaptions(meta, items)
 
   // 確保自動發布所需的圖卡快照皆已預先繪製並快取至 DB，避免 Meta API 抓取時動態調用 LLM 導致逾時 (9004)
-  // IG 一律用 AI 吉祥物全圖卡（ai）；Threads 固定 classic 品牌資訊卡；Facebook 固定 classic 品牌資訊卡
+  // FB / IG / Threads 一律用 AI 吉祥物全圖卡（ai）
   const stylesNeeded = new Set<SocialCardStyle>()
   for (const { platform } of unresolved) {
     if (!options.imageUrls?.[platform] && !options.imageUrl) {
-      stylesNeeded.add(platform === 'instagram' ? 'ai' : 'classic')
+      stylesNeeded.add('ai')
     }
   }
 
@@ -149,8 +149,8 @@ export async function triggerSocialPublish(
   const results: SocialPublishOutcome['results'] = []
   for (const { platform } of unresolved) {
     const content = platform === 'instagram' ? contentByPlatform.instagram : platform === 'facebook' ? contentByPlatform.facebook : contentByPlatform.threads
-    // IG 一律 AI 吉祥物全圖卡；Threads / Facebook 固定 classic 品牌資訊卡
-    const defaultStyle: SocialCardStyle = platform === 'instagram' ? 'ai' : 'classic'
+    // FB / IG / Threads 一律 AI 吉祥物全圖卡
+    const defaultStyle: SocialCardStyle = 'ai'
     const imageUrl =
       options.imageUrls?.[platform] ??
       options.imageUrl ??
