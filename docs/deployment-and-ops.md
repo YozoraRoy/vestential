@@ -61,7 +61,7 @@
 > 註：`AUTH_BASE_URL` 在部署工作流程中已固定為 `https://vestential.com`，無需重複設定。
 >
 > **生產資料庫（Azure SQL）**：Server `sql-stock-platform.database.windows.net`（canadacentral，Resource Group `rg-yuzora_roy_ai`）、Database `stockdb`。
-> 目前階層為 **Basic（5 DTU）／上限 2 GB**（於 2026-09-11 由「Free tier（僅 32 MB）」升級，原因與排除步驟見 §4 Q3）。
+> 目前階層為 **Basic（5 DTU）／上限 2 GB**（於 2026-09-11 由「Free tier（僅 32 MB）」升級，原因與排除步驟見 §5 Q3）。
 
 ---
 
@@ -89,14 +89,115 @@
    - 行為：驅動 `/agent-arena` 五階段（briefing → 4 agent 決策 → discussion → 裁決 → 排行榜）。為 GH 排程備援，主要時鐘為 in-process 的 `arena-scheduler.ts`（`ARENA_CRON_ENABLED=true`）。
 7. **社群 token 健康檢查 (`check-social-tokens.yml`)**：
    - 時間：每日台灣時間 **03:30**。
-   - 行為：呼叫 `/api/social/token-health`，檢查 IG/Threads/FB 憑證；異常即寄發告警信（換發步驟見 §5）。
+   - 行為：呼叫 `/api/social/token-health`，檢查 IG/Threads/FB 憑證；異常即寄發告警信（換發步驟見 §6）。
 8. **部署 (`deploy.yml`)**：
    - 觸發：任何 push 至 `main` 分支。
    - 行為：GitHub Runner 建置→zipdeploy 至 Azure App Service，並同步 App Settings（含所有社群 token）。
 
 ---
 
-## 4. 常見維運問題與排除方法
+## 4. 開發鏈路（Issue 驅動）與自動部署
+
+平台的所有「改動 → 自動驗收 → 自動上線」皆由 GitHub Issue 驅動：**Issue 是規格、驗收與狀態的唯一資料源（single source of truth），`/dev-loop` 是唯一入口，`git push origin main` 只是鏈路末段的一步**。本專案的 agent 定義在 `.opencode/agent/`（`pm`／`developer`／`qa-verifier`）、流程在 `.opencode/command/dev-loop.md`、守則在根目錄 `AGENTS.md`「## 開發鏈路（Issue 驅動）」；本章是給維運／接手者的操作視角。
+
+### 4.1 目標與理念
+
+一句話：**任何功能改動或 bug 修復，都先開成一份可執行、可驗收的 Issue 規格，由 `/dev-loop` 一站走完「開規格 → 實作 → 驗收 → 自動部署 → 生產驗證 → 關閉」，全程以 Issue body + comments 留痕，本地不另存規格／驗收報告**。維運者「grep 一個 issue number」就能重現整段交付軌跡。
+
+### 4.2 Issue 為單一資料源：樣板與 Label 狀態機
+
+每個開發 Issue 的 body 固定含五段（由 `pm` agent 依樣板產出）：
+
+| 章節 | 用途 |
+| :--- | :--- |
+| `## 目標` | 一句話＋解決什麼問題 |
+| `## 範圍` | In-scope / Out-of-scope 條列 |
+| `## 副作用鏈` | UI → API route → lib/DB 函式 → 寫表／寄信／觸發 cron，附 `file_path:line` |
+| `## ACCEPTANCE` | `- [ ]` 可驗收清單，是「完成」的唯一定義（developer 實作、qa-verifier 打勾共用同一份） |
+| `## 風險 / 待確認` | 風險與需使用者決定的點；資料不足處標「待確認」 |
+
+**Label 狀態機**（目前僅 5 個 `status/*` label；一次只應有一個 `status/*` 掛在 issue 上）：
+
+| Label | 意義 | 誰設 | 何時設 |
+| :--- | :--- | :--- | :--- |
+| `status/spec` | 規格已建立，等待實作 | pm（主 agent 委派） | P0 開規格 Issue 時 |
+| `status/in-dev` | 開發進行中 | developer | P1 開始實作時（同時移除 `status/spec`／`status/needs-fix`） |
+| `status/needs-fix` | 驗收未過，待修改 | qa-verifier | P2 驗收出現 FAIL 時（→ 回到 P1；改完重設 `status/in-dev`） |
+| `status/qa-pass` | 驗收全 PASS，准予上線 | qa-verifier（P2）／主 agent（P3 確認） | P2 全 PASS 時 |
+| `status/released` | 已上線 | dev-loop 主 agent | P4 生產驗證通過、`gh issue close` 前設定 |
+
+狀態流：`status/spec` → `status/in-dev` → `status/needs-fix` ⇄ `status/in-dev` → `status/qa-pass` → `status/released`（close）。
+
+### 4.3 `/dev-loop` 一站鏈路（P0 → P4）
+
+`/dev-loop`（agent: build）接受 `$ARGUMENTS`，**兩種輸入**：
+
+- **純數字＝既有 issue number**：`gh issue view <N> --comments` 讀現況，接續未完成階段（修復迴圈、補驗收都走這條）。
+- **其他文字＝功能描述**：先委派 `pm` 開一張含 `status/spec` 的規格 Issue，拿回 `#<N>` 再繼續。
+
+四階段分工與產出：
+
+| 階段 | 誰做 | 產出 | 如何進下一步 |
+| :--- | :--- | :--- | :--- |
+| **P0 規格** | pm（唯讀，`edit: deny`） | Issue body 含完整 `## ACCEPTANCE`，掛 `status/spec` | 回傳 issue#，交 P1 |
+| **P1 實作** | developer（`edit: allow`） | 依 ACCEPTANCE 實作；必跑 `npm run typecheck`＋`npm run lint`＋build；comment 貼逐條勾選結果 | 三項 self-check 全過 → 報「P1 完成」，交 P2 |
+| **P2 驗收** | qa-verifier（唯讀，`REALM=local`） | 依 ACCEPTANCE 逐項驗證，產 PASS/FAIL matrix 貼 issue comment | **全 PASS** → 交 P3；**有 FAIL** → 設 `status/needs-fix` 回 P1 修，修完重設 `status/in-dev` 再重 P2，直到全 PASS |
+| **P3 自動上線** | dev-loop 主 agent | 設 `status/qa-pass`（移除 `status/needs-fix`）→ 只 stage 本次相關檔案 → commit（message 含 `Closes #<N>`）→ `git push origin main` → 用 `gh run list`／`gh run watch` 觀測 deploy | push 觸發 deploy.yml（見 4.4）；部署成功 → 交 P4 |
+| **P4 生產驗證** | qa-verifier（`REALM=production`） | curl 生產 URL 驗證 ACCEPTANCE（含 DB／信件／cron 副作用，能驗才驗，否則標 UNVERIFIED） | 通過 → `status/released`＋`gh issue close --reason completed`；未過 → 回 P1 修，重跑 P3/P4 |
+
+**FAIL 迴圈（重點）**：P2 只要有任一 FAIL，Issue label 就會回到 `status/needs-fix`，流程回縮到 P1 重修，**不會有任何「雖然有 FAIL 但先上線」的例外路徑**。P4 未過同理整段重跑。因此「P2/P4 全 PASS」是唯一能走到 push 的門票。
+
+### 4.4 自動部署與上線原則
+
+- **觸發**：`/dev-loop` P3 的 `git push origin main` 會觸發 `.github/workflows/deploy.yml`（任何 push 到 `main` 都會觸發，不限 dev-loop；但**常態出貨路徑只有 dev-loop**）。deploy.yml 在 GitHub Runner 完成 `local-build` 產出 standalone，zipdeploy 至 Azure App Service 並同步全部 App Settings（詳見 §1、§2、§3.8）。
+- **「驗收後才 close」原則**：Issue 只在 **P4 生產驗證通過後**才由主 agent 標 `status/released` 並 close。換言之，一個 open 的 `status/*` Issue 若已 merge 上線，代表它卡在 P4 或等待處理中——關閉狀態＝生產已驗證，不是「PR 合併了就算完」。
+- **Issue 標題不需手動列版本**：版本／上線與否由 **label（`status/released`）＋ close 時機** 表達；`git log` 內 `Closes #<N>` 建立 commit ↔ issue 的雙向可溯性。標題保持功能語意即可，不要塞日期或版本號。
+
+### 4.5 gh CLI 操作速查（Windows PowerShell）
+
+Windows 下多行 body 一律**先寫到 `$env:TEMP\opencode\*.md` 再餵 `--body-file`**，避免引號／多行跳脫問題：
+
+```powershell
+# 1) 開規格 Issue（P0，pm）
+gh issue create --repo YozoraRoy/vestential `
+  --title "<功能標題>" --body-file "$env:TEMP\opencode\spec.md" --label status/spec
+
+# 2) 讀 Issue 規格＋留言（P0/P1 起手式）
+gh issue view <N> --repo YozoraRoy/vestential --comments
+
+# 3) 設 label：開始實作（P1，developer）
+gh issue edit <N> --repo YozoraRoy/vestential `
+  --add-label status/in-dev --remove-label status/spec,status/needs-fix
+
+# 4) 貼 self-check／QA matrix comment（P1/P2/P4，先寫 temp 檔）
+Set-Content -LiteralPath "$env:TEMP\opencode\qa.md" -Value "<matrix 內容>" -Encoding UTF8
+gh issue comment <N> --repo YozoraRoy/vestential --body-file "$env:TEMP\opencode\qa.md"
+
+# 5) 驗收全過後升 qa-pass（P2 收尾 / P3 起手）
+gh issue edit <N> --repo YozoraRoy/vestential `
+  --add-label status/qa-pass --remove-label status/needs-fix
+
+# 6) 觀測部署 run（P3；不要輪詢網頁，用 gh）
+gh run list --repo YozoraRoy/vestential --workflow deploy.yml --limit 5
+gh run watch <run-id> --repo YozoraRoy/vestential
+
+# 7) 生產驗證通過後標 released 並關閉（P4 收尾）
+gh issue edit <N> --repo YozoraRoy/vestential --add-label status/released
+gh issue close <N> --repo YozoraRoy/vestential --reason completed
+```
+
+> PowerShell 細節：`Set-Content ... -Encoding UTF8` 會存成 UTF-8（含 BOM）——gh 讀取無礙，可放心使用；here-string `@" ... "@` 適合組多行的 body。
+
+### 4.6 維運／協作紀律提醒
+
+- **developer 不 commit、不 push**：程式碼一律由 dev-loop 主 agent 在 P3 統一 commit＋push；任何人看到 developer 直接 push 即為違規（會跳過 `Closes #N` 與 label 門禁）。
+- **QA 全 PASS 才能 merge 上線**：typecheck／lint／build 是靜態門檻，P2 的 ACCEPTANCE 逐項驗證才是實質門檻；任一 FAIL 就得回 P1，沒有例外。
+- **「待確認」擋路要停**：P0–P4 任一環節遇到規格模糊、ACCEPTANCE 無法達成、或 production 驗證無法進行，一律在 issue comment 標「待確認」並**停下來問使用者**，不擅自改範圍、不自行假設。
+- **QA 驗證的環境規則**：local smoke 需要 dev server 時依 AGENTS.md §4 用完全 detach 方式起（`Start-Process -RedirectStandardOutput/-RedirectStandardError -WindowStyle Hidden -PassThru`），Ready／port／停機由 observer（主 agent）負責；`curl`／PowerShell 呼叫一律短 timeout。
+
+---
+
+## 5. 常見維運問題與排除方法
 
 ### Q1：推送後網站出現 502 Bad Gateway 或 503 Service Unavailable？
 - **原因**：Node 服務正在重啟中，或相依套件啟動階段異常。
@@ -133,11 +234,11 @@
 
 ---
 
-## 5. 社群憑證（IG / Threads / Facebook）維運
+## 6. 社群憑證（IG / Threads / Facebook）維運
 
 `check-social-tokens.yml` 每日台灣時間 03:30 呼叫 `/api/social/token-health` 檢查三平台憑證，任一失效即在健康檢查回信通知中夾帶告警。**Token 一旦過期，社群自動發文（`social-publish.ts`）與乾跑預覽的圖卡上傳都會失敗。**
 
-### 5.1 三種 token 壽命一覽
+### 6.1 三種 token 壽命一覽
 
 | 平台 | 型態 | 效期 | 取得管道 |
 | :--- | :--- | :--- | :--- |
@@ -147,7 +248,7 @@
 
 > FB 發文流程：系統內用 system user token 呼叫 `/me/accounts` 自動換出粉專專用 page token（`resolveFbPageToken`，自動配對 `FB_PAGE_ID`）。換發時須確保新 system user **有指派該粉專權限**，否則會回「FB 找不到粉專」。
 
-### 5.2 換發 SOP
+### 6.2 換發 SOP
 
 1. **收到告警** → 到 Meta Graph API Explorer / Business Suite 確認是哪筆 token 失效：
    - IG：`GET https://graph.facebook.com/{ig-user-id}?fields=id,username&access_token={IG_ACCESS_TOKEN}` 回 `error` 即失效。

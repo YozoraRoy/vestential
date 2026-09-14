@@ -104,7 +104,7 @@ npm run dev
 - ⚙️ **[系統架構與技術手冊](./docs/architecture-and-tech.md)**  
   Monorepo 結構、8-Agent 協作邏輯、0.3 秒熔斷門禁、Primary/Fallback 雙模型備援、持久化儲存機制與 2026-09 新增模組。
 - ☁️ **[Azure 部署與維運手冊](./docs/deployment-and-ops.md)**  
-  GitHub Actions 自動化 CI/CD、繞過 Oryx 記憶體不足的打包技巧、Secrets 清單、8 個定時排程、社群憑證維運與排錯步驟。
+  GitHub Actions 自動化 CI/CD、繞過 Oryx 記憶體不足的打包技巧、Secrets 清單、Issue 驅動開發鏈路（`/dev-loop`）、7 個定時排程＋自動部署、社群憑證維運與排錯步驟。
 - 🔐 **[身分驗證與配額規範手冊](./docs/auth-and-quota.md)**  
   Google 與 LINE OAuth 申請流程、JWT Session 安全規範、每日 3 次 AI 分析與 10 次圖片辨識配額機制。
 - ✉️ **[品牌專屬客服信箱建置手冊](./docs/custom-domain-email-setup.md)**  
