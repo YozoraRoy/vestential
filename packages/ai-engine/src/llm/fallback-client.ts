@@ -8,6 +8,19 @@ const PRIMARY_HARD_COOLDOWN_MS = 10 * 60 * 1000
 /** 觸發短熔斷所需的 primary 連續失敗次數。 */
 const PRIMARY_CONSECUTIVE_FAIL_LIMIT = 2
 
+interface PrimaryState {
+  failStreak: number
+  skippedUntil: number
+}
+
+/**
+ * 熔斷狀態以 primary model 為鍵「跨實例共享」：流水線每次調用 createQuickLLM 都會
+ * 產生新的 FallbackClient 實例，若各自維護狀態，每個 LLM step 都會重複燒一輪
+ * primary 重試延遲（約 40s）。共享後一旦任一 step 判定 primary 確定失敗，
+ * 後續 step 立即跳過 primary。
+ */
+const primaryStates = new Map<string, PrimaryState>()
+
 /**
  * Chain client: tries the primary model first, then each fallback in order
  * (tier 1, tier 2, …). Only throws after every tier has been exhausted.
@@ -23,13 +36,19 @@ export class FallbackClient implements LLMClient {
   /** Total number of calls that fell back to a secondary model. */
   fallbackCalls = 0
 
-  private primaryFailStreak = 0
-  /** 此時間戳之前 primary 自備援鏈移除（熔斷中）。 */
-  private primarySkippedUntil = 0
+  private get pstate(): PrimaryState {
+    const key = this.primary.model
+    let state = primaryStates.get(key)
+    if (!state) {
+      state = { failStreak: 0, skippedUntil: 0 }
+      primaryStates.set(key, state)
+    }
+    return state
+  }
 
   /** primary 是否正在熔斷（呼叫方可用於診斷顯示）。 */
   get primaryBlocked(): boolean {
-    return this.primarySkippedUntil > Date.now()
+    return this.pstate.skippedUntil > Date.now()
   }
 
   private buildTiers(): Array<{ client: LLMClient; usedFallback: boolean }> {
@@ -43,24 +62,25 @@ export class FallbackClient implements LLMClient {
   }
 
   private onPrimarySuccess(): void {
-    this.primaryFailStreak = 0
-    this.primarySkippedUntil = 0
+    this.pstate.failStreak = 0
+    this.pstate.skippedUntil = 0
   }
 
   private onPrimaryFailure(err: unknown): void {
     const msg = String((err as Error)?.message ?? err)
     const isHard =
       (err instanceof AIError && err.retryable === false) || /API 4\d\d/.test(msg)
-    this.primaryFailStreak += 1
+    const st = this.pstate
+    st.failStreak += 1
     const cooldown = isHard
       ? PRIMARY_HARD_COOLDOWN_MS
-      : this.primaryFailStreak >= PRIMARY_CONSECUTIVE_FAIL_LIMIT
+      : st.failStreak >= PRIMARY_CONSECUTIVE_FAIL_LIMIT
         ? PRIMARY_SOFT_COOLDOWN_MS
         : 0
     if (cooldown > 0) {
-      this.primarySkippedUntil = Date.now() + cooldown
+      st.skippedUntil = Date.now() + cooldown
       console.warn(
-        `[Fallback] primary ${this.primary.model} 熔斷 ${Math.round(cooldown / 1000)}s，暫由備援鏈接手（streak=${this.primaryFailStreak}, hard=${isHard}）`,
+        `[Fallback] primary ${this.primary.model} 熔斷 ${Math.round(cooldown / 1000)}s，暫由備援鏈接手（streak=${st.failStreak}, hard=${isHard}）`,
       )
     }
   }

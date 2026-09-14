@@ -346,7 +346,12 @@ export async function generateDailySummary(items: MarketFocusItem[]): Promise<st
     const system = promptOverride ? `${SUMMARY_SYSTEM_PROMPT}\n\n【後台覆寫指示】\n${promptOverride}` : SUMMARY_SYSTEM_PROMPT
     const list = items.map((it, i) => `${i + 1}. [${it.source}] ${it.title}${it.reason ? `（選取理由：${it.reason}）` : ''}`).join('\n')
     const raw = await llm.generate(system, `以下是今日精選新聞：\n${list}\n\n請撰寫當日市場總覽。`)
-    const parsed = JSON.parse(raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()) as { summary?: string }
+    let rawText = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()
+    // Gemini 等模型常在 JSON 物件後附加說明文字：只取 { ... } 本體再 parse
+    const first = rawText.indexOf('{')
+    const last = rawText.lastIndexOf('}')
+    if (first !== -1 && last > first) rawText = rawText.slice(first, last + 1)
+    const parsed = JSON.parse(rawText) as { summary?: string }
     const summary = typeof parsed?.summary === 'string' ? parsed.summary.trim() : ''
     if (summary) return summary
   } catch (e) {
