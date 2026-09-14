@@ -6,7 +6,6 @@ Vestential 是基於 Next.js 15 與多代理人協作架構（Multi-Agent Archit
 
 * **線上體驗網站**：[https://vestential.com](https://vestential.com)
 * **官方客服信箱**：`service@vestential.com`
-* **原始碼倉庫**：[https://github.com/YozoraRoy/vestential](https://github.com/YozoraRoy/vestential)
 
 ---
 
