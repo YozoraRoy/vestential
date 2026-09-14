@@ -4336,12 +4336,12 @@ export async function getAgentSetting(key: string): Promise<string | null> {
 export function listAgentSettings(category?: string): Promise<AgentSettingRow[]> {
   if (category) {
     return dbQueryAll<AgentSettingRow>(
-      'SELECT setting_key AS key, value, category, label, updated_at FROM agent_settings WHERE category = @category ORDER BY setting_key',
+      'SELECT setting_key AS [key], value, category, label, updated_at FROM agent_settings WHERE category = @category ORDER BY setting_key',
       { category },
     )
   }
   return dbQueryAll<AgentSettingRow>(
-    'SELECT setting_key AS key, value, category, label, updated_at FROM agent_settings ORDER BY category, setting_key',
+    'SELECT setting_key AS [key], value, category, label, updated_at FROM agent_settings ORDER BY category, setting_key',
   )
 }
 
@@ -4354,7 +4354,7 @@ export async function setAgentSetting(input: {
 }): Promise<boolean> {
   const nowIso = () => new Date().toISOString().slice(0, 19).replace('T', ' ')
   const existing = await dbQueryFirst<{ key: string }>(
-    'SELECT setting_key AS key FROM agent_settings WHERE setting_key = @key',
+    'SELECT setting_key AS [key] FROM agent_settings WHERE setting_key = @key',
     { key: input.key },
   )
   if (existing) {
