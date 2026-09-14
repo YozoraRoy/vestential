@@ -4,6 +4,7 @@ import { loadConfig } from '@stock/core'
 import { getAgentSetting } from '@stock/database'
 import type { MarketFocusItem } from '@stock/database'
 import { saveMarketFocus, saveMarketFocusMeta, getMarketFocus, getMarketFocusMeta, logMarketFocusEvent } from '@stock/database'
+import { attachLlmUsageRecorder } from '@/lib/llm-usage'
 
 // ─── 候選新聞來源設定 (多來源聚合池) ─────────────────────────────
 // 1. 鉅亨網 (Anue Cnyes)：台股、外匯、頭條
@@ -344,6 +345,7 @@ export async function generateDailySummary(items: MarketFocusItem[]): Promise<st
     const rawToken = (await getAgentSetting('market_focus.summary_max_tokens')) ?? ''
     const maxTokens = (rawToken && Number(rawToken) > 0 && Number(rawToken)) || 2048
     const { llm } = createQuickLLM(config, { maxTokens })
+    attachLlmUsageRecorder(llm, 'market-focus.summary')
     const promptOverride = (await getAgentSetting('market_focus.summary_prompt')) ?? ''
     const system = promptOverride ? `${SUMMARY_SYSTEM_PROMPT}\n\n【後台覆寫指示】\n${promptOverride}` : SUMMARY_SYSTEM_PROMPT
     const list = items.map((it, i) => `${i + 1}. [${it.source}] ${it.title}${it.reason ? `（選取理由：${it.reason}）` : ''}`).join('\n')
@@ -420,6 +422,7 @@ export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<Marke
   try {
     const config = loadConfig()
     const { llm } = createQuickLLM(config, { maxTokens: 2048 })
+    attachLlmUsageRecorder(llm, 'market-focus.filter')
     const rawCount = (await getAgentSetting('market_focus.select_count')) ?? ''
     const selectCount = (rawCount && Number(rawCount) > 0 && Number(rawCount)) || 10
     const promptOverride = (await getAgentSetting('market_focus.select_prompt')) ?? ''
@@ -495,6 +498,7 @@ export async function generateArticleSummaries(
   try {
     const config = loadConfig()
     const { llm } = createQuickLLM(config, { maxTokens: 1800 })
+    attachLlmUsageRecorder(llm, 'market-focus.article-summaries')
     const promptList = items
       .map((it, idx) => {
         const textSnippet = it.content ? it.content.slice(0, 350).replace(/\s+/g, ' ').trim() : '（無正文）'
@@ -585,6 +589,7 @@ export async function backfillMissingReasons(): Promise<number> {
     if (gaps.length === 0) return 0
     const config = loadConfig()
     const { llm } = createQuickLLM(config, { maxTokens: 1200 })
+    attachLlmUsageRecorder(llm, 'market-focus.backfill-reasons')
     const list = gaps
       .map(
         (it, idx) =>

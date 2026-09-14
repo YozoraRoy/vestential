@@ -4644,7 +4644,10 @@ export async function logLlmUsage(entry: LlmUsageLogInput): Promise<void> {
 export interface LlmUsageAgentReport {
   agent: string
   callCount: number
+  /** 各模型服務的呼叫次數（model → count）。 */
   models: Record<string, number>
+  /** 走備援（non-primary）的呼叫次數。 */
+  fallbackCalls: number
   promptTokens: number
   completionTokens: number
   totalTokens: number
@@ -4654,7 +4657,7 @@ export interface LlmUsageReportResult {
   from: string
   to: string
   agents: LlmUsageAgentReport[]
-  total: { callCount: number; promptTokens: number; completionTokens: number; totalTokens: number }
+  total: { callCount: number; fallbackCalls: number; promptTokens: number; completionTokens: number; totalTokens: number }
 }
 
 /**
@@ -4681,11 +4684,13 @@ export async function getLlmUsageReport(opts?: { from?: string; to?: string }): 
     agent: string
     model: string
     calls: number
+    fallbackCalls: number
     promptTokens: number
     completionTokens: number
     totalTokens: number
   }>(
     `SELECT agent, model, COUNT(*) AS calls,
+            SUM(usedFallback) AS fallbackCalls,
             SUM(promptTokens) AS promptTokens,
             SUM(completionTokens) AS completionTokens,
             SUM(totalTokens) AS totalTokens
@@ -4699,6 +4704,7 @@ export async function getLlmUsageReport(opts?: { from?: string; to?: string }): 
   // 依 agent 分組，組裝 models 物件
   const agentMap = new Map<string, LlmUsageAgentReport>()
   let totalCalls = 0
+  let totalFallbackCalls = 0
   let totalPrompt = 0
   let totalCompletion = 0
   let totalTokens = 0
@@ -4706,11 +4712,12 @@ export async function getLlmUsageReport(opts?: { from?: string; to?: string }): 
   for (const row of rows) {
     let agentReport = agentMap.get(row.agent)
     if (!agentReport) {
-      agentReport = { agent: row.agent, callCount: 0, models: {}, promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+      agentReport = { agent: row.agent, callCount: 0, models: {}, fallbackCalls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 }
       agentMap.set(row.agent, agentReport)
     }
     agentReport.callCount += row.calls
     agentReport.models[row.model] = (agentReport.models[row.model] || 0) + row.calls
+    agentReport.fallbackCalls += row.fallbackCalls
     agentReport.promptTokens += row.promptTokens
     agentReport.completionTokens += row.completionTokens
     agentReport.totalTokens += row.totalTokens
@@ -4719,6 +4726,7 @@ export async function getLlmUsageReport(opts?: { from?: string; to?: string }): 
   // 從 DB GROUP BY 結果中彙整 total
   for (const agentReport of agentMap.values()) {
     totalCalls += agentReport.callCount
+    totalFallbackCalls += agentReport.fallbackCalls
     totalPrompt += agentReport.promptTokens
     totalCompletion += agentReport.completionTokens
     totalTokens += agentReport.totalTokens
@@ -4728,6 +4736,6 @@ export async function getLlmUsageReport(opts?: { from?: string; to?: string }): 
     from,
     to,
     agents: Array.from(agentMap.values()).sort((a, b) => b.totalTokens - a.totalTokens),
-    total: { callCount: totalCalls, promptTokens: totalPrompt, completionTokens: totalCompletion, totalTokens },
+    total: { callCount: totalCalls, fallbackCalls: totalFallbackCalls, promptTokens: totalPrompt, completionTokens: totalCompletion, totalTokens },
   }
 }

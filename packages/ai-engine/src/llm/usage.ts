@@ -1,4 +1,5 @@
-import type { LLMCallInfo, LLMClient, LLMUsage } from './client.js'
+import type { LLMClient } from './client.js'
+import { FallbackClient } from './fallback-client.js'
 
 export interface AgentUsage {
   agent: string
@@ -46,8 +47,6 @@ interface AgentState {
 export class LLMUsageTracker {
   private byAgent = new Map<string, AgentState>()
   private currentAgent = 'Unknown'
-  /** 最近一次 handleUsage 收到的 token 數，等待 handleCall 湊成完整一筆送出。 */
-  private pendingUsage: { promptTokens: number; completionTokens: number } | null = null
 
   /** 每筆成功 LLM 呼叫的完整紀錄回呼；由引擎層接整合，fire-and-forget 寫入 DB。 */
   onCallRecorded?: (entry: LlmUsageEntry) => void
@@ -55,7 +54,6 @@ export class LLMUsageTracker {
   reset() {
     this.byAgent.clear()
     this.currentAgent = 'Unknown'
-    this.pendingUsage = null
   }
 
   setCurrentAgent(agent: string) {
@@ -70,41 +68,61 @@ export class LLMUsageTracker {
     return fresh
   }
 
-  private handleUsage = (usage: LLMUsage) => {
-    const current = this.getOrInit(this.currentAgent)
-    const promptTokens = usage.promptTokens ?? 0
-    const completionTokens = usage.completionTokens ?? 0
+  /** 記一筆成功呼叫：同時更新記憶體聚合（getAgent/getSummary）並觸發持久化回呼。 */
+  private record(
+    agent: string,
+    model: string,
+    usedFallback: boolean,
+    promptTokens: number,
+    completionTokens: number,
+  ) {
+    const current = this.getOrInit(agent)
+    current.model = model
     current.promptTokens += promptTokens
     current.completionTokens += completionTokens
-    this.pendingUsage = { promptTokens, completionTokens }
-  }
-
-  private handleCall = (info: LLMCallInfo) => {
-    const current = this.getOrInit(this.currentAgent)
-    current.model = info.model
-    if (info.usedFallback) current.fallbackCalls++
-
-    // 湊齊 usage + call → 輸出完整一筆紀錄（附帶於 onCallRecorded 回呼）。
-    // 搭配 FallbackClient.report() 統一發送的 onCall（model＝實際服務者），
-    // 確保每筆成功呼叫最多記一筆，且 model 為實際服務者。
-    const usage = this.pendingUsage
-    this.pendingUsage = null
-    const promptTokens = usage?.promptTokens ?? 0
-    const completionTokens = usage?.completionTokens ?? 0
+    if (usedFallback) current.fallbackCalls++
     this.onCallRecorded?.({
       at: new Date().toISOString(),
-      agent: this.currentAgent,
-      model: info.model,
-      usedFallback: info.usedFallback,
+      agent,
+      model,
+      usedFallback,
       promptTokens,
       completionTokens,
       totalTokens: promptTokens + completionTokens,
     })
   }
 
+  /**
+   * 對單一底層 client 掛 usage/call hook。雲端 provider（openai/google 等）會在
+   * 同一同步 tick 內先發 onUsage 再發 onCall，故以單一 client 為域的快取即能精準配對。
+   * 並行呼叫互不覆蓋（各自同步 tick 原子完成），解決單一 pendingUsage 全域槽的錯配。
+   */
+  private attachOne(client: LLMClient, usedFallback: boolean): void {
+    let pending: { promptTokens: number; completionTokens: number } | null = null
+    client.onUsage = (usage) => {
+      pending = {
+        promptTokens: usage.promptTokens ?? 0,
+        completionTokens: usage.completionTokens ?? 0,
+      }
+    }
+    client.onCall = (info) => {
+      const done = pending ?? { promptTokens: 0, completionTokens: 0 }
+      pending = null
+      this.record(this.currentAgent, info.model, usedFallback, done.promptTokens, done.completionTokens)
+    }
+  }
+
+  /**
+   * 將 client 掛進追蹤。
+   * - FallbackClient：逐 tier（primary＋各備援）掛載，並行環境下 token 仍能精準配對。
+   * - 一般 client：直接掛載，其自身 usage/call 亦於同一 tick 配對。
+   */
   attach(client: LLMClient): LLMClient {
-    client.onUsage = this.handleUsage
-    client.onCall = this.handleCall
+    if (client instanceof FallbackClient) {
+      for (const tier of client.tiers) this.attachOne(tier.client, tier.usedFallback)
+    } else {
+      this.attachOne(client, false)
+    }
     return client
   }
 

@@ -3,6 +3,7 @@ import { dataBlock, injectionGuardNote, sanitizeDataField } from '@stock/ai-engi
 import { loadConfig } from '@stock/core'
 import { getAgentSetting } from '@stock/database'
 import type { MarketFocusItem, MarketFocusMeta } from '@stock/database'
+import { attachLlmUsageRecorder } from '@/lib/llm-usage'
 
 // ─── 社群文案生成 (小編 Agent) ─────────────────────────────────────
 // 同一個 edition 會同時產生 IG / Threads / Facebook 三種文案。
@@ -38,9 +39,9 @@ export async function generateSocialCaptions(
   const fbPromptOverride = (await getAgentSetting('social.fb_prompt')) ?? ''
 
   try {
-    const config = loadConfig()
+const config = loadConfig()
     const { llm } = createQuickLLM(config, { maxTokens: 2048 })
-
+    attachLlmUsageRecorder(llm, 'social.captions')
     const dateStr = meta.generated_at ? sanitizeDataField(meta.generated_at, 40) : ''
     const summary = meta.summary ? sanitizeDataField(meta.summary, 1200) : ''
     const top = items
@@ -166,6 +167,7 @@ export async function generateMemeConcept(meta: MarketFocusMeta, items: MarketFo
   try {
     const config = loadConfig()
     const { llm } = createQuickLLM(config, { maxTokens: 500 })
+    attachLlmUsageRecorder(llm, 'social.meme-concept')
     const dateStr = meta.generated_at ? sanitizeDataField(meta.generated_at, 40) : ''
     const summary = meta.summary ? sanitizeDataField(meta.summary, 800) : ''
     const top = items

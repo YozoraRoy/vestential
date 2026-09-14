@@ -100,6 +100,18 @@ export class FallbackClient implements LLMClient {
     return this.fallbacks
   }
 
+  /**
+   * 底層 tier 清單（primary 第一，並標記是否屬備援層）。
+   * 供 LLMUsageTracker 逐 tier 掛載 usage/call hook：每筆成功的 usage 與 call
+   * 都由同一底層 client 在同一同步 tick 依序發出，並行呼叫下 token 亦不誤配。
+   */
+  get tiers(): Array<{ client: LLMClient; usedFallback: boolean }> {
+    return [
+      { client: this.primary, usedFallback: false },
+      ...this.fallbacks.map((client) => ({ client, usedFallback: true })),
+    ]
+  }
+
   get model(): string {
     return this.lastModel || this.primary.model
   }
