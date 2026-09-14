@@ -56,7 +56,7 @@
 
 ---
 
-## 3. 📉 週期進場模型回測 (`/backtest`)
+## 3. 📉 季線乖離模型回測 (`/backtest`)
 
 ### 3.1 季線（MA60）乖離率演算法
 以長期波段勝率最高的 60 日均線（季線）作為核心進場濾網：
@@ -107,3 +107,47 @@
 
 - **唯讀健康檢查 (`GET /api/health`)**：定期檢查市場焦點的新聞數量與時間戳、零股資料的最後交易日比對、資料庫連線品質與關鍵環境變數。
 - **自動修復端點 (`POST /api/health/repair`)**：由 GitHub Actions 在檢測出異常時自動調用（帶有 `SYNC_TOKEN` 認證），自動觸發補抓與更新。具備 10 分鐘節流與 6 小時告警冷卻機制，杜絕重複寄信干擾。
+
+---
+
+## 6. 🔄 週期進場 (`/cycle-entry`)
+
+- **定位**：在季線乖離回測（§3 `/backtest`）之上的「時點選擇」層——掃描全市場找出「已現合適進場點」的標的，輔助判斷買點。
+- **計算引擎**：`packages/cycle-entry`（`rules.ts`／`runSignalBacktest`），回測＋實時偵測同一套規則。
+- **資料更新**：`sync-cycle-entry.yml` 每交易日台灣時間 16:00 跑掃描，產出當日進場標的清單。
+- **個股細節**：`/api/cycle-entry/detail` 回傳近 1 年 OHLCV 與逐筆訊號回測（`runSignalBacktestDetail`）、今日規則判定（`evaluateLastBar`）；點擊標的開啟 `CycleEntryDetailModal` 檢視圖形與理由。
+- **首頁入口**：首頁功能卡「已現合適進場點標的」直接進入。
+
+---
+
+## 7. ⚔️ AI Agent 競技場 (`/agent-arena`)
+
+- **角色**：4 隻固定人格的 AI agent，每日以真實台股資料進行交易決策競賽並登上排行榜：
+  存股老阿伯（保守長線）、少年股神阿虎（高週轉）、股息包租嬤（殖利率）、佛系平衡嬤（股債平衡）。
+- **五階段流程（台灣時間）**：
+  1. `premarket 09:00` briefing（市場簡報）
+  2. `slot0~3`（09:35 / 10:35 / 11:35 / 13:05）各 agent 下決策（買／賣／持有＋理由＋信心度）
+  3. `close 15:30` discussion（互評）→ 裁決 → 更新排行與績效
+- **排程**：主要時鐘為 in-process 的 `arena-scheduler.ts`（`ARENA_CRON_ENABLED=true`），`arena-tick.yml` 為 GH 備援。
+- **股票池**：內建預設 24 檔（`DEFAULT_ARENA_UNIVERSE`）＋動態前高市值股＋ETF 池。
+- **參數覆寫**：後台 `/admin/arena` 可改 `arena.slippage`（預設 0.003）、`arena.system_prompt` 等，優先於程式預設值。
+- **資料展示**：後台提供決策時間軸（briefing／discussion／各 agent 決策與理由），可審視每日完整過程。
+
+---
+
+## 8. 🔐 後台管理與社群小編 (`/admin`)
+
+### 8.1 後台守衛與頁面
+- 進入 `/admin/*` 需通過 `isAdminUser`（`lib/auth.ts`）：`ADMIN_LINE_USER_IDS`（LINE user id）或 `ADMIN_EMAILS`（登入 email）任一符合即管理員，否則導向登入。
+- 8 個子頁：總覽（概況＋狀態檢查）、市場焦點（手動觸發/檢視）、週期進場（掃描記錄）、社群小編（乾跑＋自動發文）、競技場（檢視＋手動 tick）、使用量、設定（agent 參數設定）、訂閱者。
+
+### 8.2 社群小編（IG / Threads / FB）
+- **平台**：Instagram（IGAA 長效 token）、Threads（THAA）、Facebook 粉專（system user token）。三平台皆自動發文。
+- **圖卡風格**：`ai`（AI 吉祥物全圖卡，**預設**）、`classic`（資訊卡）、`meme`（梗圖）；由 `social.card_style` 全域設定，亦可在乾跑時按平台指定。
+- **乾跑 (dry-run)**：後台觸發即產生三平台文案＋圖卡（base64）預覽，不實際發布。
+- **自動發文規則**：每日以 6 小時為頻率檢查（`social-trigger.ts`），有 `hasNewEdition`（新一期市場焦點）且未重複發過才發布，並寫入 `social_posts` 去重。
+- **FB 特殊流程**：system user token 不能直接貼文，系統先呼叫 `/me/accounts` 換出對應 `FB_PAGE_ID` 的 page token 再發布。
+- **憑證健康**：`check-social-tokens.yml` 每日 03:30 檢查 `GET /api/social/token-health`，失效即告警；換發步驟見 `docs/deployment-and-ops.md` §5。
+
+### 8.3 資料庫清理保護
+- `market-focus` job 成功收尾時 fire-and-forget 執行 `cleanupMarketFocusLogs(7)`（保留近 7 天）與 `cleanupSocialCardImages(30)`（保留近 30 期圖卡），避免 Azure SQL 囤積。

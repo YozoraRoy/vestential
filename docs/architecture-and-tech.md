@@ -1,4 +1,4 @@
-# 系統架構與技術技術手冊
+# 系統架構與技術手冊
 
 本文件說明 Vestential 的 Monorepo 結構、8-Agent AI 協作引擎、雙層 LLM 備援與雙資料庫持久化機制。
 
@@ -11,15 +11,17 @@ flowchart TB
     User["🌐 使用者瀏覽器<br/>(支援 zh-TW / en / ja)"]
 
     subgraph Actions["排程與維運 (GitHub Actions)"]
-        Cron_MF["sync-market-focus<br/>每 4 小時抓取多來源新聞"]
+        Cron_MF["sync-market-focus<br/>每 6 小時抓取多來源新聞"]
         Cron_ODD["sync-oddlot<br/>每工作日 15:10 同步零股"]
         Cron_Health["health-report<br/>健康檢查與自動修復"]
+        Cron_ARENA["arena-tick + in-process<br/>競技場五階段"]
+        Cron_SOCIAL["check-social-tokens<br/>每日 03:30 檢查社群憑證"]
     end
 
     subgraph Web["核心應用 (Next.js 15 App Router)"]
         MW["Middleware (多語系路由 / Cookie)"]
-        Pages["展示層 (/analyze /portfolio /backtest /odd-lot /market-focus)"]
-        API["API 路由 (OAuth / SSE 串流 / Refresh / Health)"]
+        Pages["展示層 (/analyze /portfolio /backtest /cycle-entry /odd-lot<br/>/market-focus /agent-arena /admin /stock)"]
+        API["API 路由 (OAuth / SSE 串流 / Refresh / Health / Social / Arena)"]
     end
 
     subgraph CoreEngine["多代理人與模型層"]
@@ -62,6 +64,7 @@ flowchart TB
 | **`apps/web`** | Next.js 15 現代化 Web 前端，採用 App Router、Tailwind CSS 與 Server Actions。 |
 | **`packages/ai-engine`** | 8 個專業分析代理人、Prompt 模板、0.3 秒無效標的門禁機制與投資法則引擎。 |
 | **`packages/backtest`** | 60 日均線乖離率回測演算法、勝率計算與歷史回測資料快取。 |
+| **`packages/cycle-entry`** | 週期進場回測引擎（`rules.ts`／`runSignalBacktest`），供 `/cycle-entry` 與後台使用。 |
 | **`packages/database`** | 雙資料庫抽象層（SQLite / Azure SQL）、遷移指令碼與批次同步排程。 |
 | **`packages/market-data`** | Yahoo Finance 報表擷取、TWSE 盤後數據清洗與歷史價量快取。 |
 | **`packages/core`** | 全域型別定義、設定常數與自訂例外錯誤類別。 |
@@ -115,3 +118,27 @@ flowchart TB
 
 - **Next.js 15 Middleware 路由**：全面支援 **繁體中文 (`zh-TW`)**、**英文 (`en`)** 與 **日文 (`ja`)**。透過 Cookie 與 Accept-Language 自動判定偏好，並保持無跳轉切換。
 - **動態 Sitemap 與中繼資料**：動態產生 `sitemap.xml` 與 `robots.txt`，對外宣示所有語系的 canonical 與 alternate 連結，符合現代搜尋引擎最佳化標準。
+
+---
+
+## 7. 2026-09 新增模組（概要）
+
+以下模組於 2026-09 陸續上線，細節與操作規範見 `docs/features-guide.md` §6~§8：
+
+### 7.1 AI 競技場 (`/agent-arena`)
+- 4 隻固定角色 agent 每日依台灣時間五階段角逐票選：premarket 09:00（briefing）→ slot 0~3（09:35/10:35/11:35/13:05 決策）→ 15:30（discussion + 裁決 + 排行榜）。
+- 主要時鐘為 **in-process** 的 `apps/web/src/lib/arena-scheduler.ts`（`ARENA_CRON_ENABLED=true`），GH Actions `arena-tick.yml` 為備援。
+- 股票池：內建預設 24 檔（`DEFAULT_ARENA_UNIVERSE`）＋動態前高市值股池＋ETF；後台可覆寫滑價等參數（預設 `0.003`）。
+- 資料表：`arena_agents`、`arena_rounds`、`arena_agent_actions`、`arena_round_summaries`、`arena_intraday_prices`、`arena_decision_logs`、`arena_market_briefings`、`arena_discussions`。
+
+### 7.2 社群小編（IG / Threads / FB）
+- 每日盤後自動生成三平台文案＋圖卡，經去重與 `hasNewEdition` 門檻後自動發文。
+- 圖卡三種風格（`ai` / `classic` / `meme`），**預設 `ai`（AI 吉祥物全圖卡）**；後台可乾跑預覽。
+- 發布邏輯在 `apps/web/src/lib/social-trigger.ts`＋`social-publish.ts`；憑證與換發維運見 `docs/deployment-and-ops.md` §5。
+
+### 7.3 週期進場 (`/cycle-entry`)
+- 以季線乖離演算法為基礎的週期進場模型掃描，`sync-cycle-entry.yml` 每個交易日 16:00 更新；計算引擎在 `packages/cycle-entry`。
+
+### 7.4 後台管理 (`/admin`)
+- 獨立管理後台（`admin/layout.tsx` 守衛＋側欄），8 個子頁：總覽、市場焦點、週期進場、社群小編、競技場、使用量、設定、訂閱者。
+- 守衛邏輯為 `lib/auth.ts` 的 `isAdminUser`（`ADMIN_LINE_USER_IDS` / `ADMIN_EMAILS` 判定）。
