@@ -130,7 +130,7 @@ async function fetchUdnNews(): Promise<NewsCandidate[]> {
     try {
       const res = await fetch(url, {
         headers: { 'user-agent': USER_AGENT },
-        signal: AbortSignal.timeout(6000),
+        signal: AbortSignal.timeout(10_000),
         cache: 'no-store',
       })
       if (!res.ok) continue
@@ -283,15 +283,17 @@ export async function fetchArticleContent(url: string): Promise<{ content: strin
     const res = await fetchWithRetry(url, {
       headers: { 'user-agent': USER_AGENT },
       redirect: 'follow',
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(10_000),
     })
     if (!res.ok) return { content: null, sourceUrl: url }
     const finalUrl = res.url || url
+    // 立即 buffer body，避免 Node.js undici 在 redirect 追蹤時消費 body stream
+    // 導致後續 res.text() 拋出 "Body has already been read"
+    const html = await res.text()
     if (!(await isAllowedByRobots(finalUrl))) {
       console.log(`[MarketFocus] robots.txt disallows crawling: ${finalUrl}`)
       return { content: null, sourceUrl: finalUrl }
     }
-    const html = await res.text()
     const $ = load(html)
     $('script, style, noscript, nav, footer, aside, form, iframe, svg, .ad, .ads, .advert, [class*="ad-"], [class*="advertisement"], [id*="ad-"]').remove()
 
