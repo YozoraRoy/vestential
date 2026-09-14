@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "npm run dev --workspace=apps/web",
     "start": "npm run start --workspace=apps/web",
-    "local-build": "npm run build --workspace=packages/core && npm run build --workspace=packages/market-data && npm run build --workspaces --if-present",
+    "local-build": "npm run build --workspace=packages/core && npm run build --workspace=packages/market-data && npm run build --workspace=packages/database && npm run build --workspaces --if-present",
     "build": "echo 'Bypassing Cloud Build'",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces",
