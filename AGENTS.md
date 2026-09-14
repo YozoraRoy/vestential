@@ -52,6 +52,30 @@ $p.Id   # 立即回傳（實測 ~16ms），不要在此 task 內輪詢 Ready
 - **三要素**：`-RedirectStandardOutput/-RedirectStandardError`（log 導至暫存檔，不繼承父 console handle）、`-WindowStyle Hidden -PassThru`（detach＋拿 pid）、起完**立即回傳**。
 - Ready 確認、port 檢查、路由觀測、停機，全部留給 observer（主 agent）做，QA/起 server 的 agent 不要在 task 內自己輪詢長駐程式。
 
+## 開發鏈路（Issue 驅動）
+
+新功能／修 bug 一律走「GitHub Issue 單一資料源」的 4 階段鏈路，由一鍵指令 `/dev-loop` 觸發（agent 檔：`pm`／`developer`／`qa-verifier`，命令：`dev-loop`）：
+
+```
+P0 pm（唯讀）  →  P1 developer（實作）  →  P2 qa-verifier（驗收）  →  P3 自動上線  →  P4 生產驗證
+開 Issue 規格     依 ACCEPTANCE 實作        依 ACCEPTANCE 驗證        commit+push       驗生產後 close
+status/spec       含 typecheck/lint/build   PASS/FAIL matrix        Closes #N → deploy
+```
+
+### Issue 樣板與 Labels
+
+- Issue body 固定含：`## 目標`／`## 範圍`／`## 副作用鏈`（UI→API→lib/DB→信件/cron）／`## ACCEPTANCE`（`- [ ]` 可驗收清單）／`## 風險/待確認`。
+- Label 狀態機：`status/spec` → `status/in-dev` → `status/needs-fix` ⇄ `status/in-dev` → `status/qa-pass` → `status/released`（close）。
+- 規格與驗收報告**只放 Issue**（body + comments），不落本地檔。
+
+### 分工與紀律
+
+- **pm**：`edit: deny`，只能 `gh issue create/edit/view/comment`；回傳 issue#。
+- **developer**：`edit: allow`；以 ACCEPTANCE 為完成定義；完工必跑 `npm run typecheck`＋`npm run lint`＋build；**不 commit／不 push**（收尾由 dev-loop 主 agent 統一處理）。
+- **qa-verifier**：`edit: deny`；依 Issue ACCEPTANCE 逐項驗證，產 PASS/FAIL matrix 貼 issue comment；local 起 server 依上文 §4 detach；curl/powershell 一律短 timeout。
+- **dev-loop 收尾（主 agent）**：QA 全 PASS → commit（message 含 `Closes #<N>`）→ `git push origin main`（觸發 deploy.yml）→ 觀測部署 → 生產驗證通過後 `gh issue close <N>`。
+- 途中遇到「待確認」擋路：停下來問使用者，不擅自改範圍。
+
 ## 重要教訓
 
 - node dev server 用完必須清乾淨。之前曾殘留兩台（3000/3001 各一），新起的 server 因 3000 被佔自動改跑 3001，讓測試誤以為「卡住」。
