@@ -15,6 +15,7 @@ import { FallbackClient } from './llm/fallback-client.js'
 import { LLMUsageTracker } from './llm/usage.js'
 import type { LLMClient } from './llm/client.js'
 import type { TokenUsageSummary, AgentUsage } from './llm/usage.js'
+import { logLlmUsage } from '@stock/database'
 import { WorkflowGraph } from './graph/workflow.js'
 import { MemoryLog } from './graph/memory.js'
 import { Reflector } from './graph/reflection.js'
@@ -255,6 +256,12 @@ export class TradingEngine {
 
     this.deepLLM = this.usageTracker.attach(this.deepLLM)
     this.quickLLM = this.usageTracker.attach(this.quickLLM)
+
+    // 每筆成功 LLM 呼叫（Arena 各 agent）fire-and-forget 持久化到 llm_usage_logs。
+    // logLlmUsage 內部已 try/catch 吞錯，報表寫入失敗絕不影響主分析路徑。
+    this.usageTracker.onCallRecorded = (entry) => {
+      void logLlmUsage(entry)
+    }
 
     this.memory = new MemoryLog(this.config.memoryLogPath)
     this.reflector = new Reflector(this.quickLLM)

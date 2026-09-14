@@ -5,7 +5,7 @@ export * from './llm/factory.js'
 export { createQuickLLM } from './llm/quick.js'
 export type { QuickLLMOptions } from './llm/quick.js'
 export { LLMUsageTracker } from './llm/usage.js'
-export type { AgentUsage, TokenUsageSummary } from './llm/usage.js'
+export type { AgentUsage, TokenUsageSummary, LlmUsageEntry } from './llm/usage.js'
 export {
   INVESTMENT_FRAMEWORKS,
   getFramework,

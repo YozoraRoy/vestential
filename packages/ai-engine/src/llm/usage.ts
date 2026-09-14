@@ -22,6 +22,20 @@ export interface TokenUsageSummary {
   }
 }
 
+/** 每筆成功 LLM 呼叫的完整紀錄（供持久化，由引擎層接整合寫入 DB）。 */
+export interface LlmUsageEntry {
+  /** ISO-8601 時間戳。 */
+  at: string
+  agent: string
+  /** 實際服務模型（primary 或 fallback）。 */
+  model: string
+  /** 該次呼叫是否走備援。 */
+  usedFallback: boolean
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
 interface AgentState {
   promptTokens: number
   completionTokens: number
@@ -32,10 +46,16 @@ interface AgentState {
 export class LLMUsageTracker {
   private byAgent = new Map<string, AgentState>()
   private currentAgent = 'Unknown'
+  /** 最近一次 handleUsage 收到的 token 數，等待 handleCall 湊成完整一筆送出。 */
+  private pendingUsage: { promptTokens: number; completionTokens: number } | null = null
+
+  /** 每筆成功 LLM 呼叫的完整紀錄回呼；由引擎層接整合，fire-and-forget 寫入 DB。 */
+  onCallRecorded?: (entry: LlmUsageEntry) => void
 
   reset() {
     this.byAgent.clear()
     this.currentAgent = 'Unknown'
+    this.pendingUsage = null
   }
 
   setCurrentAgent(agent: string) {
@@ -52,14 +72,34 @@ export class LLMUsageTracker {
 
   private handleUsage = (usage: LLMUsage) => {
     const current = this.getOrInit(this.currentAgent)
-    current.promptTokens += usage.promptTokens ?? 0
-    current.completionTokens += usage.completionTokens ?? 0
+    const promptTokens = usage.promptTokens ?? 0
+    const completionTokens = usage.completionTokens ?? 0
+    current.promptTokens += promptTokens
+    current.completionTokens += completionTokens
+    this.pendingUsage = { promptTokens, completionTokens }
   }
 
   private handleCall = (info: LLMCallInfo) => {
     const current = this.getOrInit(this.currentAgent)
     current.model = info.model
     if (info.usedFallback) current.fallbackCalls++
+
+    // 湊齊 usage + call → 輸出完整一筆紀錄（附帶於 onCallRecorded 回呼）。
+    // 搭配 FallbackClient.report() 統一發送的 onCall（model＝實際服務者），
+    // 確保每筆成功呼叫最多記一筆，且 model 為實際服務者。
+    const usage = this.pendingUsage
+    this.pendingUsage = null
+    const promptTokens = usage?.promptTokens ?? 0
+    const completionTokens = usage?.completionTokens ?? 0
+    this.onCallRecorded?.({
+      at: new Date().toISOString(),
+      agent: this.currentAgent,
+      model: info.model,
+      usedFallback: info.usedFallback,
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+    })
   }
 
   attach(client: LLMClient): LLMClient {

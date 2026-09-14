@@ -487,6 +487,19 @@ CREATE TABLE IF NOT EXISTS market_focus_subscribers (
       );
       CREATE INDEX IF NOT EXISTS idx_cycle_entry_meta_date ON cycle_entry_meta(edition_date);
 
+      CREATE TABLE IF NOT EXISTS llm_usage_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent TEXT NOT NULL,
+        model TEXT NOT NULL,
+        usedFallback INTEGER DEFAULT 0,
+        promptTokens INTEGER DEFAULT 0,
+        completionTokens INTEGER DEFAULT 0,
+        totalTokens INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage_logs(created_at);
+      CREATE INDEX IF NOT EXISTS idx_llm_usage_agent ON llm_usage_logs(agent);
+
     `)
 
     return _db
@@ -1059,6 +1072,24 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           generated_at DATETIME2 DEFAULT GETDATE()
         );
         CREATE INDEX idx_cycle_entry_meta_date ON cycle_entry_meta(edition_date);
+      END
+    `)
+
+    await _pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'llm_usage_logs')
+      BEGIN
+        CREATE TABLE llm_usage_logs (
+          id               INT IDENTITY(1,1) PRIMARY KEY,
+          agent            NVARCHAR(80) NOT NULL,
+          model            NVARCHAR(100) NOT NULL,
+          usedFallback     INT DEFAULT 0,
+          promptTokens     INT DEFAULT 0,
+          completionTokens INT DEFAULT 0,
+          totalTokens      INT DEFAULT 0,
+          created_at       DATETIME2 DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_llm_usage_created ON llm_usage_logs(created_at);
+        CREATE INDEX idx_llm_usage_agent ON llm_usage_logs(agent);
       END
     `)
 
@@ -4570,5 +4601,133 @@ export async function countMarketFocusSubscribers(): Promise<{ total: number; ac
     active: Number(row?.active ?? 0),
     pending: Number(row?.pending ?? 0),
     unsubscribed: Number(row?.unsubscribed ?? 0),
+  }
+}
+
+// ─── LLM Usage Logs (逐次呼叫明細) ───────────────────────────────
+
+/** LLM 用量資料庫寫入輔助型別。 */
+export interface LlmUsageLogInput {
+  agent: string
+  model: string
+  usedFallback: boolean
+  promptTokens: number
+  completionTokens: number
+}
+
+/**
+ * 將每筆成功 LLM 呼叫寫入 llm_usage_logs 表。
+ * fire-and-forget 設計：DB 失敗一律 try/catch 吞掉，絕不影響呼叫方。
+ */
+export async function logLlmUsage(entry: LlmUsageLogInput): Promise<void> {
+  try {
+    const usedFallback = entry.usedFallback ? 1 : 0
+    const totalTokens = (entry.promptTokens || 0) + (entry.completionTokens || 0)
+    await dbExecute(
+      `INSERT INTO llm_usage_logs (agent, model, usedFallback, promptTokens, completionTokens, totalTokens)
+       VALUES (@agent, @model, @usedFallback, @promptTokens, @completionTokens, @totalTokens)`,
+      {
+        agent: (entry.agent || '').slice(0, 80),
+        model: (entry.model || '').slice(0, 100),
+        usedFallback,
+        promptTokens: entry.promptTokens || 0,
+        completionTokens: entry.completionTokens || 0,
+        totalTokens,
+      },
+    )
+  } catch (e) {
+    console.error('[DB] logLlmUsage failed:', e)
+  }
+}
+
+/** LLM Agent 用量報表（per-agent 聚合）。 */
+export interface LlmUsageAgentReport {
+  agent: string
+  callCount: number
+  models: Record<string, number>
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+export interface LlmUsageReportResult {
+  from: string
+  to: string
+  agents: LlmUsageAgentReport[]
+  total: { callCount: number; promptTokens: number; completionTokens: number; totalTokens: number }
+}
+
+/**
+ * 回傳指定時間範圍內的 LLM 用量聚合報表（DB 端 GROUP BY）。
+ * 若 from/to 均未提供，預設今日（台灣時區 00:00:00 ~ 23:59:59）。
+ * llm_usage_logs 表不存在或無資料時回傳空 agents + 全 0 的 total，不報錯。
+ */
+export async function getLlmUsageReport(opts?: { from?: string; to?: string }): Promise<LlmUsageReportResult> {
+  // 預設今日台灣時區
+  const now = new Date()
+  const tzOffset = 8 * 60 * 60 * 1000
+  const todayTaipei = new Date(now.getTime() + tzOffset)
+  const yyyy = todayTaipei.getUTCFullYear()
+  const mm = String(todayTaipei.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(todayTaipei.getUTCDate()).padStart(2, '0')
+  const todayStr = `${yyyy}-${mm}-${dd}`
+
+  const from = opts?.from ? opts.from.trim() : todayStr
+  const to = opts?.to ? opts.to.trim() : todayStr
+  const fromDT = `${from} 00:00:00`
+  const toDT = `${to} 23:59:59`
+
+  const rows = await dbQueryAll<{
+    agent: string
+    model: string
+    calls: number
+    promptTokens: number
+    completionTokens: number
+    totalTokens: number
+  }>(
+    `SELECT agent, model, COUNT(*) AS calls,
+            SUM(promptTokens) AS promptTokens,
+            SUM(completionTokens) AS completionTokens,
+            SUM(totalTokens) AS totalTokens
+     FROM llm_usage_logs
+     WHERE created_at >= @from AND created_at <= @to
+     GROUP BY agent, model
+     ORDER BY agent, calls DESC`,
+    { from: fromDT, to: toDT },
+  )
+
+  // 依 agent 分組，組裝 models 物件
+  const agentMap = new Map<string, LlmUsageAgentReport>()
+  let totalCalls = 0
+  let totalPrompt = 0
+  let totalCompletion = 0
+  let totalTokens = 0
+
+  for (const row of rows) {
+    let agentReport = agentMap.get(row.agent)
+    if (!agentReport) {
+      agentReport = { agent: row.agent, callCount: 0, models: {}, promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+      agentMap.set(row.agent, agentReport)
+    }
+    agentReport.callCount += row.calls
+    agentReport.models[row.model] = (agentReport.models[row.model] || 0) + row.calls
+    agentReport.promptTokens += row.promptTokens
+    agentReport.completionTokens += row.completionTokens
+    agentReport.totalTokens += row.totalTokens
+  }
+
+  // 從 DB GROUP BY 結果中彙整 total
+  for (const agentReport of agentMap.values()) {
+    totalCalls += agentReport.callCount
+    totalPrompt += agentReport.promptTokens
+    totalCompletion += agentReport.completionTokens
+    totalTokens += agentReport.totalTokens
+  }
+
+  return {
+    from,
+    to,
+    agents: Array.from(agentMap.values()).sort((a, b) => b.totalTokens - a.totalTokens),
+    total: { callCount: totalCalls, promptTokens: totalPrompt, completionTokens: totalCompletion, totalTokens },
   }
 }
