@@ -1,8 +1,19 @@
 import type { LLMCallInfo, LLMClient, LLMUsage } from './client.js'
+import { AIError } from '@stock/core'
+
+/** primary 連續失敗達此數即短熔斷（秒鐘層級，讓備援鏈承接並節省重試時間）。 */
+const PRIMARY_SOFT_COOLDOWN_MS = 3 * 60 * 1000
+/** primary 確定性壞掉（配額封鎖／4xx 客戶端錯誤）：長熔斷，避免每個 call 白等重試。 */
+const PRIMARY_HARD_COOLDOWN_MS = 10 * 60 * 1000
+/** 觸發短熔斷所需的 primary 連續失敗次數。 */
+const PRIMARY_CONSECUTIVE_FAIL_LIMIT = 2
 
 /**
  * Chain client: tries the primary model first, then each fallback in order
  * (tier 1, tier 2, …). Only throws after every tier has been exhausted.
+ *
+ * 熔斷（互相備援）：primary 連續失敗後進入冷卻，期間直接由備援鏈承接（省去每輪
+ * 重試 dead primary 的延遲）；冷卻結束自動重新探測 primary，恢復即切回。
  */
 export class FallbackClient implements LLMClient {
   private _onCall?: (info: LLMCallInfo) => void
@@ -11,6 +22,48 @@ export class FallbackClient implements LLMClient {
 
   /** Total number of calls that fell back to a secondary model. */
   fallbackCalls = 0
+
+  private primaryFailStreak = 0
+  /** 此時間戳之前 primary 自備援鏈移除（熔斷中）。 */
+  private primarySkippedUntil = 0
+
+  /** primary 是否正在熔斷（呼叫方可用於診斷顯示）。 */
+  get primaryBlocked(): boolean {
+    return this.primarySkippedUntil > Date.now()
+  }
+
+  private buildTiers(): Array<{ client: LLMClient; usedFallback: boolean }> {
+    if (this.primaryBlocked) {
+      return this.fallbacks.map((client) => ({ client, usedFallback: true }))
+    }
+    return [
+      { client: this.primary, usedFallback: false },
+      ...this.fallbacks.map((client) => ({ client, usedFallback: true })),
+    ]
+  }
+
+  private onPrimarySuccess(): void {
+    this.primaryFailStreak = 0
+    this.primarySkippedUntil = 0
+  }
+
+  private onPrimaryFailure(err: unknown): void {
+    const msg = String((err as Error)?.message ?? err)
+    const isHard =
+      (err instanceof AIError && err.retryable === false) || /API 4\d\d/.test(msg)
+    this.primaryFailStreak += 1
+    const cooldown = isHard
+      ? PRIMARY_HARD_COOLDOWN_MS
+      : this.primaryFailStreak >= PRIMARY_CONSECUTIVE_FAIL_LIMIT
+        ? PRIMARY_SOFT_COOLDOWN_MS
+        : 0
+    if (cooldown > 0) {
+      this.primarySkippedUntil = Date.now() + cooldown
+      console.warn(
+        `[Fallback] primary ${this.primary.model} 熔斷 ${Math.round(cooldown / 1000)}s，暫由備援鏈接手（streak=${this.primaryFailStreak}, hard=${isHard}）`,
+      )
+    }
+  }
 
   constructor(
     private primary: LLMClient,
@@ -65,14 +118,12 @@ export class FallbackClient implements LLMClient {
   }
 
   private async tryChain<T>(fn: (c: LLMClient) => Promise<T>): Promise<T> {
-    const tiers: Array<{ client: LLMClient; usedFallback: boolean }> = [
-      { client: this.primary, usedFallback: false },
-      ...this.fallbacks.map((client) => ({ client, usedFallback: true })),
-    ]
+    const tiers = this.buildTiers()
     const errors: string[] = []
     for (const tier of tiers) {
       try {
         const out = await fn(tier.client)
+        if (tier.client === this.primary) this.onPrimarySuccess()
         this.report(tier.client.model, tier.usedFallback)
         if (tier.usedFallback) this.fallbackCalls++
         return out
@@ -80,6 +131,7 @@ export class FallbackClient implements LLMClient {
         errors.push(`${tier.client.model}: ${err.message}`)
         if (tier.usedFallback) this.fallbackCalls++
         console.warn(`[Fallback] ${tier.client.model} failed: ${err.message}`)
+        if (tier.client === this.primary) this.onPrimaryFailure(err)
       }
     }
     throw new Error(`All LLM models exhausted — ${errors.join('; ')}`)
@@ -94,10 +146,7 @@ export class FallbackClient implements LLMClient {
   }
 
   async generateWithImage(systemPrompt: string, userPrompt: string, imageDataUrl: string): Promise<string> {
-    const tiers: Array<{ client: LLMClient; usedFallback: boolean }> = [
-      { client: this.primary, usedFallback: false },
-      ...this.fallbacks.map((client) => ({ client, usedFallback: true })),
-    ]
+    const tiers = this.buildTiers()
     const errors: string[] = []
     for (const tier of tiers) {
       if (!tier.client.generateWithImage) {
@@ -106,6 +155,7 @@ export class FallbackClient implements LLMClient {
       }
       try {
         const out = await tier.client.generateWithImage(systemPrompt, userPrompt, imageDataUrl)
+        if (tier.client === this.primary) this.onPrimarySuccess()
         this.report(tier.client.model, tier.usedFallback)
         if (tier.usedFallback) this.fallbackCalls++
         return out
@@ -113,6 +163,7 @@ export class FallbackClient implements LLMClient {
         errors.push(`${tier.client.model}: ${err.message}`)
         if (tier.usedFallback) this.fallbackCalls++
         console.warn(`[Fallback] ${tier.client.model} image call failed: ${err.message}`)
+        if (tier.client === this.primary) this.onPrimaryFailure(err)
       }
     }
     throw new Error(`All LLM models exhausted for image — ${errors.join('; ')}`)

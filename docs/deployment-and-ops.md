@@ -21,14 +21,15 @@
 | :--- | :--- | :--- |
 | `AZURE_CREDENTIALS` | Azure 服務主體 JSON（由 `az ad sp create-for-rbac` 產生） | —（供部署工作流程登入） |
 | `OPENAI_API_KEY` | 主要 LLM 服務的金鑰 | `OPENAI_API_KEY` |
-| `FALLBACK_DEEP_LLM_BACKEND_URL` | 備援推理模型之 Base URL（如 Groq） | `FALLBACK_DEEP_LLM_BACKEND_URL` |
-| `FALLBACK_DEEP_LLM_API_KEY` | 備援推理模型之 API Key | `FALLBACK_DEEP_LLM_API_KEY` |
-| `FALLBACK_QUICK_LLM_BACKEND_URL`| 備援快速摘要模型之 Base URL | `FALLBACK_QUICK_LLM_BACKEND_URL` |
-| `FALLBACK_QUICK_LLM_API_KEY` | 備援快速摘要模型之 API Key | `FALLBACK_QUICK_LLM_API_KEY` |
-| `FALLBACK2_DEEP_LLM_BACKEND_URL` | 第三層備援（tier2）推理模型之 Base URL | `FALLBACK2_DEEP_LLM_BACKEND_URL` |
-| `FALLBACK2_DEEP_LLM_API_KEY` | 第三層備援推理模型之 API Key | `FALLBACK2_DEEP_LLM_API_KEY` |
-| `FALLBACK2_QUICK_LLM_BACKEND_URL` | 第三層備援快速摘要模型之 Base URL | `FALLBACK2_QUICK_LLM_BACKEND_URL` |
-| `FALLBACK2_QUICK_LLM_API_KEY` | 第三層備援快速摘要模型之 API Key | `FALLBACK2_QUICK_LLM_API_KEY` |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini API Key（Google AI Studio 申請，tier1 備援） | `GOOGLE_GENERATIVE_AI_API_KEY` |
+| `FALLBACK_DEEP_LLM_BACKEND_URL` | ~~tier1 OpenAI 相容後端~~（tier1 已改用 Gemini，停用留作回退） | `FALLBACK_DEEP_LLM_BACKEND_URL`（部署時設為空） |
+| `FALLBACK_DEEP_LLM_API_KEY` | ~~tier1 推理 API Key~~（同上，停用） | `FALLBACK_DEEP_LLM_API_KEY`（空） |
+| `FALLBACK_QUICK_LLM_BACKEND_URL`| ~~tier1 快速模型後端~~（同上，停用） | `FALLBACK_QUICK_LLM_BACKEND_URL`（空） |
+| `FALLBACK_QUICK_LLM_API_KEY` | ~~tier1 快速模型 API Key~~（同上，停用） | `FALLBACK_QUICK_LLM_API_KEY`（空） |
+| `FALLBACK2_DEEP_LLM_BACKEND_URL` | 第二層備援（tier2）推理模型之 Base URL（保留 qwen 後端） | `FALLBACK2_DEEP_LLM_BACKEND_URL` |
+| `FALLBACK2_DEEP_LLM_API_KEY` | 第二層備援推理模型之 API Key | `FALLBACK2_DEEP_LLM_API_KEY` |
+| `FALLBACK2_QUICK_LLM_BACKEND_URL` | 第二層備援快速摘要模型之 Base URL | `FALLBACK2_QUICK_LLM_BACKEND_URL` |
+| `FALLBACK2_QUICK_LLM_API_KEY` | 第二層備援快速摘要模型之 API Key | `FALLBACK2_QUICK_LLM_API_KEY` |
 | `DATABASE_URL` | Azure SQL Server 連線字串（若留空則使用 SQLite） | `DATABASE_URL` |
 | `SYNC_TOKEN` | 內部安全更新端點的 Bearer 驗證金鑰（需 ≥16 字元） | `SYNC_TOKEN` |
 | `AUTH_SECRET` | 登入 Session JWT 簽章密鑰（由 `openssl rand -base64 32` 產生） | `AUTH_SECRET` |
@@ -57,6 +58,8 @@
 | `ARENA_CRON_ENABLED` | `true`＝啟用 in-process 台灣時間競技場排程（主要時鐘） |
 | `LLM_DISABLE_THINKING` / `LLM_TIMEOUT_MS` / `LLM_MAX_TOKENS` | LLM 推理參數調校（`true` / `180000` / `8192`） |
 | `ANALYZE_MAX_TOKENS` | 分析輸出 token 上限（`2048`） |
+
+> **LLM 互相備援鏈（deploy.yml 硬編）**：主要 `openai`（`big-pickle`，`LLM_BACKEND_URL=https://opencode.ai/zen/v1`）→ tier1 `google`（`gemini-2.5-flash`，key 走 `GOOGLE_GENERATIVE_AI_API_KEY`）→ tier2 `openai`（`qwen/qwen3.8-27b`，`FALLBACK2_*` 後端）。任一生產商故障時自動切下一層接手；primary 連續失敗會進入熔斷冷卻（短 3 分鐘／確定性壞 10 分鐘）直接由備援承接，冷卻結束自動重探、恢復即切回（對應 `packages/ai-engine/src/llm/fallback-client.ts` 的 `FallbackClient`）。
 
 > 註：`AUTH_BASE_URL` 在部署工作流程中已固定為 `https://vestential.com`，無需重複設定。
 >
