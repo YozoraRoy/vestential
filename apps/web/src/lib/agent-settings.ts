@@ -56,7 +56,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<string, AgentSettingMeta> = {
   'social.ig_max_chars': {
     category: 'social',
     label: 'IG 上限字數',
-    defaultValue: '2200',
+    defaultValue: '500',
     editable: false,
     help: 'Instagram 平台文案上限，為硬性限制，不可調整。',
   },
@@ -70,7 +70,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<string, AgentSettingMeta> = {
   'social.fb_max_chars': {
     category: 'social',
     label: 'Facebook 上限字數',
-    defaultValue: '2200',
+    defaultValue: '500',
     editable: false,
     help: 'Facebook 平台文案上限，為硬性限制，不可調整。',
   },

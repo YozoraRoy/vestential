@@ -21,9 +21,9 @@ interface DryRunResult {
 
 type SocialPlatform = 'instagram' | 'threads' | 'facebook'
 
-const IG_LIMIT = 2200
+const IG_LIMIT = 500
 const TH_LIMIT = 500
-const FB_LIMIT = 2200
+const FB_LIMIT = 500
 
 const BG_PRESET_OPTIONS = [
   { id: 'auto', label: '🤖 AI 智能匹配新聞' },
