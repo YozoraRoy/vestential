@@ -348,6 +348,7 @@ export interface Dict {
     analyzing: string
     done: string
     disabled: string
+    failed: string
   }
   analyzePage: {
     statMarkets: string
@@ -385,6 +386,12 @@ export interface Dict {
     rateLimitError: string
     llmRateLimited: string
     deleteFailed: string
+    partialComplete: string
+    continueRunning: string
+    agentFailed: string
+    agentComplete: string
+    resumingAnalysis: string
+    jobPartial: string
   }
   errorPage: {
     title: string

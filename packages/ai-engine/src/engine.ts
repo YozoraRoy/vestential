@@ -16,7 +16,6 @@ import { LLMUsageTracker } from './llm/usage.js'
 import type { LLMClient } from './llm/client.js'
 import type { TokenUsageSummary, AgentUsage } from './llm/usage.js'
 import { logLlmUsage } from '@stock/database'
-import { WorkflowGraph } from './graph/workflow.js'
 import { MemoryLog } from './graph/memory.js'
 import { Reflector } from './graph/reflection.js'
 import { SignalProcessor } from './graph/signal.js'
@@ -59,12 +58,42 @@ async function resolveSymbol(rawTicker: string): Promise<string> {
 
 export type ProgressCallback = (step: string, detail: string) => void
 
+/** 每個 Agent 完成時即時回呼；外層可立即將進度寫入 analysis_jobs。 */
+export type AgentCompleteCallback = (
+  agentName: string,
+  reportField: string,
+  content: string,
+  partialState: AnalysisState,
+) => void
+
 export interface AnalyzeOptions {
   assetType?: AssetType
   /** 分析報告輸出語言，預設 zh-TW（繁體中文 + NTD）。 */
   language?: AnalysisLanguage
   /** 僅執行指定的 Agent（節點名稱需為 AGENT_KEYS 之一）。未提供時預設全數執行。 */
   enabledAgents?: string[]
+  /** 每個 Agent 完成時即時回呼（跑多少看多少）。 */
+  onAgentComplete?: AgentCompleteCallback
+  /**
+   * 續跑：從哪個 Agent 開始（含該 Agent 本身會重跑）。
+   * 需搭配 existingState；續跑時會跳過 resolveSymbol / Data Fetcher / Early-Exit Guard。
+   */
+  resumeFrom?: string
+  /** 續跑：先前已完成的 AnalysisState 部分快照（取自 analysis_jobs.state_snapshot）。 */
+  existingState?: Partial<AnalysisState>
+}
+
+/** analyze() / resumeAnalysis() 的執行結果；失敗時仍回傳已完成的部分 state，而非直接 throw。 */
+export interface AnalyzeRunResult {
+  state: AnalysisState
+  signal: string
+  tokenUsage: TokenUsageSummary
+  /** 已成功完成的 Agent 名稱（依執行順序）。 */
+  completedAgents: string[]
+  /** 失敗的 Agent 名稱；無失敗時為 undefined。 */
+  failedAgent?: string
+  /** 失敗的錯誤訊息；無失敗時為 undefined。 */
+  error?: string
 }
 
 export interface ModelPlan {
@@ -285,10 +314,20 @@ export class TradingEngine {
     tradeDate: string,
     onProgress?: ProgressCallback,
     options: AnalyzeOptions = {},
-  ): Promise<{ state: AnalysisState; signal: string; tokenUsage: TokenUsageSummary }> {
+  ): Promise<AnalyzeRunResult> {
     this.usageTracker.reset()
-    onProgress?.('Symbol Normalizer', 'Resolving ticker symbol...')
-    const resolvedTicker = await resolveSymbol(ticker)
+
+    // ── 續跑模式：resumeFrom + existingState 已提供，跳過 resolveSymbol / Data Fetcher / Early-Exit Guard ──
+    const resumeFrom = options.resumeFrom?.trim()
+    const existingState = options.existingState
+    const isResume = !!resumeFrom && !!existingState
+    let resolvedTicker: string
+    if (isResume && existingState.ticker) {
+      resolvedTicker = existingState.ticker
+    } else {
+      onProgress?.('Symbol Normalizer', 'Resolving ticker symbol...')
+      resolvedTicker = await resolveSymbol(ticker)
+    }
 
     // 讓 LLM 重試等待時能通知前端顯示倒數
     const onRetry = (retryAfterMs: number) => onProgress?.('LLM', `retrying in ${Math.round(retryAfterMs / 1000)}s`)
@@ -296,8 +335,14 @@ export class TradingEngine {
     this.quickLLM.onRetry = onRetry
 
     const outputLanguage: AnalysisLanguage =
-      options.language ?? (this.config.outputLanguage as AnalysisLanguage) ?? DEFAULT_ANALYSIS_LANGUAGE
-    const outputInstruction = buildAnalysisLanguageInstruction(outputLanguage, this.config.twdUsdRate)
+      isResume && existingState.outputLanguage
+        ? existingState.outputLanguage
+        : options.language ??
+          (this.config.outputLanguage as AnalysisLanguage) ??
+          DEFAULT_ANALYSIS_LANGUAGE
+    const outputInstruction =
+      (isResume && existingState.outputInstruction) ||
+      buildAnalysisLanguageInstruction(outputLanguage, this.config.twdUsdRate)
 
     const requestedAgents = options.enabledAgents && options.enabledAgents.length > 0
       ? options.enabledAgents
@@ -309,77 +354,88 @@ export class TradingEngine {
       throw new Error('至少需要啟用一個 Agent 才能進行 AI 分析（目前已全部停用）。')
     }
 
+    const startIndex = isResume
+      ? Math.max(0, activeKeys.findIndex(k => k === resumeFrom))
+      : 0
+    if (isResume && (startIndex === 0 && activeKeys[0] !== resumeFrom)) {
+      throw new Error(`無法續跑：找不到 Agent「${resumeFrom}」（可能已不在啟用清單中）。`)
+    }
+    if (isResume && startIndex >= activeKeys.length) {
+      throw new Error(`無法續跑：Agent「${resumeFrom}」已是最後順位之後，沒有剩餘 Agent 可執行。`)
+    }
+
     let quoteContext = ''
     let profileContext = ''
     let historyContext = ''
     let quote: any = null
     let profile: any = null
     let assetTypeContext = ''
+    let assetType: AssetType = AssetType.Stock
 
-    try {
-      onProgress?.('Data Fetcher', `Fetching real-time quote for ${resolvedTicker}...`)
-      quote = await tools.getQuote(resolvedTicker)
-      quoteContext = `Current Price Quote for ${resolvedTicker}:
+    if (!isResume) {
+      try {
+        onProgress?.('Data Fetcher', `Fetching real-time quote for ${resolvedTicker}...`)
+        quote = await tools.getQuote(resolvedTicker)
+        quoteContext = `Current Price Quote for ${resolvedTicker}:
 - Current Price: $${quote.price}
 - Daily Volume: ${quote.volume}
 - Last Quote Timestamp: ${new Date(quote.timestamp).toISOString()}`
-    } catch (e: any) {
-      console.warn(`[TradingEngine] Failed to fetch quote for ${resolvedTicker}:`, e.message)
-    }
+      } catch (e: any) {
+        console.warn(`[TradingEngine] Failed to fetch quote for ${resolvedTicker}:`, e.message)
+      }
 
-    try {
-      onProgress?.('Data Fetcher', `Fetching company profile for ${resolvedTicker}...`)
-      profile = await tools.getProfile(resolvedTicker)
-      profileContext = `Company/Fund Profile:
+      try {
+        onProgress?.('Data Fetcher', `Fetching company profile for ${resolvedTicker}...`)
+        profile = await tools.getProfile(resolvedTicker)
+        profileContext = `Company/Fund Profile:
 - Name: ${profile.name}
 - Sector: ${profile.sector ?? 'N/A'}
 - Industry: ${profile.industry ?? 'N/A'}
 - Exchange: ${profile.exchange ?? 'N/A'}
 - Description: ${profile.description ?? 'N/A'}`
-    } catch (e: any) {
-      console.warn(`[TradingEngine] Failed to fetch profile for ${resolvedTicker}:`, e.message)
-    }
+      } catch (e: any) {
+        console.warn(`[TradingEngine] Failed to fetch profile for ${resolvedTicker}:`, e.message)
+      }
 
-    // ── 標的類型偵測（ETF / 個股 / 指數）──
-    // 從 Yahoo profile 的 quoteType 判斷（"ETF" / "EQUITY" 等）。
-    // 找不到時回退到呼叫端明確指定的 options.assetType，最後才是預設個股。
-    // 分類會以文字注入 instrumentContext，讓每個後續 Agent 都能理解這是 ETF 或個股。
-    let detectedAssetType: AssetType | null = null
-    if (profile?.quoteType) {
-      const t = String(profile.quoteType).toUpperCase()
-      if (t.includes('ETF')) detectedAssetType = AssetType.ETF
-      else if (t.includes('INDEX')) detectedAssetType = AssetType.Index
-      else detectedAssetType = AssetType.Stock
-    }
-    const assetType: AssetType = detectedAssetType ?? options.assetType ?? AssetType.Stock
-    const assetTypeLabel = assetType === AssetType.ETF ? 'ETF（指數股票型基金）' : '個股（普通股）'
-    onProgress?.('Instrument Classifier', `Detected ${resolvedTicker} as ${assetType} (${assetTypeLabel})`)
-    assetTypeContext = `INSTRUMENT TYPE: This instrument is a ${assetType} (${assetTypeLabel}).
+      // ── 標的類型偵測（ETF / 個股 / 指數）──
+      let detectedAssetType: AssetType | null = null
+      if (profile?.quoteType) {
+        const t = String(profile.quoteType).toUpperCase()
+        if (t.includes('ETF')) detectedAssetType = AssetType.ETF
+        else if (t.includes('INDEX')) detectedAssetType = AssetType.Index
+        else detectedAssetType = AssetType.Stock
+      }
+      assetType = detectedAssetType ?? options.assetType ?? AssetType.Stock
+      const assetTypeLabel = assetType === AssetType.ETF ? 'ETF（指數股票型基金）' : '個股（普通股）'
+      onProgress?.('Instrument Classifier', `Detected ${resolvedTicker} as ${assetType} (${assetTypeLabel})`)
+      assetTypeContext = `INSTRUMENT TYPE: This instrument is a ${assetType} (${assetTypeLabel}).
 - Analysts MUST treat it as a ${assetType === AssetType.ETF ? 'basket of underlying securities (ETF)' : 'single listed common stock'}.
 - ETF: no single-company financial statements / PE / PB / moat; focus on underlying index, holdings, expense ratio, premium/discount to NAV, and tracking error instead.
 - Stock: standard equity valuation (financial statements, PE/PB, moat) applies.`
 
-    // Early-Exit Guard 門禁防禦：如果即時報價與 Profile 均無法獲取，代表無效股票代號，立即中斷阻斷！
-    const hasValidQuote = quote && typeof quote.price === 'number' && quote.price > 0
-    const hasValidProfile = profile && profile.name && profile.name !== resolvedTicker
+      // Early-Exit Guard 門禁防禦：如果即時報價與 Profile 均無法獲取，代表無效股票代號，立即中斷阻斷！
+      const hasValidQuote = quote && typeof quote.price === 'number' && quote.price > 0
+      const hasValidProfile = profile && profile.name && profile.name !== resolvedTicker
 
-    if (!hasValidQuote && !hasValidProfile) {
-      throw new Error(`無法驗證股票代號 [${ticker}]。查無此股票之即時市場數據與基本面資料，已終止 AI 分析。請確認代號是否正確（例如台股 2330 / 2330.TW 或美股 AAPL）。`)
-    }
-
-    try {
-      onProgress?.('Data Fetcher', `Fetching historical charts for ${resolvedTicker}...`)
-      const history = await tools.getStockData(resolvedTicker)
-      if (history && history.length > 0) {
-        const recent = history.slice(-15)
-        historyContext = `Recent 15-day Price History (OHLCV):
-${recent.map(h => `- ${new Date(h.timestamp).toISOString().split('T')[0]}: Open $${h.open.toFixed(2)}, High $${h.high.toFixed(2)}, Low $${h.low.toFixed(2)}, Close $${h.close.toFixed(2)}, Vol ${h.volume}`).join('\n')}`
+      if (!hasValidQuote && !hasValidProfile) {
+        throw new Error(`無法驗證股票代號 [${ticker}]。查無此股票之即時市場數據與基本面資料，已終止 AI 分析。請確認代號是否正確（例如台股 2330 / 2330.TW 或美股 AAPL）。`)
       }
-    } catch (e: any) {
-      console.warn(`[TradingEngine] Failed to fetch historical data for ${resolvedTicker}:`, e.message)
+
+      try {
+        onProgress?.('Data Fetcher', `Fetching historical charts for ${resolvedTicker}...`)
+        const history = await tools.getStockData(resolvedTicker)
+        if (history && history.length > 0) {
+          const recent = history.slice(-15)
+          historyContext = `Recent 15-day Price History (OHLCV):
+${recent.map(h => `- ${new Date(h.timestamp).toISOString().split('T')[0]}: Open $${h.open.toFixed(2)}, High $${h.high.toFixed(2)}, Low $${h.low.toFixed(2)}, Close $${h.close.toFixed(2)}, Vol ${h.volume}`).join('\n')}`
+        }
+      } catch (e: any) {
+        console.warn(`[TradingEngine] Failed to fetch historical data for ${resolvedTicker}:`, e.message)
+      }
     }
 
-    const instrumentContext = `${assetTypeContext}
+    const instrumentContext = !isResume
+      ? `${assetTypeContext}
 
 The instrument to analyze is ${resolvedTicker}.
 
@@ -388,8 +444,9 @@ ${profileContext}
 ${quoteContext}
 
 ${historyContext}`
+      : (existingState.instrumentContext ?? '')
 
-    const initialState: AnalysisState = {
+    const buildInitialState = (): AnalysisState => ({
       ticker: resolvedTicker,
       tradeDate,
       assetType,
@@ -421,9 +478,12 @@ ${historyContext}`
         round: 0,
       },
       finalDecision: '',
-    }
+    })
 
-    const graph = new WorkflowGraph()
+    // 續跑：以快照覆蓋初始值（含已完成 agent 的報告內容、investDebate round/history 等）
+    const initialState: AnalysisState = isResume
+      ? { ...buildInitialState(), ...(existingState as Partial<AnalysisState>) } as AnalysisState
+      : buildInitialState()
 
     // agent 名稱 → 該 agent 產出的報告欄位（字串）；用於 fallback 時在末尾附加備援說明。
     const reportFieldByAgent: Record<string, keyof AnalysisState> = {
@@ -456,17 +516,6 @@ ${historyContext}`
       }
     }
 
-    const wrap = (name: string, fn: (s: AnalysisState) => Promise<Partial<AnalysisState>>) => {
-      return async (s: AnalysisState) => {
-        onProgress?.(name, 'running...')
-        this.usageTracker.setCurrentAgent(name)
-        const result = await fn(s)
-        appendFallbackNote(result, name, this.usageTracker.getAgent(name))
-        onProgress?.(name, 'done')
-        return result
-      }
-    }
-
     const nodeFactories: Array<[string, (s: AnalysisState) => Promise<Partial<AnalysisState>>]> = [
       ['Market Analyst', createMarketAnalyst(this.quickLLM)],
       ['Sentiment Analyst', createSentimentAnalyst(this.quickLLM)],
@@ -479,30 +528,89 @@ ${historyContext}`
     ]
 
     const activeNodes = nodeFactories.filter(([key]) => enabledSet.has(key))
+    const runNodes = activeNodes.slice(startIndex)
 
-    for (const [name, fn] of activeNodes) {
-      graph.addNode(name, wrap(name, fn))
+    // ── 依序執行（含中間節點起跑），任一 agent 失敗即停、保留已完成部分 ──
+    let state: AnalysisState = { ...initialState }
+    const completedAgents: string[] = []
+    let failedAgent: string | undefined
+    let error: string | undefined
+
+    for (const [name, fn] of runNodes) {
+      try {
+        onProgress?.(name, 'running...')
+        this.usageTracker.setCurrentAgent(name)
+        const result = await fn(state)
+        appendFallbackNote(result, name, this.usageTracker.getAgent(name))
+        state = { ...state, ...result }
+        completedAgents.push(name)
+        onProgress?.(name, 'done')
+
+        const field = reportFieldByAgent[name] ?? ''
+        const content =
+          name === 'Bull Researcher'
+            ? (result.investDebate?.currentResponse ?? '')
+            : field && typeof state[field] === 'string'
+              ? String(state[field])
+              : ''
+        options.onAgentComplete?.(name, field, content, state)
+      } catch (e: any) {
+        failedAgent = name
+        error = e?.message ?? String(e)
+        onProgress?.(name, 'failed')
+        break
+      }
     }
 
-    for (let i = 0; i < activeNodes.length - 1; i++) {
-      graph.addEdge({ from: activeNodes[i][0], to: activeNodes[i + 1][0] })
-    }
-    graph.addEdge({ from: activeNodes[activeNodes.length - 1][0], to: '__end__' })
-
-    graph.setEntryPoint(activeNodes[0][0])
-
-    const finalState = await graph.execute(initialState)
-    const signal = this.signalProcessor.process(finalState.finalDecision)
+    const signal = this.signalProcessor.process(state.finalDecision)
     const tokenUsage = this.usageTracker.getSummary()
 
-    await this.memory.store({
-      ticker,
-      date: tradeDate,
-      rating: signal,
-      decision: finalState.finalDecision,
-      pending: true,
-    })
+    if (!failedAgent) {
+      await this.memory.store({
+        ticker,
+        date: tradeDate,
+        rating: signal,
+        decision: state.finalDecision,
+        pending: true,
+      })
+    }
 
-    return { state: finalState, signal, tokenUsage }
+    const result: AnalyzeRunResult = { state, signal, tokenUsage, completedAgents }
+    if (failedAgent) {
+      result.failedAgent = failedAgent
+      result.error = error
+    }
+    return result
+  }
+
+  /**
+   * 續跑分析：從 analysis_jobs 讀出的 job 資料續跑剩餘 agent。
+   * 跳過 resolveSymbol / Data Fetcher / Early-Exit Guard（context 已在 job 快照中），
+   * 續跑不再重算已完成 agent，也不重新計費（計費判斷由 API 層負責）。
+   */
+  async resumeAnalysis(
+    job: {
+      ticker: string
+      date: string
+      resumeFrom: string
+      existingState: Partial<AnalysisState>
+      enabledAgents: string[]
+      language?: AnalysisLanguage
+    },
+    onProgress?: ProgressCallback,
+    onAgentComplete?: AgentCompleteCallback,
+  ): Promise<AnalyzeRunResult> {
+    return this.analyze(
+      job.ticker,
+      job.date,
+      onProgress,
+      {
+        language: job.language,
+        enabledAgents: job.enabledAgents,
+        resumeFrom: job.resumeFrom,
+        existingState: job.existingState,
+        onAgentComplete,
+      },
+    )
   }
 }

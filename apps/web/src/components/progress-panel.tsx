@@ -20,9 +20,11 @@ const STEPS = [
 interface ProgressPanelProps {
   progress: { step: string; detail: string }[]
   enabledAgents?: string[]
+  /** 失敗 agent 的錯誤訊息（顯示在紅色 X 的 tooltip）。 */
+  failedAgentError?: string | null
 }
 
-export function ProgressPanel({ progress, enabledAgents }: ProgressPanelProps) {
+export function ProgressPanel({ progress, enabledAgents, failedAgentError }: ProgressPanelProps) {
   const { dict } = useI18n()
   const ui = dict.progressPanel
   const lastEvent = progress[progress.length - 1]
@@ -30,6 +32,10 @@ export function ProgressPanel({ progress, enabledAgents }: ProgressPanelProps) {
 
   const completed = new Set(
     progress.filter(e => e.detail === 'done').map(e => e.step),
+  )
+
+  const failed = new Set(
+    progress.filter(e => e.detail === 'failed').map(e => e.step),
   )
 
   const visible = useMemo(() => {
@@ -50,6 +56,7 @@ export function ProgressPanel({ progress, enabledAgents }: ProgressPanelProps) {
           const label = ui.eachAgent[key] ?? key
           const isEnabled = !enabledAgents || enabledAgents.includes(key)
           const isDone = completed.has(key)
+          const isFailed = failed.has(key)
           const isCurrent = key === currentStep
 
           if (!isEnabled) {
@@ -71,24 +78,31 @@ export function ProgressPanel({ progress, enabledAgents }: ProgressPanelProps) {
             )
           }
 
-          if (!isDone && !isCurrent && completed.size === 0) {
+          if (!isDone && !isFailed && !isCurrent && completed.size === 0 && failed.size === 0) {
             return null
           }
 
           return (
             <div
               key={key}
+              title={isFailed && failedAgentError ? failedAgentError : undefined}
               className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-300 ${
-                isCurrent
-                  ? 'bg-[var(--accent)]/10 border border-[var(--accent)]/20'
-                  : isDone
-                    ? 'opacity-80'
-                    : 'opacity-40'
+                isFailed
+                  ? 'bg-red-900/10 border border-red-500/30'
+                  : isCurrent
+                    ? 'bg-[var(--accent)]/10 border border-[var(--accent)]/20'
+                    : isDone
+                      ? 'opacity-80'
+                      : 'opacity-40'
               }`}
             >
               <div className="relative w-5 h-5 flex items-center justify-center">
                 {isCurrent ? (
                   <div className="w-2 h-2 bg-[var(--accent)] rounded-full animate-pulse" />
+                ) : isFailed ? (
+                  <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 ) : isDone ? (
                   <svg className="w-4 h-4 text-[var(--accent-green)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -97,13 +111,18 @@ export function ProgressPanel({ progress, enabledAgents }: ProgressPanelProps) {
                   <div className="w-1.5 h-1.5 bg-[var(--text-secondary)] rounded-full" />
                 )}
               </div>
-              <Icon className={`w-4 h-4 ${isCurrent ? 'text-[var(--accent)]' : ''}`} />
+              <Icon className={`w-4 h-4 ${isCurrent ? 'text-[var(--accent)]' : isFailed ? 'text-red-400' : ''}`} />
               <span className={`text-sm ${isCurrent ? 'font-semibold text-[var(--accent)]' : ''}`}>
                 {label}
               </span>
               {isCurrent && (
                 <span className="text-xs text-[var(--accent)] ml-auto animate-pulse">
                   {ui.analyzing}
+                </span>
+              )}
+              {isFailed && (
+                <span className="text-xs text-red-400 ml-auto">
+                  {ui.failed}
                 </span>
               )}
               {isDone && (

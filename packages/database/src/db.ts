@@ -500,6 +500,24 @@ CREATE TABLE IF NOT EXISTS market_focus_subscribers (
       CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage_logs(created_at);
       CREATE INDEX IF NOT EXISTS idx_llm_usage_agent ON llm_usage_logs(agent);
 
+      CREATE TABLE IF NOT EXISTS analysis_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        ticker TEXT NOT NULL,
+        date TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running',
+        enabled_agents TEXT NOT NULL DEFAULT '[]',
+        agent_states TEXT NOT NULL DEFAULT '{}',
+        state_snapshot TEXT NOT NULL DEFAULT '{}',
+        failed_agent TEXT,
+        error TEXT,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_analysis_jobs_user ON analysis_jobs(user_id);
+      CREATE INDEX IF NOT EXISTS idx_analysis_jobs_ticker ON analysis_jobs(ticker);
+      CREATE INDEX IF NOT EXISTS idx_analysis_jobs_status ON analysis_jobs(status);
+
     `)
 
     return _db
@@ -1090,6 +1108,29 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
         );
         CREATE INDEX idx_llm_usage_created ON llm_usage_logs(created_at);
         CREATE INDEX idx_llm_usage_agent ON llm_usage_logs(agent);
+      END
+    `)
+
+    await _pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'analysis_jobs')
+      BEGIN
+        CREATE TABLE analysis_jobs (
+          id             INT IDENTITY(1,1) PRIMARY KEY,
+          user_id        INT NOT NULL,
+          ticker         NVARCHAR(40) NOT NULL,
+          date           NVARCHAR(20) NOT NULL,
+          status         NVARCHAR(20) NOT NULL DEFAULT 'running',
+          enabled_agents NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+          agent_states   NVARCHAR(MAX) NOT NULL DEFAULT '{}',
+          state_snapshot NVARCHAR(MAX) NOT NULL DEFAULT '{}',
+          failed_agent   NVARCHAR(80),
+          error          NVARCHAR(MAX),
+          created_at     DATETIME2 DEFAULT GETDATE(),
+          updated_at     DATETIME2 DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_analysis_jobs_user ON analysis_jobs(user_id);
+        CREATE INDEX idx_analysis_jobs_ticker ON analysis_jobs(ticker);
+        CREATE INDEX idx_analysis_jobs_status ON analysis_jobs(status);
       END
     `)
 
@@ -1729,6 +1770,225 @@ export async function getAnalysisRecords(limit: number = 20, symbol?: string): P
     return memoryStore.filter(r => r.ticker.toUpperCase().includes(cleanSymbol)).slice(0, limit)
   }
   return memoryStore.slice(0, limit)
+}
+
+// ─── Analysis Jobs（跑多少看多少＋斷點續跑）────────────────────────
+export type AnalysisJobStatus = 'running' | 'partial' | 'completed' | 'failed'
+
+/** 單一 agent 的執行狀態（存於 analysis_jobs.agent_states JSON） */
+export interface AnalysisJobAgentState {
+  state: 'completed' | 'failed' | 'pending'
+  reportField?: string
+  content?: string
+  error?: string
+}
+
+export interface AnalysisJobRow {
+  id: number
+  user_id: number
+  ticker: string
+  date: string
+  status: AnalysisJobStatus
+  enabled_agents: string
+  agent_states: string
+  state_snapshot: string
+  failed_agent?: string | null
+  error?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface AnalysisJobInput {
+  userId: number
+  ticker: string
+  date: string
+  enabledAgents: string[]
+}
+
+export interface AnalysisJobUpdate {
+  status?: AnalysisJobStatus
+  agentStates?: Record<string, AnalysisJobAgentState>
+  stateSnapshot?: any
+  failedAgent?: string
+  error?: string
+}
+
+export async function saveAnalysisJob(job: AnalysisJobInput): Promise<number> {
+  const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19)
+  const enabledAgentsStr = JSON.stringify(job.enabledAgents ?? [])
+  let insertedId = -1
+
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('userId', sql.Int, job.userId)
+          .input('ticker', sql.NVarChar(40), job.ticker)
+          .input('date', sql.NVarChar(20), job.date)
+          .input('enabledAgents', sql.NVarChar(sql.MAX), enabledAgentsStr)
+          .query(`
+            INSERT INTO analysis_jobs (user_id, ticker, date, status, enabled_agents, agent_states, state_snapshot, created_at, updated_at)
+            VALUES (@userId, @ticker, @date, 'running', @enabledAgents, '{}', '{}', GETDATE(), GETDATE());
+            SELECT SCOPE_IDENTITY() as id
+          `)
+        insertedId = Number(result.recordset[0]?.id ?? -1)
+      } catch (e) {
+        console.error('[AzureSQL] saveAnalysisJob error:', e)
+      }
+    }
+  } else {
+    const db = getSqliteDb()
+    if (db) {
+      try {
+        const stmt = db.prepare(`
+          INSERT INTO analysis_jobs (user_id, ticker, date, status, enabled_agents, agent_states, state_snapshot, created_at, updated_at)
+          VALUES (?, ?, ?, 'running', ?, '{}', '{}', ?, ?)
+        `)
+        const info = stmt.run(job.userId, job.ticker, job.date, enabledAgentsStr, nowStr, nowStr)
+        insertedId = Number(info.lastInsertRowid)
+      } catch (e) {
+        console.error('[SQLite] saveAnalysisJob error:', e)
+      }
+    }
+  }
+
+  return insertedId > 0 ? insertedId : -1
+}
+
+export async function updateAnalysisJob(jobId: number, patch: AnalysisJobUpdate): Promise<boolean> {
+  const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19)
+  const cls: string[] = []
+  const params: any[] = []
+
+  if (patch.status !== undefined) {
+    cls.push('status = ?')
+    params.push(patch.status)
+  }
+  if (patch.agentStates !== undefined) {
+    cls.push('agent_states = ?')
+    params.push(JSON.stringify(patch.agentStates))
+  }
+  if (patch.stateSnapshot !== undefined) {
+    cls.push('state_snapshot = ?')
+    params.push(JSON.stringify(patch.stateSnapshot))
+  }
+  if (patch.failedAgent !== undefined) {
+    cls.push('failed_agent = ?')
+    params.push(patch.failedAgent)
+  }
+  if (patch.error !== undefined) {
+    cls.push('error = ?')
+    params.push(patch.error)
+  }
+
+  if (cls.length === 0) return true
+  cls.push('updated_at = ?')
+  params.push(nowStr)
+  params.push(jobId)
+
+  const setClause = cls.join(', ')
+
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return false
+    try {
+      const req = pool.request()
+      const azureClauses: string[] = []
+      if (patch.status !== undefined) { req.input('status', sql.NVarChar(20), patch.status); azureClauses.push('status = @status') }
+      if (patch.agentStates !== undefined) { req.input('agentStates', sql.NVarChar(sql.MAX), JSON.stringify(patch.agentStates)); azureClauses.push('agent_states = @agentStates') }
+      if (patch.stateSnapshot !== undefined) { req.input('stateSnapshot', sql.NVarChar(sql.MAX), JSON.stringify(patch.stateSnapshot)); azureClauses.push('state_snapshot = @stateSnapshot') }
+      if (patch.failedAgent !== undefined) { req.input('failedAgent', sql.NVarChar(80), patch.failedAgent); azureClauses.push('failed_agent = @failedAgent') }
+      if (patch.error !== undefined) { req.input('error', sql.NVarChar(sql.MAX), patch.error); azureClauses.push('error = @error') }
+      azureClauses.push('updated_at = @updatedAt')
+      req.input('updatedAt', sql.DateTime2, new Date())
+      req.input('jobId', sql.Int, jobId)
+      await req.query(`
+        UPDATE analysis_jobs SET ${azureClauses.join(', ')} WHERE id = @jobId
+      `)
+      return true
+    } catch (e) {
+      console.error('[AzureSQL] updateAnalysisJob error:', e)
+      return false
+    }
+  }
+
+  const db = getSqliteDb()
+  if (!db) return false
+  try {
+    db.prepare(`UPDATE analysis_jobs SET ${setClause} WHERE id = ?`).run(...params)
+    return true
+  } catch (e) {
+    console.error('[SQLite] updateAnalysisJob error:', e)
+    return false
+  }
+}
+
+export async function getAnalysisJobById(jobId: number): Promise<AnalysisJobRow | null> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('jobId', sql.Int, jobId)
+          .query(`
+            SELECT id, user_id, ticker, date, status, enabled_agents, agent_states, state_snapshot, failed_agent, error, created_at, updated_at
+            FROM analysis_jobs WHERE id = @jobId
+          `)
+        const row = result.recordset[0]
+        if (row) return row as AnalysisJobRow
+      } catch (e) {
+        console.error('[AzureSQL] getAnalysisJobById error:', e)
+      }
+    }
+    return null
+  }
+
+  const db = getSqliteDb()
+  if (!db) return null
+  try {
+    const row = db.prepare(`
+      SELECT id, user_id, ticker, date, status, enabled_agents, agent_states, state_snapshot, failed_agent, error, created_at, updated_at
+      FROM analysis_jobs WHERE id = ?
+    `).get(jobId) as AnalysisJobRow | undefined
+    return row ?? null
+  } catch (e) {
+    console.error('[SQLite] getAnalysisJobById error:', e)
+    return null
+  }
+}
+
+export async function listAnalysisJobsByUser(userId: number, limit: number = 20): Promise<AnalysisJobRow[]> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('userId', sql.Int, userId)
+          .input('limit', sql.Int, limit)
+          .query(`
+            SELECT TOP (@limit) id, user_id, ticker, date, status, enabled_agents, agent_states, state_snapshot, failed_agent, error, created_at, updated_at
+            FROM analysis_jobs WHERE user_id = @userId ORDER BY id DESC
+          `)
+        return (result.recordset ?? []) as AnalysisJobRow[]
+      } catch (e) {
+        console.error('[AzureSQL] listAnalysisJobsByUser error:', e)
+      }
+    }
+    return []
+  }
+
+  const db = getSqliteDb()
+  if (!db) return []
+  try {
+    return db.prepare(`
+      SELECT id, user_id, ticker, date, status, enabled_agents, agent_states, state_snapshot, failed_agent, error, created_at, updated_at
+      FROM analysis_jobs WHERE user_id = ? ORDER BY id DESC LIMIT ?
+    `).all(userId, limit) as AnalysisJobRow[]
+  } catch (e) {
+    console.error('[SQLite] listAnalysisJobsByUser error:', e)
+    return []
+  }
 }
 
 // ─── Portfolio Records ───────────────────────────────────────────

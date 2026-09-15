@@ -2,12 +2,13 @@
 
 import { useState, useRef, useCallback, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { BarChart3, Brain, Search as SearchIcon, Clock, History, FileText, ChevronRight, Target, RefreshCw, Trash2, Zap } from 'lucide-react'
+import { BarChart3, Brain, Search as SearchIcon, Clock, History, FileText, ChevronRight, Target, RefreshCw, Trash2, Zap, AlertTriangle } from 'lucide-react'
 import { AGENT_KEYS, type AnalysisLanguage } from '@stock/core'
 import { SearchBar } from '@/components/search-bar'
 import { AnalysisCard } from '@/components/analysis-card'
 import { ProgressPanel } from '@/components/progress-panel'
 import { AnalysisOptions } from '@/components/analysis-options'
+import { AgentReportSection, REPORT_FIELD_TO_AGENT } from '@/components/agent-report-section'
 import { useI18n } from '@/i18n/LanguageProvider'
 import { localizePath } from '@/i18n/paths'
 import type { Dict } from '@/i18n/dictionaries'
@@ -51,6 +52,9 @@ function AnalyzeContent() {
   const [enabledAgents, setEnabledAgents] = useState<string[]>([...AGENT_KEYS])
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null)
   const [assetType, setAssetType] = useState<string | null>(null)
+  const [liveReports, setLiveReports] = useState<Record<string, { agent: string; content: string }>>({})
+  const [jobId, setJobId] = useState<number | null>(null)
+  const [partialError, setPartialError] = useState<{ agent: string; error: string } | null>(null)
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -85,8 +89,6 @@ function AnalyzeContent() {
     }
   }, [router])
 
-  // 從 model_usage JSON 計算該筆分析消耗的總 token 數
-  // 舊紀錄 model_usage 可能為空，但完整報告內可能存有 tokenUsage，一併回退讀取
   const getRecordTokens = (record: AnalysisRecord): number | null => {
     if (record.model_usage) {
       try {
@@ -105,6 +107,14 @@ function AnalyzeContent() {
       if (typeof total === 'number' && total > 0) return total
     } catch {}
     return null
+  }
+
+  /** 判斷歷史分析紀錄是否為部分完成（full_report_json 內含 status: 'partial'）。 */
+  const isPartialRecord = (record: AnalysisRecord): boolean => {
+    try {
+      const report = JSON.parse(record.full_report_json) as { status?: string }
+      return report?.status === 'partial'
+    } catch { return false }
   }
 
   // 讀取歷史分析紀錄 (支援傳入 symbol)
@@ -155,6 +165,65 @@ function AnalyzeContent() {
     return () => { if (retryTimerRef.current) clearInterval(retryTimerRef.current) }
   }, [retryCountdown !== null])
 
+  // 共用 SSE 消費者：解析 progress/agent_complete/partial_result/result/error 事件
+  const consumeAnalysisStream = useCallback(async (
+    res: Response,
+    onStateChange: (s: Partial<{
+      progress: { step: string; detail: string }
+      agentComplete: { agent: string; reportField: string; content: string; jobId: number }
+      partialResult: { jobId: number; failedAgent: string; error: string; reports: Record<string, string> }
+      result: any
+      error: string
+    }>) => void,
+  ) => {
+    if (!res.body) throw new Error('No response body')
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const blocks = buffer.split('\n\n')
+      buffer = blocks.pop() || ''
+
+      for (const block of blocks) {
+        const lines = block.split('\n')
+        let eventType = 'message'
+        let data = ''
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) eventType = line.slice(7)
+          else if (line.startsWith('data: ')) data = line.slice(6)
+        }
+
+        if (!data) continue
+        const parsed = JSON.parse(data)
+
+        switch (eventType) {
+          case 'progress':
+            onStateChange({ progress: parsed })
+            break
+          case 'agent_complete':
+            onStateChange({ agentComplete: parsed })
+            break
+          case 'partial_result':
+            onStateChange({ partialResult: parsed })
+            break
+          case 'result':
+            onStateChange({ result: parsed })
+            break
+          case 'error':
+            onStateChange({ error: parsed.message })
+            break
+        }
+      }
+    }
+  }, [])
+
   const handleAnalyze = useCallback(async (symbol: string) => {
     if (enabledAgents.length === 0) {
       setError(ui.minAgentError)
@@ -166,6 +235,9 @@ function AnalyzeContent() {
     setProgress([])
     setElapsed(0)
     setSelectedRecordId(null)
+    setLiveReports({})
+    setPartialError(null)
+    setJobId(null)
     timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000)
 
     const controller = new AbortController()
@@ -198,59 +270,58 @@ function AnalyzeContent() {
         throw new Error(body.error || `HTTP ${res.status}`)
       }
 
-      if (!res.body) throw new Error('No response body')
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const blocks = buffer.split('\n\n')
-        buffer = blocks.pop() || ''
-
-        for (const block of blocks) {
-          const lines = block.split('\n')
-          let eventType = 'message'
-          let data = ''
-
-          for (const line of lines) {
-            if (line.startsWith('event: ')) eventType = line.slice(7)
-            else if (line.startsWith('data: ')) data = line.slice(6)
+      await consumeAnalysisStream(res, ({ progress, agentComplete, partialResult, result, error }) => {
+        if (progress !== undefined) {
+          setProgress(prev => [...prev, progress])
+          if (progress.step === 'LLM' && typeof progress.detail === 'string') {
+            const m = progress.detail.match(/retrying in (\d+)s/)
+            if (m) setRetryCountdown(parseInt(m[1], 10))
           }
-
-          if (!data) continue
-          const parsed = JSON.parse(data)
-
-          switch (eventType) {
-            case 'progress':
-              setProgress(prev => [...prev, parsed])
-              if (parsed.step === 'LLM' && typeof parsed.detail === 'string') {
-                const m = parsed.detail.match(/retrying in (\d+)s/)
-                if (m) setRetryCountdown(parseInt(m[1], 10))
-              }
-              if (parsed.step === 'Instrument Classifier' && typeof parsed.detail === 'string') {
-                const cm = parsed.detail.match(/\bas (stock|etf|index|crypto|future)\b/i)
-                if (cm) setAssetType(cm[1].toLowerCase())
-              }
-              break
-            case 'result':
-              setAnalysis(parsed)
-              setRetryCountdown(null)
-              if (parsed.assetType) setAssetType(String(parsed.assetType).toLowerCase())
-              fetchHistory()
-              window.dispatchEvent(new Event('quota-updated'))
-              break
-            case 'error':
-              setError(formatLLMError(parsed.message, dict))
-              setRetryCountdown(null)
-              break
+          if (progress.step === 'Instrument Classifier' && typeof progress.detail === 'string') {
+            const cm = progress.detail.match(/\bas (stock|etf|index|crypto|future)\b/i)
+            if (cm) setAssetType(cm[1].toLowerCase())
           }
         }
-      }
+        if (agentComplete !== undefined) {
+          // 即時渲染該 agent 報告
+          const agentName = REPORT_FIELD_TO_AGENT[agentComplete.reportField] ?? agentComplete.agent
+          setLiveReports(prev => ({ ...prev, [agentName]: { agent: agentName, content: agentComplete.content } }))
+          if (agentComplete.jobId) setJobId(agentComplete.jobId)
+        }
+        if (partialResult !== undefined) {
+          setPartialError({ agent: partialResult.failedAgent, error: partialResult.error })
+          if (partialResult.jobId) setJobId(partialResult.jobId)
+          if (partialResult.reports) {
+            // fallback：若 agent_complete 已推送就不重複，未收到時從 reports 補齊
+            setLiveReports(prev => {
+              const next = { ...prev }
+              const mapping: Record<string, string> = {
+                market: 'Market Analyst',
+                sentiment: 'Sentiment Analyst',
+                news: 'News Analyst',
+                fundamentals: 'Fundamentals Analyst',
+              }
+              for (const [field, content] of Object.entries(partialResult.reports)) {
+                const agentName = mapping[field]
+                if (agentName && !next[agentName]) next[agentName] = { agent: agentName, content }
+              }
+              return next
+            })
+          }
+        }
+        if (result !== undefined) {
+          setAnalysis(result)
+          setRetryCountdown(null)
+          setPartialError(null)
+          if (result.assetType) setAssetType(String(result.assetType).toLowerCase())
+          fetchHistory()
+          window.dispatchEvent(new Event('quota-updated'))
+        }
+        if (error !== undefined) {
+          setError(formatLLMError(error, dict))
+          setRetryCountdown(null)
+        }
+      })
     } catch (e: any) {
       if (e.name !== 'AbortError') {
         setError(e.message)
@@ -262,7 +333,76 @@ function AnalyzeContent() {
       if (retryTimerRef.current) clearInterval(retryTimerRef.current)
       abortRef.current = null
     }
-  }, [fetchHistory, language, enabledAgents])
+  }, [fetchHistory, language, enabledAgents, ui, dict, consumeAnalysisStream])
+
+  // 斷點續跑：呼叫 /api/analyze/resume，SSE 推送與首次分析相同
+  const handleResume = useCallback(async (id: number) => {
+    setLoading(true)
+    setError(null)
+    setProgress([])
+    setElapsed(0)
+    setPartialError(null)
+    setJobId(id)
+    timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000)
+
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    try {
+      const res = await fetch('/api/analyze/resume', {
+        method: 'POST',
+        body: JSON.stringify({ jobId: id }),
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      })
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: res.statusText }))
+        if (res.status === 401) {
+          const redirectUrl = `/login?redirect=${encodeURIComponent('/analyze')}`
+          window.location.href = redirectUrl
+          return
+        }
+        throw new Error(body.error || `HTTP ${res.status}`)
+      }
+
+      await consumeAnalysisStream(res, ({ progress, agentComplete, partialResult, result, error }) => {
+        if (progress !== undefined) {
+          setProgress(prev => [...prev, progress])
+        }
+        if (agentComplete !== undefined) {
+          const agentName = REPORT_FIELD_TO_AGENT[agentComplete.reportField] ?? agentComplete.agent
+          setLiveReports(prev => ({ ...prev, [agentName]: { agent: agentName, content: agentComplete.content } }))
+          if (agentComplete.jobId) setJobId(agentComplete.jobId)
+        }
+        if (partialResult !== undefined) {
+          setPartialError({ agent: partialResult.failedAgent, error: partialResult.error })
+        }
+        if (result !== undefined) {
+          setAnalysis(result)
+          setRetryCountdown(null)
+          setPartialError(null)
+          if (result.assetType) setAssetType(String(result.assetType).toLowerCase())
+          fetchHistory()
+          window.dispatchEvent(new Event('quota-updated'))
+        }
+        if (error !== undefined) {
+          setError(formatLLMError(error, dict))
+          setRetryCountdown(null)
+        }
+      })
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        setError(e.message)
+      }
+    } finally {
+      setLoading(false)
+      setRetryCountdown(null)
+      if (timerRef.current) clearInterval(timerRef.current)
+      if (retryTimerRef.current) clearInterval(retryTimerRef.current)
+      abortRef.current = null
+    }
+  }, [fetchHistory, dict, consumeAnalysisStream])
 
   const handleToggleAgent = useCallback((key: string) => {
     setEnabledAgents(prev =>
@@ -390,13 +530,24 @@ function AnalyzeContent() {
       />
 
       <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {loading && (
+        {(loading || partialError) && (
           <div className="lg:col-span-1">
-            <ProgressPanel progress={progress} enabledAgents={enabledAgents} />
+            <ProgressPanel
+              progress={progress}
+              enabledAgents={enabledAgents}
+              failedAgentError={partialError?.error ?? null}
+            />
+            {Object.values(liveReports).length > 0 && (
+              <div className="mt-4 space-y-4">
+                {Object.values(liveReports).map(({ agent, content }) => (
+                  <AgentReportSection key={agent} agent={agent} content={content} />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
-        <div className={loading ? 'lg:col-span-2' : 'lg:col-span-3'}>
+        <div className={(loading || partialError) ? 'lg:col-span-2' : 'lg:col-span-3'}>
           {loading && (
             <div className="bg-[var(--bg-card)] rounded-xl p-4 border border-white/5 mb-6">
               {retryCountdown !== null ? (
@@ -450,6 +601,34 @@ function AnalyzeContent() {
           {error && (
             <div className="bg-red-900/20 border border-red-500/30 rounded-xl p-4 text-red-400 text-sm">
               {ui.errorPrefix}{error}
+            </div>
+          )}
+
+          {!error && partialError && jobId !== null && (
+            <div className="bg-red-900/20 border border-red-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle className="w-4 h-4 text-red-400" />
+                <span className="text-sm font-medium text-red-400">
+                  {ui.agentFailed}：{partialError.agent}
+                </span>
+              </div>
+              <div className="text-xs text-red-400/80 mb-1">
+                {ui.partialComplete}
+              </div>
+              <div className="text-xs text-[var(--text-secondary)] mb-3 break-all">
+                {partialError.error}
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() => handleResume(jobId)}
+                  disabled={loading}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--accent)] text-white font-medium text-xs hover:opacity-90 transition disabled:opacity-50"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  {ui.continueRunning}
+                </button>
+                {/* 續跑沿用已完成的報告，不重算不重計費 */}
+              </div>
             </div>
           )}
         </div>
@@ -522,6 +701,11 @@ function AnalyzeContent() {
                   <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4 text-[var(--text-secondary)]" />
                     <span className="font-bold text-lg">{record.ticker}</span>
+                    {isPartialRecord(record) && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                        {ui.jobPartial}
+                      </span>
+                    )}
                   </div>
                   <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${getRecommendationBadge(record.recommendation)}`}>
                     {record.recommendation}

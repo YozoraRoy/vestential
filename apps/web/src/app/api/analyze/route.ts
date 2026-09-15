@@ -1,5 +1,5 @@
 import { TradingEngine } from '@stock/ai-engine'
-import { saveAnalysisRecord, consumeAnalysisQuota } from '@stock/database'
+import { saveAnalysisJob, consumeAnalysisQuota } from '@stock/database'
 import {
   DEFAULT_ANALYSIS_LANGUAGE,
   AGENT_KEYS,
@@ -7,6 +7,7 @@ import {
   type AnalysisLanguage,
 } from '@stock/core'
 import { DAILY_ANALYSIS_LIMIT, getCurrentUserFromCookies, getTaiwanDateStr } from '../../../lib/auth'
+import { runAnalysisStream } from './run-analysis'
 
 let _engine: TradingEngine | null = null
 let _engineError: string | null = null
@@ -49,6 +50,7 @@ export async function POST(req: Request) {
       return new Response(JSON.stringify({ error: 'login required' }), { status: 401, headers: { 'Content-Type': 'application/json' } })
     }
 
+    // Quota 扣除時機：僅首次執行扣額度（續跑走 /api/analyze/resume，不重扣）。
     const quota = await consumeAnalysisQuota(user.id, getTaiwanDateStr(), DAILY_ANALYSIS_LIMIT)
     if (!quota.allowed) {
       return new Response(
@@ -69,6 +71,14 @@ export async function POST(req: Request) {
       return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
 
+    // 先建 job 再開始串流：失敗/中斷時可從 analysis_jobs 續跑
+    const jobId = await saveAnalysisJob({
+      userId: user.id,
+      ticker: symbol,
+      date: date ?? new Date().toISOString().split('T')[0],
+      enabledAgents,
+    })
+
     const stream = new ReadableStream({
       async start(controller) {
         const send = (event: string, data: any) => {
@@ -76,49 +86,23 @@ export async function POST(req: Request) {
         }
 
         try {
-          const { state, signal, tokenUsage } = await engine.analyze(
-            symbol,
-            date ?? new Date().toISOString().split('T')[0],
-            (step: string, detail: string) => send('progress', { step, detail }),
-            { language: outputLanguage, enabledAgents },
-          )
-
-          const modelPlan = engine.getModelPlan()
-          const resultPayload = {
-            signal,
-            decision: state.finalDecision,
-            tokenUsage,
-            modelPlan,
+          const tradeDate = date ?? new Date().toISOString().split('T')[0]
+          await runAnalysisStream({
+            engine,
+            ticker: symbol,
+            date: tradeDate,
             language: outputLanguage,
             enabledAgents,
-            assetType: state.assetType,
-            reports: {
-              market: state.marketReport,
-              sentiment: state.sentimentReport,
-              news: state.newsReport,
-              fundamentals: state.fundamentalsReport,
-            },
-          }
-
-          const fallbackCount = tokenUsage.agents.reduce((n, a) => n + (a.fallbackCalls ?? 0), 0)
-
-          try {
-            const decisionObj = typeof state.finalDecision === 'object' ? state.finalDecision : {}
-            await saveAnalysisRecord({
-              ticker: symbol,
-              recommendation: signal || (decisionObj as any)?.rating || (decisionObj as any)?.final_decision || 'Hold',
-              summary: (decisionObj as any)?.investmentThesis || (decisionObj as any)?.rationale || (typeof state.finalDecision === 'string' ? state.finalDecision : ''),
-              fullReport: resultPayload,
-              modelUsage: JSON.stringify(tokenUsage.agents),
-              primaryModels: JSON.stringify(modelPlan),
-              fallbackUsed: fallbackCount > 0,
-              fallbackCount,
-            })
-          } catch (dbErr) {
-            console.error('[API/Analyze] Failed to save analysis record to DB:', dbErr)
-          }
-
-          send('result', resultPayload)
+            jobId,
+            send,
+            run: (onProgress, onAgentComplete) =>
+              engine.analyze(
+                symbol,
+                tradeDate,
+                onProgress,
+                { language: outputLanguage, enabledAgents, onAgentComplete },
+              ),
+          })
         } catch (e: any) {
           send('error', { message: e.message })
         } finally {

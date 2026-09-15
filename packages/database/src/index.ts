@@ -39,8 +39,9 @@ export {
   countMarketFocusSubscribers,
   logLlmUsage,
   getLlmUsageReport,
+  saveAnalysisJob, updateAnalysisJob, getAnalysisJobById, listAnalysisJobsByUser,
 } from './db.js'
-export type { AnalysisRecord, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta, MarketFocusLogRow, MarketFocusLogInput,
+export type { AnalysisRecord, AnalysisJobRow, AnalysisJobInput, AnalysisJobUpdate, AnalysisJobAgentState, AnalysisJobStatus, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta, MarketFocusLogRow, MarketFocusLogInput,
   ArenaSeasonRow, ArenaAgentRow, ArenaHoldingRow, ArenaTradeRow, ArenaSnapshotRow, ArenaAgentInput, ArenaLeaderboardRow,
   ArenaIntradayPriceRow, ArenaMarketBriefingRow, ArenaDecisionLogRow, ArenaDiscussionRow,
   SocialPostRow, SocialPostInput, SocialPostPlatform, SocialPostStatus,

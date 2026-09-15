@@ -393,6 +393,7 @@ export const en: Dict = {
     analyzing: 'Analyzing...',
     done: 'Done',
     disabled: 'Disabled',
+    failed: 'Failed',
   },
   analyzePage: {
     statMarkets: 'Markets',
@@ -430,6 +431,12 @@ export const en: Dict = {
     rateLimitError: 'Daily quota exhausted ({used}/3)',
     llmRateLimited: 'The AI model quota is temporarily exhausted. Please try again later (about 1 minute).',
     deleteFailed: 'Delete failed (HTTP {status})',
+    partialComplete: 'Analysis incomplete (partial)',
+    continueRunning: 'Continue',
+    agentFailed: 'This agent failed',
+    agentComplete: 'This agent is done',
+    resumingAnalysis: 'Resuming remaining agents...',
+    jobPartial: 'Partial',
   },
   errorPage: {
     title: 'Trouble loading the page',

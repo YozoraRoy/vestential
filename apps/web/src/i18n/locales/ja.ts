@@ -393,6 +393,7 @@ export const ja: Dict = {
     analyzing: 'Analyzing...',
     done: 'Done',
     disabled: '無効',
+    failed: '失敗',
   },
   analyzePage: {
     statMarkets: 'マーケット',
@@ -430,6 +431,12 @@ export const ja: Dict = {
     rateLimitError: '本日のクォータを使い切りました（{used}/3）',
     llmRateLimited: 'AI モデルのクォータが一時的に枯渇しました。少し待ってから再試行してください（約 1 分）。',
     deleteFailed: '削除に失敗しました（HTTP {status}）',
+    partialComplete: '分析未完了（部分完了）',
+    continueRunning: '続行する',
+    agentFailed: 'このエージェントは失敗しました',
+    agentComplete: 'このエージェントは完了しました',
+    resumingAnalysis: '未完了のエージェントを再開中...',
+    jobPartial: '部分完了',
   },
   errorPage: {
     title: 'ページの読み込みに一時的な問題が発生しました',

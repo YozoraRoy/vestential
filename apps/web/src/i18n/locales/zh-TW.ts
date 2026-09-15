@@ -393,6 +393,7 @@ export const zhTW: Dict = {
     analyzing: 'Analyzing...',
     done: 'Done',
     disabled: '已停用',
+    failed: '失敗',
   },
   analyzePage: {
     statMarkets: 'Markets',
@@ -430,6 +431,12 @@ export const zhTW: Dict = {
     rateLimitError: '今日額度已用完 ({used}/3)',
     llmRateLimited: 'AI 模型額度暫時用完，請稍後再試（約 1 分鐘後）',
     deleteFailed: '刪除失敗 (HTTP {status})',
+    partialComplete: '分析未完成（部分完成）',
+    continueRunning: '繼續跑',
+    agentFailed: '此 Agent 執行失敗',
+    agentComplete: '此 Agent 已完成',
+    resumingAnalysis: '正在續跑未完成的 Agent...',
+    jobPartial: '部分完成',
   },
   errorPage: {
     title: '頁面載入遇到暫時性問題',
