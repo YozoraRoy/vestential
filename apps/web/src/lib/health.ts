@@ -27,11 +27,22 @@ function toCompact(d: Date): string {
 }
 
 /**
- * 台灣時間是否尚未到「預期交易日 15:30」。
- * TW 15:30 前收盤資料尚未公布；用於將 oddlot 缺失降為 warn。
- * 以 UTC getter 計算（now + 8h 後讀 UTC 欄位），避免本機時區造成雙重偏移。
+ * odd-lot 盤後零股預期同步完成時間（台灣時間 20:10，以當日分鐘數表示）。
+ * 交叉引用 .github/workflows/sync-oddlot.yml:6：cron 宣告 `10 7 * * 1-5`
+ * （UTC 07:10 = TW 15:10）；但 GitHub Actions `schedule` 事件常有 4~5 小時
+ * 佇列延遲（cf. apps/web/src/lib/arena-scheduler.ts:5），故 de-facto
+ * 同步約在 TW 20:10 完成。未來若調整 sync-oddlot.yml 排程，須同步此常數。
  */
-function beforeTwClose(nowMs: number, expectedCompact: string): boolean {
+export const ODD_LOT_EXPECTED_SYNC_DEADLINE_TW = 20 * 60 + 10
+
+/**
+ * 台灣時間現在是否仍處「今日（＝預期交易日）」的 odd-lot 同步預期窗口。
+ * TW 20:10（de-facto 同步完成）之前，當日盤後零股尚未同步屬預期現象，
+ * 用於將 oddlot 缺失降為 warn；20:10 之後仍缺則維持 error（真警報不吞）。
+ * 以 UTC getter 計算（now + 8h 後讀 UTC 欄位），避免本機時區造成雙重偏移。
+ * 非當日一律回傳 false（跨日/非交易日不誤放）。
+ */
+export function beforeOddLotSyncDeadline(nowMs: number, expectedCompact: string): boolean {
   const tw = new Date(nowMs + 8 * 60 * 60 * 1000)
   const y = tw.getUTCFullYear()
   const m = String(tw.getUTCMonth() + 1).padStart(2, '0')
@@ -39,7 +50,7 @@ function beforeTwClose(nowMs: number, expectedCompact: string): boolean {
   const compact = `${y}${m}${d}`
   if (compact < expectedCompact) return false
   if (compact > expectedCompact) return false
-  return tw.getUTCHours() * 60 + tw.getUTCMinutes() < 15 * 60 + 30
+  return tw.getUTCHours() * 60 + tw.getUTCMinutes() < ODD_LOT_EXPECTED_SYNC_DEADLINE_TW
 }
 
 export async function runHealthChecks(): Promise<HealthReport> {
@@ -127,21 +138,21 @@ export async function runHealthChecks(): Promise<HealthReport> {
     const row = await dbQueryFirst<{ d: string | null }>('SELECT MAX(date) AS d FROM odd_lot_trades')
     checks.oddLot = { latestDate: row?.d ?? null, expectedDate: expected, expectedIso: formatDateIso(lastTradingDay) }
     if (!row?.d) {
-      const pending = beforeTwClose(now, expected)
+      const pending = beforeOddLotSyncDeadline(now, expected)
       issues.push({
         code: 'oddlot_empty',
         severity: pending ? 'warn' : 'error',
         message: pending
-          ? `odd_lot_trades 尚無資料（今日 TW 15:30 前屬預期）`
+          ? `odd_lot_trades 尚無資料（TW 15:30~20:10 屬預期，盤後零股同步中）`
           : 'odd_lot_trades 完全沒有資料',
       })
     } else if (row.d < expected) {
-      const pending = beforeTwClose(now, expected)
+      const pending = beforeOddLotSyncDeadline(now, expected)
       issues.push({
         code: 'oddlot_stale',
         severity: pending ? 'warn' : 'error',
         message: pending
-          ? `odd_lot 最新交易日 ${row.d}，今日 ${expected} 收盤資料尚未公布（TW 15:30 前屬預期）`
+          ? `odd_lot 最新交易日 ${row.d}，今日 ${expected} 收盤資料尚未公布（TW 15:30~20:10 屬預期，盤後零股同步中）`
           : `odd_lot 最新交易日 ${row.d} 早於最近交易日 ${expected}`,
       })
     }
