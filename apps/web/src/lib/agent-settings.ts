@@ -31,8 +31,8 @@ export const DEFAULT_AGENT_SETTINGS: Record<string, AgentSettingMeta> = {
   'market_focus.summary_max_tokens': {
     category: 'market-focus',
     label: '每日總覽 max_tokens',
-    defaultValue: '2048',
-    help: '生成每日總覽時 LLM 的 token 上限。',
+    defaultValue: '1000',
+    help: '生成每日總覽時 LLM 的 token 上限。超過 1000 會使 Groq qwen 備援 429 而 fallback，請勿調高。',
   },
   // 社群小編
   'social.ig_prompt': {

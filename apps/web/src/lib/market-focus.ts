@@ -1,5 +1,5 @@
 import { load } from 'cheerio'
-import { createQuickLLM } from '@stock/ai-engine'
+import { createQuickLLM, FALLBACK_SAFE_MAX_TOKENS, chunkByOutputBudget, mergeChunkEntries } from '@stock/ai-engine'
 import { loadConfig } from '@stock/core'
 import { getAgentSetting } from '@stock/database'
 import type { MarketFocusItem } from '@stock/database'
@@ -343,7 +343,7 @@ export async function generateDailySummary(items: MarketFocusItem[]): Promise<st
     const config = loadConfig()
     // 透過 createQuickLLM 帶上 fallback chain:primary(OpenAI)被配額 429 封鎖時自動切換備援模型
     const rawToken = (await getAgentSetting('market_focus.summary_max_tokens')) ?? ''
-    const maxTokens = (rawToken && Number(rawToken) > 0 && Number(rawToken)) || 2048
+    const maxTokens = Number(rawToken) > 0 ? Math.min(Number(rawToken), FALLBACK_SAFE_MAX_TOKENS) : FALLBACK_SAFE_MAX_TOKENS
     const { llm } = createQuickLLM(config, { maxTokens })
     attachLlmUsageRecorder(llm, 'market-focus.summary')
     const promptOverride = (await getAgentSetting('market_focus.summary_prompt')) ?? ''
@@ -421,7 +421,7 @@ export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<Marke
   let threw = false
   try {
     const config = loadConfig()
-    const { llm } = createQuickLLM(config, { maxTokens: 2048 })
+    const { llm } = createQuickLLM(config, { maxTokens: FALLBACK_SAFE_MAX_TOKENS })
     attachLlmUsageRecorder(llm, 'market-focus.filter')
     const rawCount = (await getAgentSetting('market_focus.select_count')) ?? ''
     const selectCount = (rawCount && Number(rawCount) > 0 && Number(rawCount)) || 10
@@ -497,28 +497,55 @@ export async function generateArticleSummaries(
   if (items.length === 0) return []
   try {
     const config = loadConfig()
-    const { llm } = createQuickLLM(config, { maxTokens: 1800 })
+    const { llm } = createQuickLLM(config, { maxTokens: FALLBACK_SAFE_MAX_TOKENS })
     attachLlmUsageRecorder(llm, 'market-focus.article-summaries')
-    const promptList = items
-      .map((it, idx) => {
-        const textSnippet = it.content ? it.content.slice(0, 350).replace(/\s+/g, ' ').trim() : '（無正文）'
-        return `[新聞 ${idx}] 標題：${it.title}\n來源：${it.source ?? '未知'}\n選取理由：${it.reason ?? '無'}\n正文摘錄：${textSnippet}`
-      })
-      .join('\n\n')
 
-    const raw = await llm.generate(
-      ARTICLE_SUMMARIES_SYSTEM_PROMPT,
-      `請為以下 ${items.length} 則新聞分別產出說人話重點摘要：\n\n${promptList}`,
-    )
-    const cleaned = raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()
-    const parsed = JSON.parse(cleaned) as { summaries?: { index: number; summary: string }[] }
     const summaryMap = new Map<number, string>()
-    if (Array.isArray(parsed?.summaries)) {
-      for (const entry of parsed.summaries) {
-        if (typeof entry.index === 'number' && typeof entry.summary === 'string' && entry.summary.trim()) {
-          summaryMap.set(entry.index, entry.summary.trim())
+    // 每批輸出估算：180 字 × 1.5 ≈270 token/則（不含 JSON overhead，故直接以 270/則保守估算）；
+    // budget=850、baseOverhead=40 ⇒ 每批最多 3 則（270×3+40=850 ≤850，遠低於 1000 硬上限）：
+    // 12 則 ⇒ 4 批（≥3 批）、40 則 ⇒ 14 批（≥8 批），皆滿足驗收批數。
+    const chunks = chunkByOutputBudget(
+      items,
+      850,
+      () => 270,
+      40,
+    )
+    let chunkStartIndex = 0
+    for (const chunk of chunks) {
+      const promptList = chunk
+        .map((it, idx) => {
+          const textSnippet = it.content ? it.content.slice(0, 350).replace(/\s+/g, ' ').trim() : '（無正文）'
+          return `[新聞 ${idx}] 標題：${it.title}\n來源：${it.source ?? '未知'}\n選取理由：${it.reason ?? '無'}\n正文摘錄：${textSnippet}`
+        })
+        .join('\n\n')
+      try {
+        const raw = await llm.generate(
+          ARTICLE_SUMMARIES_SYSTEM_PROMPT,
+          `請為以下 ${chunk.length} 則新聞分別產出說人話重點摘要：\n\n${promptList}`,
+        )
+        const cleaned = raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()
+        const parsed = JSON.parse(cleaned) as { summaries?: { index: number; summary: string }[] }
+        const entries: { index: number; value: string }[] = []
+        if (Array.isArray(parsed?.summaries)) {
+          for (const entry of parsed.summaries) {
+            if (typeof entry.index === 'number' && typeof entry.summary === 'string') {
+              entries.push({ index: entry.index, value: entry.summary })
+            }
+          }
         }
+        mergeChunkEntries(summaryMap, entries, chunkStartIndex)
+      } catch (e) {
+        // 單批失敗只退該批（空白 → 下方既有 `核心重點：reason` 兜底），其餘批次照常合併
+        console.error(`[MarketFocus] article summary chunk failed (batch start=${chunkStartIndex}, size=${chunk.length}), skipping batch:`, e)
+        await logMarketFocusEvent({
+          source: 'article_summary',
+          level: 'error',
+          code: 'LLM_FALLBACK',
+          message: `逐則新聞摘要批次失敗（第 ${chunkStartIndex + 1} 起 ${chunk.length} 則），僅退回該批精選理由短述`,
+          detail: formatErrorDetail(e),
+        })
       }
+      chunkStartIndex += chunk.length
     }
 
     return items.map((it, idx) => {
@@ -588,30 +615,57 @@ export async function backfillMissingReasons(): Promise<number> {
     const gaps = recent.filter((it) => !it.reason)
     if (gaps.length === 0) return 0
     const config = loadConfig()
-    const { llm } = createQuickLLM(config, { maxTokens: 1200 })
+    const { llm } = createQuickLLM(config, { maxTokens: FALLBACK_SAFE_MAX_TOKENS })
     attachLlmUsageRecorder(llm, 'market-focus.backfill-reasons')
-    const list = gaps
-      .map(
-        (it, idx) =>
-          `[${idx}] 標題：${it.title}\n來源：${it.source ?? '未知'}${it.summary ? `\n摘要：${it.summary.slice(0, 200)}` : ''}`,
-      )
-      .join('\n\n')
-    const raw = await llm.generate(
-      BACKFILL_REASON_SYSTEM_PROMPT,
-      `請為以下 ${gaps.length} 則新聞補上價值投資遴選原因：\n\n${list}`,
+
+    // 每批輸出估算：30 字 × 1.5 + JSON ≈67/則，budget 850 下 ~12 則/批 → 40 則 ≥3 批
+    const chunks = chunkByOutputBudget(
+      gaps,
+      850,
+      () => 67,
+      40,
     )
-    const cleaned = raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()
-    const parsed = JSON.parse(cleaned) as { reasons?: { index: number; reason: string }[] }
-    const map = new Map<number, string>()
-    if (Array.isArray(parsed?.reasons)) {
-      for (const e of parsed.reasons) {
-        if (typeof e.index === 'number' && typeof e.reason === 'string' && e.reason.trim()) {
-          map.set(e.index, e.reason.trim())
+    const reasonMap = new Map<number, string>()
+    let chunkStartIndex = 0
+    for (const chunk of chunks) {
+      const list = chunk
+        .map(
+          (it, idx) =>
+            `[${idx}] 標題：${it.title}\n來源：${it.source ?? '未知'}${it.summary ? `\n摘要：${it.summary.slice(0, 200)}` : ''}`,
+        )
+        .join('\n\n')
+      try {
+        const raw = await llm.generate(
+          BACKFILL_REASON_SYSTEM_PROMPT,
+          `請為以下 ${chunk.length} 則新聞補上價值投資遴選原因：\n\n${list}`,
+        )
+        const cleaned = raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()
+        const parsed = JSON.parse(cleaned) as { reasons?: { index: number; reason: string }[] }
+        const entries: { index: number; value: string }[] = []
+        if (Array.isArray(parsed?.reasons)) {
+          for (const e of parsed.reasons) {
+            if (typeof e.index === 'number' && typeof e.reason === 'string') {
+              entries.push({ index: e.index, value: e.reason })
+            }
+          }
         }
+        mergeChunkEntries(reasonMap, entries, chunkStartIndex)
+      } catch (e) {
+        // 單批失敗：該批 reason=null 不寫入，其餘批次照常 saveMarketFocus
+        console.error(`[MarketFocus] backfill reason chunk failed (batch start=${chunkStartIndex}, size=${chunk.length}), skipping batch:`, e)
+        await logMarketFocusEvent({
+          source: 'backfill_reason',
+          level: 'error',
+          code: 'LLM_FALLBACK',
+          message: `回填遴選原因批次失敗（第 ${chunkStartIndex + 1} 起 ${chunk.length} 則），該批 reason=null 不寫入`,
+          detail: formatErrorDetail(e),
+        })
       }
+      chunkStartIndex += chunk.length
     }
+
     const filled = gaps
-      .map((it, idx) => ({ ...it, reason: map.get(idx) || null }))
+      .map((it, idx) => ({ ...it, reason: reasonMap.get(idx) || null }))
       .filter((it) => !!it.reason)
     if (filled.length > 0) await saveMarketFocus(filled)
     return filled.length

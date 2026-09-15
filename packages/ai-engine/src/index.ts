@@ -21,3 +21,4 @@ export type {
 export { recognizePortfolioImage } from './recognize-image.js'
 export type { RecognizedPosition, RecognizePortfolioImageResult } from './recognize-image.js'
 export * from './arena/index.js'
+export { FALLBACK_SAFE_MAX_TOKENS, chunkByOutputBudget, mergeChunkEntries } from './llm/budget.js'
