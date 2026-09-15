@@ -4193,6 +4193,10 @@ export interface SocialPostRow {
   external_id: string | null
   error: string | null
   published_at: string | null
+  /** IG：發布後自動貼上的第一則留言狀態（posted | failed；其他平台為 null）。 */
+  comment_status: string | null
+  comment_external_id: string | null
+  comment_error: string | null
   created_at: string
 }
 
@@ -4263,10 +4267,15 @@ export async function createSocialPost(input: SocialPostInput): Promise<SocialPo
   return row
 }
 
-/** 更新發文紀錄狀態與欄位（失敗原因 / container / external id …）。 */
+/** 更新發文紀錄狀態與欄位（失敗原因 / container / external id / IG 留言狀態 …）。 */
 export async function updateSocialPost(
   id: number,
-  patch: Partial<Pick<SocialPostRow, 'status' | 'container_id' | 'external_id' | 'error' | 'published_at' | 'image_url'>>,
+  patch: Partial<
+    Pick<
+      SocialPostRow,
+      'status' | 'container_id' | 'external_id' | 'error' | 'published_at' | 'image_url' | 'comment_status' | 'comment_external_id' | 'comment_error'
+    >
+  >,
 ): Promise<void> {
   const sets: string[] = []
   const params: Record<string, any> = { id }
@@ -4293,6 +4302,18 @@ export async function updateSocialPost(
   if (patch.image_url !== undefined) {
     sets.push('image_url = @image_url')
     params.image_url = patch.image_url
+  }
+  if (patch.comment_status !== undefined) {
+    sets.push('comment_status = @comment_status')
+    params.comment_status = patch.comment_status
+  }
+  if (patch.comment_external_id !== undefined) {
+    sets.push('comment_external_id = @comment_external_id')
+    params.comment_external_id = patch.comment_external_id
+  }
+  if (patch.comment_error !== undefined) {
+    sets.push('comment_error = @comment_error')
+    params.comment_error = patch.comment_error
   }
   if (sets.length === 0) return
   await dbExecute(`UPDATE social_posts SET ${sets.join(', ')} WHERE id = @id`, params)

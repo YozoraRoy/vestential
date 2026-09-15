@@ -14,10 +14,13 @@ const THREADS_MAX_CHARS = 500
 const IG_MAX_CHARS = 500
 const FB_MAX_CHARS = 500
 
-// 導流 URL：平台內文結尾皆附上（Threads 會自動可點；IG 純文字可複製；FB 可點）
+// 導流 URL：FB/Threads 內文結尾附上（可點＋OG 預覽卡）；IG 文中網址不可點，
+// 改由發布層自動貼到「第一則留言」（IG_DRIVE_COMMENT），body 用滿字數上限。
 export const MARKET_FOCUS_URL = 'https://vestential.com/market-focus'
 const DRIVE_CTA = `\n\n完整分析 → ${MARKET_FOCUS_URL}`
 const DRIVE_CTA_LEN = Array.from(DRIVE_CTA).length
+/** IG 發布後自動貼上的第一則留言（導流）。 */
+export const IG_DRIVE_COMMENT = `完整分析 → ${MARKET_FOCUS_URL}`
 
 export interface SocialCaptions {
   instagram: string
@@ -118,7 +121,7 @@ function buildSocialSystemPrompt(
   return override ? `${base}\n\n【後台覆寫指示】\n${override}` : base
 }
 
-/** 內文結尾追加導流網址；已含網址時不重複附加，並保證總長度不超過平台上限。 */
+/** 內文結尾追加導流網址（僅 FB/Threads；IG 改放第一則留言）。已含網址時不重複附加，並保證總長度不超過平台上限。 */
 function appendDriveLink(captions: SocialCaptions): SocialCaptions {
   const ship = (text: string, max: number): string => {
     if (text.includes(MARKET_FOCUS_URL)) return trimToChars(text, max)
@@ -126,7 +129,7 @@ function appendDriveLink(captions: SocialCaptions): SocialCaptions {
     return body + DRIVE_CTA
   }
   return {
-    instagram: ship(captions.instagram, IG_MAX_CHARS),
+    instagram: trimToChars(captions.instagram, IG_MAX_CHARS),
     threads: ship(captions.threads, THREADS_MAX_CHARS),
     facebook: ship(captions.facebook, FB_MAX_CHARS),
   }

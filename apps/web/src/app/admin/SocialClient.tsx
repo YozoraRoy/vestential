@@ -12,7 +12,9 @@ interface DryRunResult {
   cards?: { classic: string; meme: string; ai: string }
   captions?: { instagram: string; threads: string; facebook: string }
   meme?: { title: string; punchline: string } | null
-  results?: Array<{ platform: string; status: string; error?: string | null }>
+  /** 發布時會自動貼上 IG 的第一則留言（導流）。 */
+  igDriveComment?: string
+  results?: Array<{ platform: string; status: string; error?: string | null; commentStatus?: string | null }>
   message?: string
   skipped?: boolean
   triggered?: boolean
@@ -425,6 +427,9 @@ export function SocialClient() {
                     value={draftIg}
                     onChange={(e) => setDraftIg(e.target.value)}
                   />
+                  <p className="text-xs text-[var(--text-secondary)] mt-1">
+                    🔗 導流「{preview.igDriveComment ?? '完整分析 → vestential.com/market-focus'}」會在發布後自動放上第一則留言（IG caption 網址不可點）。
+                  </p>
                 </div>
               </Card>
             )}

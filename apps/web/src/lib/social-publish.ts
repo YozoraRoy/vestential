@@ -1,5 +1,6 @@
 import { hasSocialPosted, createSocialPost, updateSocialPost, deleteSocialPostByEdition } from '@stock/database'
 import type { SocialPostRow, SocialPostPlatform } from '@stock/database'
+import { IG_DRIVE_COMMENT } from '@/lib/social'
 
 // ─── IG / Threads / Facebook 發布層 ───────────────────────────────
 // IG/Threads 一律 two-step：建立 container → 輪詢/發布；FB 單步直發。
@@ -56,6 +57,8 @@ export interface PublishResult {
   containerId?: string | null
   externalId?: string | null
   error?: string | null
+  /** IG 第一則留言（導流）發布狀態：posted | failed；未嘗試時缺省。 */
+  commentStatus?: string | null
 }
 
 /** 偵測此 edition 是否已對平台發布過（含失敗紀錄）。 */
@@ -174,7 +177,35 @@ async function publishInstagram(
     error: null,
     published_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
   })
-  return { platform: 'instagram', status: 'published', containerId, externalId }
+
+  // 導流放第一則留言（IG caption 網址不可點）。best-effort：失敗不影響貼文本身。
+  let commentStatus: string | undefined
+  let commentId: string | undefined
+  if (externalId) {
+    const comment = await graphPost(`${IG_API}/${externalId}/comments`, {
+      message: IG_DRIVE_COMMENT,
+      access_token: accessToken,
+    })
+      .then((j) => ({ id: j?.id ? String(j.id) : undefined, error: undefined as string | undefined }))
+      .catch((e: any) => ({ id: undefined as string | undefined, error: e?.message || String(e) }))
+    commentId = comment.id
+    if (commentId) {
+      commentStatus = 'posted'
+      await updateSocialPost(row.id, {
+        comment_status: 'posted',
+        comment_external_id: commentId,
+        comment_error: null,
+      }).catch((e) => console.error('[Social/instagram] save comment status failed:', e))
+    } else {
+      commentStatus = 'failed'
+      await updateSocialPost(row.id, {
+        comment_status: 'failed',
+        comment_error: String(comment.error ?? 'unknown').slice(0, 1000),
+      }).catch((e) => console.error('[Social/instagram] save comment error failed:', e))
+    }
+  }
+
+  return { platform: 'instagram', status: 'published', containerId, externalId, commentStatus }
 }
 
 // ─── Threads：container → publish ─────────────────────────────────

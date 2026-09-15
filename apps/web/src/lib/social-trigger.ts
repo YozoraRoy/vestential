@@ -1,6 +1,6 @@
 import { getMarketFocusMeta, getMarketFocus, getAgentSetting, saveSocialCardImage, getSocialCardImage } from '@stock/database'
 import type { SocialPostPlatform } from '@stock/database'
-import { generateSocialCaptions, generateMemeConcept, type SocialCaptions } from '@/lib/social'
+import { generateSocialCaptions, generateMemeConcept, IG_DRIVE_COMMENT, type SocialCaptions } from '@/lib/social'
 import { renderSocialCard, type SocialCardStyle } from '@/lib/social-canvas'
 import { generateSocialBackgroundImage, generateSocialArtworkImage } from '@/lib/social-ai-image'
 import { publishSocialPost, alreadyPosted } from '@/lib/social-publish'
@@ -17,7 +17,7 @@ export interface SocialPublishOutcome {
   editionKey?: string | null
   dryRun?: boolean
   message?: string
-  results?: { platform: SocialPostPlatform; status: string; error?: string | null }[]
+  results?: { platform: SocialPostPlatform; status: string; error?: string | null; commentStatus?: string | null }[]
   /** 僅 dryRun 時回傳：目前 social.card_style 設定值（作為預設選卡）。 */
   cardStyle?: SocialCardStyle
   /** 僅 dryRun 時回傳：IG 一律使用 AI 吉祥物全圖卡（ai）。 */
@@ -26,6 +26,8 @@ export interface SocialPublishOutcome {
   cards?: { classic: string; meme: string; ai: string }
   captions?: SocialCaptions
   meme?: { title: string; punchline: string } | null
+  /** 僅 dryRun 時回傳：IG 發布後會自動貼上的第一則留言。 */
+  igDriveComment?: string
   error?: string
 }
 
@@ -85,6 +87,7 @@ export async function triggerSocialPublish(
       cards: { classic: toDataUrl(classicBuf), meme: toDataUrl(memeBuf), ai: toDataUrl(aiBuf) },
       captions,
       meme,
+      igDriveComment: IG_DRIVE_COMMENT,
       results: platforms.map((p) => ({ platform: p, status: 'dry_run', error: null })),
     }
   }
@@ -157,7 +160,7 @@ export async function triggerSocialPublish(
       buildCardImageUrl(editionKey!, defaultStyle)
 
     const res = await publishSocialPost(platform, editionKey!, content, imageUrl, false, force)
-    results.push({ platform, status: res.status, error: res.error })
+    results.push({ platform, status: res.status, error: res.error, commentStatus: res.commentStatus })
   }
 
   const failed = results.filter((r) => r.status === 'failed')
