@@ -29,6 +29,25 @@ const RETRY_COOLDOWN_MS = 10 * 60 * 1000 // 10 分鐘內不重複嘗試同一個
 const SWEEP_INTERVAL_MS = 30 * 1000
 const WINDOW_MINUTES = 240 // 目標時間後 4 小時內仍允許補跑
 
+interface JobStatusPayload {
+  status?: string
+  error?: string
+  result?: unknown
+}
+
+/** 查詢 job 狀態（失敗回 null；呼叫端視為「本次查不到，下次 sweep 再確認」）。 */
+async function fetchJobStatus(
+  url: string,
+  headers: Record<string, string>,
+): Promise<JobStatusPayload | null> {
+  try {
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(15 * 1000) })
+    return (await res.json().catch(() => null)) as JobStatusPayload | null
+  } catch {
+    return null
+  }
+}
+
 let started = false
 const lastAttemptAt: Record<string, number> = {}
 
@@ -50,43 +69,59 @@ function taiwanNowDate(): string {
 async function triggerPhase(roundDate: string, spec: PhaseSpec): Promise<void> {
   const syncToken = process.env.SYNC_TOKEN
   const port = process.env.PORT || '3000'
-  const scheme = process.env.NODE_ENV === 'production' ? 'http' : 'http'
-  const url = `${scheme}://127.0.0.1:${port}/api/agent-arena/tick?date=${roundDate}&${spec.query}`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(syncToken ? { Authorization: `Bearer ${syncToken}` } : {}),
-    },
-    body: '{}',
-    signal: AbortSignal.timeout(280 * 1000),
-  })
-  const body = (await res.json().catch(() => null)) as {
+  const base = `http://127.0.0.1:${port}`
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(syncToken ? { Authorization: `Bearer ${syncToken}` } : {}),
+  }
+
+  // POST 建 job：route 立即回 jobId（背景執行，不再同步等 LLM；秒級返回）。
+  let postRes: Response
+  try {
+    postRes = await fetch(`${base}/api/agent-arena/tick?date=${roundDate}&${spec.query}`, {
+      method: 'POST',
+      headers,
+      body: '{}',
+      signal: AbortSignal.timeout(20 * 1000),
+    })
+  } catch (e) {
+    console.warn(`[ArenaScheduler] ${spec.key} POST 失敗:`, (e as Error).message ?? e)
+    return
+  }
+  const posted = (await postRes.json().catch(() => null)) as {
     success?: boolean
-    alreadyRun?: boolean
-    errors?: string[]
-    processed?: number
-    trades?: number
+    jobId?: number
     error?: string
   } | null
-  if (!res.ok) {
-    console.warn(`[ArenaScheduler] ${spec.key} HTTP ${res.status}: ${body?.error ?? res.statusText}`)
+  if (!postRes.ok || !posted?.success || !posted?.jobId) {
+    console.warn(`[ArenaScheduler] ${spec.key} POST HTTP ${postRes.status}: ${posted?.error ?? postRes.statusText}`)
     return
   }
-  if (!body?.success) {
-    console.warn(`[ArenaScheduler] ${spec.key} success=false: ${body?.error ?? ''}`)
-    return
+
+  // 本地輪詢 status（每 10s；上限涵蓋 watchdog（20 min 最長）＋緩衝，約 26 min）。
+  const statusUrl = `${base}/api/agent-arena/tick/status?jobId=${posted.jobId}`
+  const deadline = Date.now() + 26 * 60 * 1000
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 10 * 1000))
+    const st = await fetchJobStatus(statusUrl, headers)
+    if (!st) {
+      console.warn(`[ArenaScheduler] ${spec.key} status 查詢失敗（job ${posted.jobId}），下次 sweep 再確認`)
+      return
+    }
+    if (st.status === 'done') {
+      const res = (st.result ?? {}) as { processed?: number; trades?: number }
+      console.log(
+        `[ArenaScheduler] ${spec.key} done date=${roundDate} processed=${res.processed ?? 0} trades=${res.trades ?? 0}`,
+      )
+      return
+    }
+    if (st.status === 'failed') {
+      console.warn(`[ArenaScheduler] ${spec.key} failed date=${roundDate}: ${st.error ?? '未知錯誤'}`)
+      return
+    }
+    // running → 繼續輪詢
   }
-  if (body.alreadyRun) return
-  if (body.errors?.length) {
-    console.warn(
-      `[ArenaScheduler] ${spec.key} errors (${body.errors.length}) processed=${body.processed} trades=${body.trades}`,
-    )
-  } else {
-    console.log(
-      `[ArenaScheduler] ${spec.key} done date=${roundDate} processed=${body.processed} trades=${body.trades}`,
-    )
-  }
+  console.warn(`[ArenaScheduler] ${spec.key} 輪詢逾時（job ${posted.jobId}），下次 sweep 再確認`)
 }
 
 async function sweep(): Promise<void> {

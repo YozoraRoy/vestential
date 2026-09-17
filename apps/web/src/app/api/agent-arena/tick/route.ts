@@ -2,14 +2,15 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { getCurrentUserFromReq, isAdminUser } from '@/lib/auth'
 import { authorizeSync } from '@/lib/sync-auth'
-import { runArenaTick } from '@/lib/arena'
+import { startArenaTickJob } from '@/lib/arena'
 import { isTaiwanMarketTradingDay, getLastMarketTradingDay } from '@/utils/taiwan-calendar'
 
 export const dynamic = 'force-dynamic'
 
 export const runtime = 'nodejs'
 
-export const maxDuration = 300
+// 非同步模式：route 只負責建 job（秒級返回），實際 LLM 在背景跑，故不需 300s。
+export const maxDuration = 60
 
 function twDateStr(d: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(d)
@@ -43,10 +44,13 @@ export async function POST(req: NextRequest) {
   const force = searchParams.get('force') === '1' || searchParams.get('force') === 'true'
 
   try {
-    const result = await runArenaTick(roundDate, { phase, slot, force })
-    return NextResponse.json({ success: true, ...result }, { headers: { 'Cache-Control': 'no-store' } })
+    const started = await startArenaTickJob(roundDate, { phase, slot, force })
+    return NextResponse.json(
+      { success: true, jobId: started.jobId, roundDate: started.roundDate, phase: started.phaseKey, deduplicated: started.deduplicated },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
   } catch (e: any) {
-    console.error('[Arena/Tick] failed:', e)
-    return NextResponse.json({ success: false, error: e.message ?? 'tick 失敗' }, { status: 500 })
+    console.error('[Arena/Tick] failed to start job:', e)
+    return NextResponse.json({ success: false, error: e.message ?? '建立 tick job 失敗' }, { status: 500 })
   }
 }

@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { migrate } from '@stock/database'
 import { getCurrentUserFromReq, isAdminUser } from '@/lib/auth'
-import { runArenaTick } from '@/lib/arena'
+import { startArenaTickJob } from '@/lib/arena'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 300
+export const maxDuration = 60
 
 export async function POST(req: NextRequest) {
   await migrate()
@@ -25,9 +25,15 @@ export async function POST(req: NextRequest) {
   const date = body.date?.trim() || undefined
 
   try {
-    const result = await runArenaTick(date!, { phase, slot, force: !!body.force })
-    return NextResponse.json({ success: true, ...result })
+    const started = await startArenaTickJob(date!, { phase, slot, force: !!body.force })
+    return NextResponse.json({
+      success: true,
+      jobId: started.jobId,
+      roundDate: started.roundDate,
+      phase: started.phaseKey,
+      deduplicated: started.deduplicated,
+    })
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e?.message ?? 'arena tick 失敗' }, { status: 500 })
+    return NextResponse.json({ success: false, error: e?.message ?? '建立 arena tick job 失敗' }, { status: 500 })
   }
 }

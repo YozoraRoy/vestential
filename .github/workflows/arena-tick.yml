@@ -25,7 +25,9 @@ on:
 jobs:
   tick:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 非同步模式：POST 立即回 jobId → 每 10s 輪詢（上限 150 次 ≈ 25 min）。
+    # watchdog 會先把逾時 job 標 failed，故 25 min 內必見 done/failed；30 min 為 GH 層保險。
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -56,7 +58,8 @@ jobs:
             echo "force=1" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Trigger arena tick on Azure
+      - name: Trigger arena tick on Azure (async, returns jobId)
+        id: trigger
         run: |
           TARGET=${{ steps.date.outputs.target }}
           QUERY="date=${TARGET}"
@@ -89,7 +92,7 @@ jobs:
           if [ -n "$FORCE" ]; then QUERY="${QUERY}&force=${FORCE}"; fi
           echo "Ticking: $QUERY"
           CODE=$(curl -s -o /tmp/arena_tick.json -w "%{http_code}" \
-            --max-time 300 \
+            --max-time 90 \
             -X POST \
             -H "Authorization: Bearer ${{ secrets.SYNC_TOKEN }}" \
             -H "Content-Type: application/json" \
@@ -98,6 +101,36 @@ jobs:
           cat /tmp/arena_tick.json
           echo ""
           if [ "$CODE" != "200" ]; then
-            echo "::error::arena tick failed (HTTP $CODE)"
+            echo "::error::arena tick POST failed (HTTP $CODE)"
             exit 1
           fi
+          JOB_ID=$(jq -r '.jobId // empty' /tmp/arena_tick.json)
+          if [ -z "$JOB_ID" ]; then
+            echo "::error::arena tick POST did not return jobId: $(cat /tmp/arena_tick.json)"
+            exit 1
+          fi
+          echo "jobId=$JOB_ID"
+          echo "jobId=$JOB_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Poll arena tick status (10s interval, up to 150)
+        run: |
+          JOB_ID="${{ steps.trigger.outputs.jobId }}"
+          LAST=""
+          for i in $(seq 1 150); do
+            sleep 10
+            LAST=$(curl -s --max-time 30 \
+              -H "Authorization: Bearer ${{ secrets.SYNC_TOKEN }}" \
+              "https://stock-platform-roy.azurewebsites.net/api/agent-arena/tick/status?jobId=${JOB_ID}")
+            STATUS=$(printf '%s' "$LAST" | jq -r '.status // empty')
+            echo "poll#$i status=${STATUS}"
+            if [ "$STATUS" = "done" ]; then
+              echo "::notice::arena tick done: $(printf '%s' "$LAST" | jq -c '{status, jobId, phase, roundDate, processed: .result.processed, trades: .result.trades, errors: (.result.errors | length // 0)}')"
+              exit 0
+            fi
+            if [ "$STATUS" = "failed" ]; then
+              echo "::error::arena tick failed: $LAST"
+              exit 1
+            fi
+          done
+          echo "::error::arena tick timed out after 150 polls (~25 min); last=$LAST"
+          exit 1

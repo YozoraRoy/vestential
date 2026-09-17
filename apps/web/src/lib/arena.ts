@@ -36,6 +36,11 @@ import {
   replaceArenaRoundUniverse,
   getArenaRoundUniverse,
   getAgentSetting,
+  migrate,
+  saveArenaTickJob,
+  updateArenaTickJob,
+  findRunningArenaTickJob,
+  type ArenaTickJobRow,
 } from '@stock/database'
 import type { ArenaAgentRecord, ArenaTradeRecord, ArenaSnapshotRecord } from '@stock/ai-engine'
 
@@ -294,4 +299,192 @@ export async function runArenaTick(
     tickGate = null
   })
   return tickGate
+}
+
+// ─── Arena tick 背景 job（非同步三態：running / done / failed）────────
+
+/**
+ * Watchdog 逾時（分鐘）依 phase 分設（QA 量測定案）：
+ * premarket 含股票池建立＋逐檔決策、close 含多 slot 結算 → 20 min；
+ * slot 單一時點決策較快 → 12 min；full（不分段）比照 premarket/close → 20 min。
+ */
+export const ARENA_TICK_WATCHDOG_MIN: Record<string, number> = {
+  premarket: 20,
+  slot: 12,
+  close: 20,
+  full: 20,
+}
+
+/** 依 phase 回傳 watchdog 分鐘數（未知名/undefined 一律 20）。 */
+export function arenaTickWatchdogMinutes(phase?: string | null): number {
+  if (phase && phase in ARENA_TICK_WATCHDOG_MIN) return ARENA_TICK_WATCHDOG_MIN[phase]
+  return ARENA_TICK_WATCHDOG_MIN.full
+}
+
+/** 背景 job 的 result/error 寫入上限（防爆 DB 欄位與 log）。 */
+export const ARENA_TICK_ERROR_MAX_CHARS = 2000
+export const ARENA_TICK_RESULT_MAX_CHARS = 200_000
+export const ARENA_TICK_ERRORS_MAX = 50
+export const ARENA_TICK_ERROR_ITEM_MAX_CHARS = 500
+
+/** 收斂 ArenaTickResult 再序列化：errors 陣列截斷＋每筆截短＋總長度保險（保證 ≤ 上限）。 */
+export function sanitizeArenaTickResult(result: ArenaTickResult): string {
+  const errors = Array.isArray(result.errors)
+    ? result.errors.slice(0, ARENA_TICK_ERRORS_MAX).map((e) => String(e).slice(0, ARENA_TICK_ERROR_ITEM_MAX_CHARS))
+    : result.errors
+  const base = { ...result, errors }
+  if (JSON.stringify(base).length <= ARENA_TICK_RESULT_MAX_CHARS) return JSON.stringify(base)
+
+  // 保險：仍超上限 → 遞迴截短所有字串/陣列，並標 truncated
+  const cut = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      return value.length > ARENA_TICK_ERROR_ITEM_MAX_CHARS ? value.slice(0, ARENA_TICK_ERROR_ITEM_MAX_CHARS) : value
+    }
+    if (Array.isArray(value)) return value.slice(0, ARENA_TICK_ERRORS_MAX).map(cut)
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = cut(v)
+      return out
+    }
+    return value
+  }
+  const trimmed = JSON.stringify({ ...(cut(base) as ArenaTickResult), truncated: true })
+  if (trimmed.length <= ARENA_TICK_RESULT_MAX_CHARS) return trimmed
+
+  // 再保險：仍超（理論上不會，除非欄位爆炸多）→ 只留摘要欄位
+  return JSON.stringify({
+    processed: result.processed,
+    trades: result.trades,
+    errors,
+    modelCalls: result.modelCalls,
+    roundDate: result.roundDate,
+    truncated: true,
+    _oversized: true,
+  })
+}
+
+/**
+ * staleness 判定：running 且 updated_at 超過該 phase watchdog → 視為逾時/實例回收。
+ * 用於 status 端點（讓 workflow 快速失敗可重觸發）。
+ */
+function parseArenaTickTimestamp(value: string): Date {
+  return new Date(value.replace(' ', 'T') + (value.length === 19 ? 'Z' : ''))
+}
+
+export function isArenaTickJobStale(job: ArenaTickJobRow, now: Date = new Date()): boolean {
+  if (job.status !== 'running') return false
+  const updatedAt = job.updated_at && !Number.isNaN(Date.parse(job.updated_at))
+    ? parseArenaTickTimestamp(job.updated_at)
+    : job.created_at && !Number.isNaN(Date.parse(job.created_at))
+      ? parseArenaTickTimestamp(job.created_at)
+      : null
+  if (!updatedAt) return true // 無時間戳（不應發生）一律視為 stale，交由重觸發
+  const watchdogMs = arenaTickWatchdogMinutes(job.phase) * 60 * 1000
+  return now.getTime() - updatedAt.getTime() > watchdogMs
+}
+
+/** status 端點對外的三態視圖（running / done(result) / failed(error)，含 staleness 轉 failed）。 */
+export interface ArenaTickStatusView {
+  status: 'running' | 'done' | 'failed'
+  jobId: number
+  roundDate: string
+  phase: string
+  startedAt: string | null
+  updatedAt: string | null
+  result?: unknown
+  error?: string | null
+}
+
+export function interpretArenaTickJobStatus(job: ArenaTickJobRow, now: Date = new Date()): ArenaTickStatusView {
+  const base = {
+    jobId: job.id,
+    roundDate: job.round_date,
+    phase: job.phase,
+    startedAt: job.created_at ?? null,
+    updatedAt: job.updated_at ?? null,
+  }
+  if (job.status === 'done') {
+    let result: unknown = null
+    if (job.result) {
+      try {
+        result = JSON.parse(job.result)
+      } catch {
+        result = null
+      }
+    }
+    return { ...base, status: 'done', result }
+  }
+  if (job.status === 'failed') {
+    return { ...base, status: 'failed', error: job.error ?? '執行失敗' }
+  }
+  if (isArenaTickJobStale(job, now)) {
+    return { ...base, status: 'failed', error: 'job 逾時/實例回收（updated_at 超過 watchdog），請重新觸發' }
+  }
+  return { ...base, status: 'running' }
+}
+
+export interface StartArenaTickJobOptions {
+  phase?: 'premarket' | 'slot' | 'close'
+  slot?: number
+  force?: boolean
+}
+
+export interface StartedArenaTickJob {
+  jobId: number
+  roundDate: string
+  phaseKey: string
+  deduplicated: boolean
+}
+
+/** 建 job（status=running）→ 背景跑 runArenaTick → 完成寫 result+done／例外寫 error+failed；watchdog 逾時標 failed。 */
+export async function startArenaTickJob(
+  roundDate: string,
+  opts: StartArenaTickJobOptions = {},
+): Promise<StartedArenaTickJob> {
+  // job 路徑確保表存在（migrate 冪等；避免 prod DB 缺 020 表時整段失敗）。
+  await migrate()
+
+  const phase = opts.phase
+  const slot = opts.slot ?? null
+  const phaseKey = phase ? (phase === 'slot' ? (SLOT_MAP[slot ?? 0] ?? 'slot') : phase) : 'full'
+
+  // 去重（M3）：同 (round_date, phase, slot) 已有 running job → 回傳既有 jobId，不重疊執行。
+  const existing = await findRunningArenaTickJob(roundDate, phase ?? 'full', slot)
+  if (existing) {
+    return { jobId: existing.id, roundDate, phaseKey, deduplicated: true }
+  }
+
+  const jobId = await saveArenaTickJob({ roundDate, phase: phase ?? 'full', slot })
+  if (jobId <= 0) {
+    throw new Error('建立 tick job 失敗（DB 不可用）')
+  }
+
+  const watchdogMs = arenaTickWatchdogMinutes(phase ?? 'full') * 60 * 1000
+
+  // 背景執行（fire-and-forget）：route 不等待 LLM，只回 jobId。
+  void (async () => {
+    let settled = false
+    const finish = async (patch: { status: 'done' | 'failed'; result?: string; error?: string }) => {
+      if (settled) return
+      settled = true
+      await updateArenaTickJob(jobId, patch)
+    }
+
+    const timer = setTimeout(() => {
+      void finish({ status: 'failed', error: `執行逾時（watchdog ${arenaTickWatchdogMinutes(phase ?? 'full')} min）` })
+    }, watchdogMs)
+    timer.unref?.()
+
+    try {
+      const result = await runArenaTick(roundDate, { phase, slot: slot ?? undefined, force: opts.force })
+      await finish({ status: 'done', result: sanitizeArenaTickResult(result) })
+    } catch (e: any) {
+      const msg = String(e?.message ?? e).slice(0, ARENA_TICK_ERROR_MAX_CHARS)
+      await finish({ status: 'failed', error: msg || '執行失敗' })
+    } finally {
+      clearTimeout(timer)
+    }
+  })()
+
+  return { jobId, roundDate, phaseKey, deduplicated: false }
 }

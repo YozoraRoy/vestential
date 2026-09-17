@@ -413,6 +413,20 @@ function getSqliteDb(): Database.Database | null {
         PRIMARY KEY (round_date, symbol)
       );
 
+      CREATE TABLE IF NOT EXISTS arena_tick_jobs (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        round_date TEXT    NOT NULL,
+        phase      TEXT    NOT NULL,   -- premarket | slot | close
+        slot       INTEGER,            -- phase=slot 時指定 slot index
+        status     TEXT    NOT NULL DEFAULT 'running',  -- running | done | failed
+        result     TEXT,               -- JSON：ArenaTickResult（done 時寫入）
+        error      TEXT,               -- 失敗訊息（failed 時寫入）
+        created_at TEXT    DEFAULT (datetime('now','localtime')),
+        updated_at TEXT    DEFAULT (datetime('now','localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_arena_tick_jobs_round_phase_slot ON arena_tick_jobs(round_date, phase, slot);
+      CREATE INDEX IF NOT EXISTS idx_arena_tick_jobs_status ON arena_tick_jobs(status);
+
       CREATE TABLE IF NOT EXISTS social_posts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         platform TEXT NOT NULL,
@@ -1001,6 +1015,23 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           name NVARCHAR(100),
           CONSTRAINT pk_arena_round_universe PRIMARY KEY (round_date, symbol)
         );
+      END
+
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'arena_tick_jobs')
+      BEGIN
+        CREATE TABLE arena_tick_jobs (
+          id         INT IDENTITY(1,1) PRIMARY KEY,
+          round_date NVARCHAR(20) NOT NULL,
+          phase      NVARCHAR(40) NOT NULL,   -- premarket | slot | close
+          slot       INT,
+          status     NVARCHAR(20) NOT NULL DEFAULT 'running',  -- running | done | failed
+          result     NVARCHAR(MAX),           -- JSON：ArenaTickResult（done 時寫入）
+          error      NVARCHAR(MAX),           -- 失敗訊息（failed 時寫入）
+          created_at DATETIME2 DEFAULT GETDATE(),
+          updated_at DATETIME2 DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_arena_tick_jobs_key ON arena_tick_jobs(round_date, phase, slot);
+        CREATE INDEX idx_arena_tick_jobs_status ON arena_tick_jobs(status);
       END
 
       IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'social_posts')
@@ -1955,6 +1986,255 @@ export async function getAnalysisJobById(jobId: number): Promise<AnalysisJobRow 
   } catch (e) {
     console.error('[SQLite] getAnalysisJobById error:', e)
     return null
+  }
+}
+
+// ─── Arena tick jobs（非同步分段 tick）─────────────────────────────
+
+export interface ArenaTickJobRow {
+  id: number
+  round_date: string
+  phase: string          // premarket | slot | close
+  slot: number | null
+  status: 'running' | 'done' | 'failed'
+  result: string | null  // JSON：ArenaTickResult（done 時寫入）
+  error: string | null   // 失敗訊息（failed 時寫入）
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ArenaTickJobInput {
+  roundDate: string
+  phase: string
+  slot?: number | null
+}
+
+export async function saveArenaTickJob(job: ArenaTickJobInput): Promise<number> {
+  const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19)
+  let insertedId = -1
+
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('roundDate', sql.NVarChar(20), job.roundDate)
+          .input('phase', sql.NVarChar(40), job.phase)
+          .input('slot', sql.Int, job.slot ?? null)
+          .query(`
+            INSERT INTO arena_tick_jobs (round_date, phase, slot, status, created_at, updated_at)
+            OUTPUT INSERTED.id
+            VALUES (@roundDate, @phase, @slot, 'running', GETDATE(), GETDATE())
+          `)
+        insertedId = Number(result.recordset[0]?.id ?? -1)
+      } catch (e) {
+        console.error('[AzureSQL] saveArenaTickJob error:', e)
+      }
+    }
+  } else {
+    const db = getSqliteDb()
+    if (db) {
+      try {
+        const stmt = db.prepare(`
+          INSERT INTO arena_tick_jobs (round_date, phase, slot, status, created_at, updated_at)
+          VALUES (?, ?, ?, 'running', ?, ?)
+        `)
+        const info = stmt.run(job.roundDate, job.phase, job.slot ?? null, nowStr, nowStr)
+        insertedId = Number(info.lastInsertRowid)
+      } catch (e) {
+        console.error('[SQLite] saveArenaTickJob error:', e)
+      }
+    }
+  }
+
+  return insertedId > 0 ? insertedId : -1
+}
+
+export interface ArenaTickJobUpdate {
+  status?: 'running' | 'done' | 'failed'
+  result?: string
+  error?: string
+}
+
+export async function updateArenaTickJob(jobId: number, patch: ArenaTickJobUpdate): Promise<boolean> {
+  const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19)
+  const sets: string[] = []
+  const params: any[] = []
+
+  if (patch.status !== undefined) {
+    sets.push('status = ?')
+    params.push(patch.status)
+  }
+  if (patch.result !== undefined) {
+    sets.push('result = ?')
+    params.push(patch.result)
+  }
+  if (patch.error !== undefined) {
+    sets.push('error = ?')
+    params.push(patch.error)
+  }
+  if (sets.length === 0) return true
+  sets.push('updated_at = ?')
+  params.push(nowStr, jobId)
+
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return false
+    try {
+      const req = pool.request()
+      const azureSets: string[] = []
+      if (patch.status !== undefined) {
+        req.input('status', sql.NVarChar(20), patch.status)
+        azureSets.push('status = @status')
+      }
+      if (patch.result !== undefined) {
+        req.input('result', sql.NVarChar(sql.MAX), patch.result)
+        azureSets.push('result = @result')
+      }
+      if (patch.error !== undefined) {
+        req.input('error', sql.NVarChar(sql.MAX), patch.error)
+        azureSets.push('error = @error')
+      }
+      azureSets.push('updated_at = @updatedAt')
+      req.input('updatedAt', sql.DateTime2, new Date())
+      req.input('jobId', sql.Int, jobId)
+      await req.query(`UPDATE arena_tick_jobs SET ${azureSets.join(', ')} WHERE id = @jobId`)
+      return true
+    } catch (e) {
+      console.error('[AzureSQL] updateArenaTickJob error:', e)
+      return false
+    }
+  }
+
+  const db = getSqliteDb()
+  if (!db) return false
+  try {
+    db.prepare(`UPDATE arena_tick_jobs SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+    return true
+  } catch (e) {
+    console.error('[SQLite] updateArenaTickJob error:', e)
+    return false
+  }
+}
+
+export async function getArenaTickJobById(jobId: number): Promise<ArenaTickJobRow | null> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('jobId', sql.Int, jobId)
+          .query(`
+            SELECT id, round_date, phase, slot, status, result, error, created_at, updated_at
+            FROM arena_tick_jobs WHERE id = @jobId
+          `)
+        const row = result.recordset[0]
+        if (row) return row as unknown as ArenaTickJobRow
+      } catch (e) {
+        console.error('[AzureSQL] getArenaTickJobById error:', e)
+      }
+    }
+    return null
+  }
+
+  const db = getSqliteDb()
+  if (!db) return null
+  try {
+    const row = db.prepare(`
+      SELECT id, round_date, phase, slot, status, result, error, created_at, updated_at
+      FROM arena_tick_jobs WHERE id = ?
+    `).get(jobId) as ArenaTickJobRow | undefined
+    return row ?? null
+  } catch (e) {
+    console.error('[SQLite] getArenaTickJobById error:', e)
+    return null
+  }
+}
+
+/**
+ * 去重查詢：同 (round_date, phase, slot) 是否存在仍 running 的 job。
+ * startArenaTickJob 依此避免同一分段被重疊執行（M3）。
+ */
+export async function findRunningArenaTickJob(
+  roundDate: string,
+  phase: string,
+  slot: number | null = null,
+): Promise<ArenaTickJobRow | null> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const req = pool.request()
+          .input('roundDate', sql.NVarChar(20), roundDate)
+          .input('phase', sql.NVarChar(40), phase)
+        const slotClause = slot !== null ? 'AND slot = @slot' : 'AND slot IS NULL'
+        if (slot !== null) req.input('slot', sql.Int, slot)
+        const result = await req.query(`
+            SELECT TOP (1) id, round_date, phase, slot, status, result, error, created_at, updated_at
+            FROM arena_tick_jobs
+            WHERE round_date = @roundDate AND phase = @phase ${slotClause} AND status = 'running'
+            ORDER BY id DESC
+          `)
+        const row = result.recordset[0]
+        if (row) return row as unknown as ArenaTickJobRow
+      } catch (e) {
+        console.error('[AzureSQL] findRunningArenaTickJob error:', e)
+      }
+    }
+    return null
+  }
+
+  const db = getSqliteDb()
+  if (!db) return null
+  try {
+    const slotClause = slot !== null ? 'AND slot = ?' : 'AND slot IS NULL'
+    const row = db.prepare(`
+      SELECT id, round_date, phase, slot, status, result, error, created_at, updated_at
+      FROM arena_tick_jobs
+      WHERE round_date = ? AND phase = ? ${slotClause} AND status = 'running'
+      ORDER BY id DESC LIMIT 1
+    `).get(...[roundDate, phase, ...(slot !== null ? [slot] : [])]) as ArenaTickJobRow | undefined
+    return row ?? null
+  } catch (e) {
+    console.error('[SQLite] findRunningArenaTickJob error:', e)
+    return null
+  }
+}
+
+/** 清理超過 retentionDays（預設 7）天前已結束（done/failed）的 tick job，回傳刪除筆數。 */
+export async function cleanupArenaTickJobs(retentionDays = 7): Promise<number> {
+  try {
+    const n = Math.max(1, Math.floor(retentionDays))
+    let deleted = 0
+    if (isAzureSql) {
+      const pool = await getAzurePool()
+      if (!pool) return 0
+      const r = await pool
+        .request()
+        .input('days', sql.Int, n)
+        .query(`
+          DELETE FROM arena_tick_jobs
+          WHERE status IN ('done', 'failed')
+            AND updated_at < DATEADD(day, -@days, GETDATE());
+          SELECT @@ROWCOUNT AS n
+        `)
+      deleted = r.recordset?.[0]?.n ?? 0
+    } else {
+      const db = getSqliteDb()
+      if (!db) return 0
+      const r = db
+        .prepare(
+          `DELETE FROM arena_tick_jobs
+           WHERE status IN ('done', 'failed')
+             AND updated_at < datetime('now','localtime','-${n} days')`,
+        )
+        .run()
+      deleted = r.changes
+    }
+    return deleted
+  } catch (e) {
+    console.error('[DB] cleanupArenaTickJobs failed:', e)
+    return 0
   }
 }
 

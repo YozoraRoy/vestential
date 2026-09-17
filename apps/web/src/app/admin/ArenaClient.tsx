@@ -185,19 +185,46 @@ const lbById = useMemo(() => {
   }
 
   const run = async (phase: 'premarket' | 'slot' | 'close', slot?: number, force = false) => {
+    const label = `${phase}${slot != null ? ` slot${slot}` : ''}`
     setBusy(`${phase}${slot ?? ''}`)
-    const r = await post('/api/admin/arena/tick', { phase, slot, force })
-    setBusy(null)
-    setResult(
-      r.ok
-        ? {
-            ok: r.body.success,
-            message: r.body.success
-              ? `${phase}${slot != null ? ` slot${slot}` : ''} 完成：processed=${r.body.processed ?? 0} trades=${r.body.trades ?? 0} errors=${JSON.stringify(r.body.errors ?? [])}${r.body.alreadyRun ? '（已跑過）' : ''}`
-              : `${phase} 失敗：${r.body.error ?? ''}`,
+    try {
+      const r = await post('/api/admin/arena/tick', { phase, slot, force })
+      if (!r.ok || !r.body?.success || !r.body?.jobId) {
+        setResult({ ok: false, message: `${label} 失敗：${r.body?.error ?? '無法建立 job'}` })
+        return
+      }
+      const jobId = r.body.jobId
+      const phaseKey = r.body.phase ?? phase
+      setResult({ ok: true, message: `${phaseKey} 已啟動（job #${jobId}），執行中…` })
+
+      // 輪詢 status：三態分流；job 層去重回傳同一 jobId，不會並發。
+      let final: { status?: string; result?: any; error?: string } | null = null
+      for (let i = 0; i < 150; i++) {
+        await new Promise((res) => setTimeout(res, 10_000))
+        const s = await getJson(`/api/agent-arena/tick/status?jobId=${jobId}`)
+        if (s.ok && s.body?.status) {
+          if (s.body.status === 'done' || s.body.status === 'failed') {
+            final = s.body
+            break
           }
-        : { ok: false, message: `${phase} 失敗：${r.body?.error ?? ''}` },
-    )
+        }
+      }
+      if (!final) {
+        setResult({ ok: false, message: `${phaseKey} 逾時（job #${jobId} 超過輪詢上限），請稍後以狀態頁確認` })
+      } else if (final.status === 'done') {
+        const res = final.result ?? {}
+        setResult({
+          ok: true,
+          message: `${phaseKey} 完成：processed=${res.processed ?? 0} trades=${res.trades ?? 0} errors=${JSON.stringify(res.errors ?? [])}${res.alreadyRun ? '（已跑過）' : ''}`,
+        })
+      } else {
+        setResult({ ok: false, message: `${phaseKey} 失敗：${final.error ?? '未知錯誤'}` })
+      }
+    } catch (e) {
+      setResult({ ok: false, message: `${label} 失敗：${e instanceof Error ? e.message : '發生錯誤'}` })
+    } finally {
+      setBusy(null)
+    }
     setOpenHistory({})
     setAgentDetail({})
     await load(roundDate || undefined)
