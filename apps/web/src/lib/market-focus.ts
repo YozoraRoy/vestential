@@ -579,11 +579,13 @@ export async function refreshMarketFocus(): Promise<MarketFocusItem[]> {
   return enriched
 }
 
-/** 回填近 4 天內缺少 AI 摘要的新聞（排程偶發 LLM 失敗留下的空摘要），於每次 job 收尾自動治癒。 */
+const MAX_BACKFILL_ITEMS = 20
+
+/** 回填近 4 天內缺少 AI 摘要的新聞（排程偶發 LLM 失敗留下的空摘要），於每次 job 收尾自動治癒，每次最多回補 20 則避免超時。 */
 export async function backfillMissingSummaries(): Promise<number> {
   try {
-    const recent = await getMarketFocus(40, 4)
-    const gaps = recent.filter((it) => !it.summary)
+    const recent = await getMarketFocus(MAX_BACKFILL_ITEMS, 4)
+    const gaps = recent.filter((it) => !it.summary).slice(0, MAX_BACKFILL_ITEMS)
     if (gaps.length === 0) return 0
     const summaries = await generateArticleSummaries(gaps)
     const filled = gaps
@@ -608,11 +610,11 @@ const BACKFILL_REASON_SYSTEM_PROMPT = `你是 Vestential 的台股主筆。以�
 只輸出純 JSON，不要任何其他文字：
 {"reasons":[{"index":0,"reason":"..."},{"index":1,"reason":"..."}]}`
 
-/** 回填近 4 天內缺少「價值投資遴選原因」的新聞（排程偶發 LLM 失敗留下的空理由）。 */
+/** 回填近 4 天內缺少「價值投資遴選原因」的新聞（排程偶發 LLM 失敗留下的空理由），每次最多回補 20 則。 */
 export async function backfillMissingReasons(): Promise<number> {
   try {
-    const recent = await getMarketFocus(40, 4)
-    const gaps = recent.filter((it) => !it.reason)
+    const recent = await getMarketFocus(MAX_BACKFILL_ITEMS, 4)
+    const gaps = recent.filter((it) => !it.reason).slice(0, MAX_BACKFILL_ITEMS)
     if (gaps.length === 0) return 0
     const config = loadConfig()
     const { llm } = createQuickLLM(config, { maxTokens: FALLBACK_SAFE_MAX_TOKENS })

@@ -10,10 +10,14 @@ import {
   evaluateLastBar,
   passesGate,
   runSignalBacktest,
+  runSignalBacktestDetail,
+  computeWilsonScoreInterval,
+  DEFAULT_COST_PCT,
   classifyStage,
   MIN_EVAL_INDEX,
   MIN_SCORE,
   MAX_CANDIDATES,
+  MIN_SAMPLE_SIGNALS,
   ruleR1,
   ruleR3,
   ruleR5,
@@ -164,6 +168,7 @@ describe('passesGate', () => {
     expect(passesGate(3, ['R3', 'R4', 'R5'])).toBe(false) // 無 R1/R2
     expect(MIN_SCORE).toBe(3)
     expect(MAX_CANDIDATES).toBe(10)
+    expect(MIN_SAMPLE_SIGNALS).toBe(10)
   })
 })
 
@@ -178,7 +183,7 @@ describe('runSignalBacktest', () => {
     const ohlcv = seriesOf(closes, volumes)
     const stats = runSignalBacktest(ohlcv)
     expect(stats.totalSignals).toBeGreaterThanOrEqual(0)
-    expect(stats.wins + stats.losses + stats.neutral).toBe(stats.totalSignals)
+    expect(stats.wins + stats.losses + stats.neutral + (stats.openTrades ?? 0)).toBe(stats.totalSignals)
     if (stats.wins + stats.losses > 0) {
       expect(stats.winRate).toBeGreaterThanOrEqual(0)
       expect(stats.winRate).toBeLessThanOrEqual(100)
@@ -196,6 +201,83 @@ describe('runSignalBacktest', () => {
     volumes.push(...Array.from({ length: 10 }, () => 400))
     const stats = runSignalBacktest(seriesOf(closes, volumes))
     expect(stats.totalSignals).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('Wilson 95% 信賴區間', () => {
+  it('total <= 0 回傳 null', () => {
+    expect(computeWilsonScoreInterval(0, 0)).toBeNull()
+    expect(computeWilsonScoreInterval(5, -1)).toBeNull()
+  })
+
+  it('以 9 wins / 21 total 驗算（同欣電例）', () => {
+    const ci = computeWilsonScoreInterval(9, 21)
+    expect(ci).not.toBeNull()
+    // 估計勝率 42.9%，Wilson 95% CI 約在 [24.5, 63.4]
+    expect(ci!.lower).toBeCloseTo(24.5, 0)
+    expect(ci!.upper).toBeCloseTo(63.4, 0)
+    expect(ci!.lower).toBeLessThan(42.9)
+    expect(ci!.upper).toBeGreaterThan(42.9)
+  })
+
+  it('極端情況 0% 與 100% 邊界維持在 [0, 100]', () => {
+    const zero = computeWilsonScoreInterval(0, 10)
+    expect(zero!.lower).toBe(0)
+    expect(zero!.upper).toBeGreaterThan(0)
+    expect(zero!.upper).toBeLessThan(100)
+
+    const full = computeWilsonScoreInterval(10, 10)
+    expect(full!.lower).toBeGreaterThan(0)
+    expect(full!.upper).toBe(100)
+  })
+})
+
+describe('Stage 2 · open trade 語意與 0.6% 淨報酬', () => {
+  it('DEFAULT_COST_PCT 常數為 0.006', () => {
+    expect(DEFAULT_COST_PCT).toBe(0.006)
+  })
+
+  it('資料尾端截斷（未滿 holdingDays 且未觸停利停損）為 open', () => {
+    // 建立 120 根 K 棒，讓前段觸發一次訊號，並在剛好第 115 根觸發最後一次訊號
+    // 訊號在 115，進場在 116，到 120 僅 4 天（< 40），價格維持平盤未觸 +8% / -5%
+    const closes: number[] = Array.from({ length: 60 }, () => 100)
+    closes.push(...Array.from({ length: 30 }, (_, i) => 100 + ((200 - 100) * i) / 29))
+    closes.push(...[200, 180, 162, 146, 132, 140, 152, 166, 182, 200]) // length=100
+    // 再補平盤到 120
+    closes.push(...Array.from({ length: 20 }, () => 150))
+    const volumes: number[] = Array.from({ length: 120 }, () => 1000)
+
+    const detail = runSignalBacktestDetail(seriesOf(closes, volumes))
+    const openTrades = detail.trades.filter((t) => t.outcome === 'open')
+    if (openTrades.length > 0) {
+      const op = openTrades[0]
+      expect(op.exitDate).toBeNull()
+      expect(op.exitPrice).toBeNull()
+      expect(op.returnPct).toBeNull()
+      expect(op.netReturnPct).toBeNull()
+      expect(op.exitReason).toBe('open')
+      expect(op.holdingDays).toBeGreaterThan(0)
+    }
+    // open 不計入 winRate 分母
+    expect(detail.stats.totalSignals).toBe(detail.trades.length)
+  })
+
+  it('已平倉交易扣除 0.6% round-trip 淨報酬', () => {
+    // 模擬單筆 win：進場 100，停利 108 (+8%)
+    // netReturnPct 應為 0.08 - 0.006 = 0.074 (+7.4%)
+    const closes = Array.from({ length: 70 }, () => 100)
+    closes.push(...Array.from({ length: 30 }, (_, i) => 100 + ((200 - 100) * i) / 29))
+    closes.push(...[200, 180, 162, 146, 132, 140, 152, 166, 182, 200])
+    const volumes = Array.from({ length: 110 }, () => 1000)
+
+    const detail = runSignalBacktestDetail(seriesOf(closes, volumes))
+    const winTrades = detail.trades.filter((t) => t.outcome === 'win')
+    if (winTrades.length > 0) {
+      const w = winTrades[0]
+      expect(w.returnPct).toBeCloseTo(0.08, 2)
+      expect(w.netReturnPct).toBeCloseTo(0.074, 3)
+      expect(w.netReturnPct!).toBeLessThan(w.returnPct!)
+    }
   })
 })
 

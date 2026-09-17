@@ -143,46 +143,75 @@ describe('runGridSearch', () => {
   })
 
   it('選取勝率最高且交易次數最多者為最佳參數', () => {
-    // 構造：深乖離閾值才有交易；淺乖離（-3%）不觸發 → 勝率高者被選中而非次數
-    // 平盤後大幅下挫再反彈，使深閾值（-8%）觸發且為單一交易
-    const data: OHLCV[] = Array.from({ length: 80 }, (_, i) => ({
-      timestamp: (i + 1) * 86400000,
-      open: 100,
-      high: 100,
-      low: 100,
-      close: 100,
-      volume: 1000,
-    }))
-    // 連續 30 日下挫至 60（乖離為負），再于日後反彈 +8%
-    for (let i = 0; i < 30; i++) {
-      const price = 100 - i * 1.5 // 100 → 56.5
-      data.push({
-        timestamp: (80 + i + 1) * 86400000,
-        open: price,
-        high: price + 1,
-        low: price - 1,
-        close: price,
-        volume: 1000,
-      })
-    }
-    // 底部反彈日：從 56.5 反彈 +12%
-    const baseClose = 100 - 29 * 1.5 // ≈ 56.5
-    const rebound = baseClose * (1 + TARGET_PROFIT + 0.04)
-    data.push({
-      timestamp: (data.length + 1) * 86400000,
-      open: baseClose,
-      high: rebound,
-      low: baseClose,
-      close: baseClose * 1.04,
-      volume: 1000,
-    })
-
-    const res = runGridSearch(data)
+    const res = runGridSearch(singleTradeReboundData())
     // 深閾值應該至少觸發一次交易（非零 trades）
     const anyTrade = res.allThresholds.some((t) => t.totalTrades >= 1)
     expect(anyTrade).toBe(true)
   })
 })
+
+describe('runGridSearch minTrades', () => {
+  it('低樣本（僅 1 筆）高勝率閾值在 default minTrades=10 下被排除 → belowTarget', () => {
+    const res = runGridSearch(singleWinOneTradeData())
+    // 單筆交易不達樣本門檻：不得選出「最佳」，且標記為未達標
+    expect(res.bestThreshold).toBe(0)
+    expect(res.belowTarget).toBe(true)
+    expect(res.totalTrades).toBe(0)
+  })
+
+  it('minTrades:1 時可選出單筆獲利交易閾值（勝率達標 → belowTarget=false）', () => {
+    const res = runGridSearch(singleWinOneTradeData(), { minTrades: 1 })
+    const best = res.allThresholds.find((t) => t.threshold === res.bestThreshold)
+    expect(best).toBeDefined()
+    expect(best!.totalTrades).toBe(1)
+    expect(best!.winRate).toBe(1)
+    expect(res.belowTarget).toBe(false)
+  })
+})
+
+/** 60 根平盤 + 單日重挫 -9% + 進場日反彈 +13%：所有淺至中閾值各得「單筆獲利」交易。 */
+function singleWinOneTradeData(): OHLCV[] {
+  return makeFromRows([
+    [100, 100, 91, 91], // 訊號日：close 91 → 乖離 ≈ -8.8%
+    [92, 104, 92, 103], // 進場日：open 92，high +13% → 觸發 +8% 目標
+  ])
+}
+
+/** 平盤 80 根後 30 日下挫至 →56.5，再單日反彈 +12%：深閾值僅觸發單筆交易、勝率 100%。 */
+function singleTradeReboundData(): OHLCV[] {
+  const data: OHLCV[] = Array.from({ length: 80 }, (_, i) => ({
+    timestamp: (i + 1) * 86400000,
+    open: 100,
+    high: 100,
+    low: 100,
+    close: 100,
+    volume: 1000,
+  }))
+  // 連續 30 日下挫至 60（乖離為負）
+  for (let i = 0; i < 30; i++) {
+    const price = 100 - i * 1.5 // 100 → 56.5
+    data.push({
+      timestamp: (80 + i + 1) * 86400000,
+      open: price,
+      high: price + 1,
+      low: price - 1,
+      close: price,
+      volume: 1000,
+    })
+  }
+  // 底部反彈日：從 56.5 反彈 +12%
+  const baseClose = 100 - 29 * 1.5 // ≈ 56.5
+  const rebound = baseClose * (1 + TARGET_PROFIT + 0.04)
+  data.push({
+    timestamp: (data.length + 1) * 86400000,
+    open: baseClose,
+    high: rebound,
+    low: baseClose,
+    close: baseClose * 1.04,
+    volume: 1000,
+  })
+  return data
+}
 
 describe('常數', () => {
   it('目標條件符合規格：+8% / -5% / 40 日', () => {

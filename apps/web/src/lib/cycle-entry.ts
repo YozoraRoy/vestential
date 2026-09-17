@@ -5,6 +5,7 @@ import {
   passesGate,
   runSignalBacktest,
   MAX_CANDIDATES,
+  MIN_SAMPLE_SIGNALS,
   TW_LARGE_CAP_UNIVERSE,
   resolveStockName,
 } from '@stock/cycle-entry'
@@ -21,6 +22,12 @@ import { createQuickLLM } from '@stock/ai-engine'
 // 4) LLM 逐檔評述＋當日總覽（失敗個別為 null，不整批失敗）
 
 const UNIVERSE_TOP_COUNT = 100
+
+/** 歷史窗口年數：需涵蓋多空循環，才有統計意義（不含近 5 年者自動被長度/樣本門檻排除）。 */
+export const BACKTEST_WINDOW_YEARS = 5
+
+/** 歷史 K 棒長度下限（5 年約 1200 根交易日；600 為保守下限，未達標不入候選）。 */
+export const MIN_HISTORY_LENGTH = 600
 
 /** 台灣日期（Asia/Taipei）ISO；用 UTC+8 偏移計算避免本機時區雙重偏移。 */
 export function twTodayIso(t = Date.now()): string {
@@ -60,7 +67,7 @@ export async function collectCycleCandidates(quotes: BatchQuote[]): Promise<Cycl
   const top = pickTopByMarketCap(quotes, UNIVERSE_TOP_COUNT)
   const end = new Date()
   const start = new Date(end)
-  start.setFullYear(start.getFullYear() - 1)
+  start.setFullYear(start.getFullYear() - BACKTEST_WINDOW_YEARS)
 
   const histories = await mapLimit<BatchQuote, OHLCV[] | null>(
     top,
@@ -68,7 +75,7 @@ export async function collectCycleCandidates(quotes: BatchQuote[]): Promise<Cycl
     async (q) => {
       try {
         const h = await provider.getHistory(q.symbol, 'TW', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10))
-        return h.length >= 120 ? h : null
+        return h.length >= MIN_HISTORY_LENGTH ? h : null
       } catch (e) {
         console.warn(`[CycleEntry] history fetch failed: ${q.symbol}`, e)
         return null
@@ -83,6 +90,8 @@ export async function collectCycleCandidates(quotes: BatchQuote[]): Promise<Cycl
     const last = evaluateLastBar(history)
     if (!last) continue
     if (!passesGate(last.score, last.matchedRules)) continue
+    const stats = runSignalBacktest(history)
+    if (stats.totalSignals < MIN_SAMPLE_SIGNALS) continue
 
     candidates.push({
       symbol: top[i].symbol,
@@ -100,7 +109,7 @@ export async function collectCycleCandidates(quotes: BatchQuote[]): Promise<Cycl
       ma20: last.ma20,
       ma60: last.ma60,
       macdHist: last.macdHist,
-      stats: runSignalBacktest(history),
+      stats,
     })
   }
 
@@ -174,9 +183,9 @@ export async function generateLlmNotes(candidates: CycleCandidate[]): Promise<(s
           const ruleText = c.matchedRules.map((r) => `${r}(${RULE_LABELS[r]})`).join('、')
           const stats = c.stats
           const statsText = stats.totalSignals > 0
-            ? `歷史同規則訊號 ${stats.totalSignals} 次、勝率 ${stats.winRate != null ? (stats.winRate * 100).toFixed(0) + '%' : '—'}、平均 ${stats.avgDaysToTarget != null ? stats.avgDaysToTarget.toFixed(0) + ' 日' : '—'}`
+            ? `歷史同規則訊號 ${stats.totalSignals} 次、勝率 ${stats.winRate != null ? stats.winRate.toFixed(1) + '%' : '—'}、平均 ${stats.avgDaysToTarget != null ? stats.avgDaysToTarget.toFixed(0) + ' 日' : '—'}`
             : '尚無歷史同規則訊號'
-          const prompt = `標的：${c.name ?? c.symbol}（${c.symbol}）\n價格 ${c.price}，距 52 週高 ${(c.pctOff52wHigh * 100).toFixed(1)}%，距低 ${(c.pctOff52wLow * 100).toFixed(1)}%\n觸發規則：${ruleText}（score ${c.score}）\n技術面：RSI ${c.rsi.toFixed(1)} / MA20 ${c.ma20.toFixed(1)} / MA60 ${c.ma60.toFixed(1)} / MACD柱 ${c.macdHist.toFixed(3)}\n擬合回測：${statsText}`
+          const prompt = `標的：${c.name ?? c.symbol}（${c.symbol}）\n價格 ${c.price}，距 52 週高 ${(c.pctOff52wHigh * 100).toFixed(1)}%，距低 ${(c.pctOff52wLow * 100).toFixed(1)}%\n觸發規則：${ruleText}（score ${c.score}）\n技術面：RSI ${c.rsi.toFixed(1)} / MA20 ${c.ma20.toFixed(1)} / MA60 ${c.ma60.toFixed(1)} / MACD柱 ${c.macdHist.toFixed(3)}\n近 5 年回測：${statsText}`
           const note = (await llm.generate(NOTE_SYSTEM_PROMPT, prompt)).trim()
           return note ? note.slice(0, 200) : null
         } catch (e) {

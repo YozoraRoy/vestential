@@ -7,7 +7,7 @@ import { getLatestCycleEntryMeta, getCycleEntrySignalsByEdition } from '@stock/d
 import { SectionHeading } from '@/components/section-heading'
 import { CycleEntrySection } from '@/components/cycle-entry-section'
 import type { CycleEntryDict } from '@/components/cycle-entry-view'
-import { resolveStockName } from '@stock/cycle-entry'
+import { resolveStockName, MIN_SAMPLE_SIGNALS } from '@stock/cycle-entry'
 
 const BASE_URL = 'https://vestential.com'
 
@@ -48,7 +48,10 @@ export default async function CycleEntryPage() {
   const ce = dict.cycleEntry
 
   const meta = await getLatestCycleEntryMeta()
-  const signals = meta ? await getCycleEntrySignalsByEdition(meta.editionDate) : []
+  // 讀取端防護：樣本不足的標的（含舊版次在管線重跑前）不列入公開名單
+  const signals = meta
+    ? (await getCycleEntrySignalsByEdition(meta.editionDate)).filter((s) => (s.btTotalSignals ?? 0) >= MIN_SAMPLE_SIGNALS)
+    : []
 
   const viewDict: CycleEntryDict = {
     viewModeList: ce.viewModeList,
@@ -104,6 +107,11 @@ export default async function CycleEntryPage() {
     exitReasonTarget: ce.exitReasonTarget,
     exitReasonStop: ce.exitReasonStop,
     exitReasonTimeout: ce.exitReasonTimeout,
+    exitReasonOpen: ce.exitReasonOpen,
+    openBadge: ce.openBadge,
+    ciLabel: ce.ciLabel,
+    sampleBadge: ce.sampleBadge,
+    netReturnNote: ce.netReturnNote,
     tradesEmpty: ce.tradesEmpty,
     winRateFormulaTitle: ce.winRateFormulaTitle,
     winRateFormulaText: ce.winRateFormulaText,

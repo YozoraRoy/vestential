@@ -23,7 +23,14 @@ import {
   Area,
 } from 'recharts'
 import type { CycleEntrySignalRow } from '@stock/database'
-import type { EntryStats, OHLCV, SeriesEval, TradeRecord, RuleKey } from '@stock/cycle-entry'
+import {
+  computeWilsonScoreInterval,
+  type EntryStats,
+  type OHLCV,
+  type SeriesEval,
+  type TradeRecord,
+  type RuleKey,
+} from '@stock/cycle-entry'
 import {
   formatWinRate,
   fmt,
@@ -164,12 +171,14 @@ export function CycleEntryDetailModal({ signal, dict, onClose }: Props) {
 
   const equityData = useMemo(() => {
     if (!detail || detail.trades.length === 0) return []
+    const closedTrades = detail.trades.filter((t) => t.outcome !== 'open')
+    if (closedTrades.length === 0) return []
     const points: { date: number; value: number }[] = [
-      { date: new Date(detail.trades[0].entryDate).getTime(), value: 0 },
+      { date: new Date(closedTrades[0].entryDate).getTime(), value: 0 },
     ]
     let acc = 1
-    for (const t of detail.trades) {
-      acc *= 1 + (t.returnPct ?? 0)
+    for (const t of closedTrades) {
+      acc *= 1 + (t.netReturnPct ?? t.returnPct ?? 0)
       points.push({
         date: new Date(t.exitDate ?? t.entryDate).getTime(),
         value: (acc - 1) * 100,
@@ -180,9 +189,14 @@ export function CycleEntryDetailModal({ signal, dict, onClose }: Props) {
 
   const resolvedName = signal ? `${shortSymbol(signal.symbol)} ${signal.name ?? ''}`.trim() : ''
 
+  const decided = (signal?.btWins ?? detail?.stats.wins ?? 0) + (signal?.btLosses ?? detail?.stats.losses ?? 0)
+  const wilsonCi = useMemo(() => {
+    const wins = signal?.btWins ?? detail?.stats.wins ?? 0
+    return computeWilsonScoreInterval(wins, decided)
+  }, [signal, detail, decided])
+
   if (!signal) return null
 
-  const decided = (signal.btWins ?? 0) + (signal.btLosses ?? 0)
   const matchedSet = new Set<RuleKey>(detail?.lastEval?.matchedRules ?? [])
   const showTrades = detail && !loading && !error
 
@@ -255,10 +269,20 @@ export function CycleEntryDetailModal({ signal, dict, onClose }: Props) {
                 <div className="rounded-xl bg-white/[0.03] border border-white/5 p-3">
                   <div className="text-[10px] text-[var(--text-secondary)] mb-1">{dict.btWinRate}</div>
                   <div className="font-semibold tabular-nums">{formatWinRate(detail.signal.btWinRate)}</div>
+                  {wilsonCi ? (
+                    <div className="text-[10px] text-[var(--text-secondary)] tabular-nums mt-0.5 truncate">
+                      CI {wilsonCi.lower}%~{wilsonCi.upper}%
+                    </div>
+                  ) : null}
                 </div>
                 <div className="rounded-xl bg-white/[0.03] border border-white/5 p-3">
                   <div className="text-[10px] text-[var(--text-secondary)] mb-1">{dict.btSignals}</div>
                   <div className="font-semibold tabular-nums">{detail.signal.btTotalSignals ?? '—'}</div>
+                  {detail.stats.openTrades ? (
+                    <div className="text-[10px] text-sky-400 tabular-nums mt-0.5 truncate">
+                      {detail.stats.openTrades} {dict.openBadge}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="rounded-xl bg-white/[0.03] border border-white/5 p-3">
                   <div className="text-[10px] text-[var(--text-secondary)] mb-1">{dict.btAvgDays}</div>
@@ -436,58 +460,75 @@ export function CycleEntryDetailModal({ signal, dict, onClose }: Props) {
                   {showTrades && detail.trades.length === 0 ? (
                     <p className="text-sm text-[var(--text-secondary)] py-8 text-center">{dict.tradesEmpty}</p>
                   ) : showTrades ? (
-                    <div className="overflow-x-auto rounded-xl border border-white/10">
-                      <table className="w-full text-sm min-w-full">
-                        <thead>
-                          <tr className="border-b border-white/10 text-left text-xs text-[var(--text-secondary)]">
-                            <th className="px-3 py-2.5 font-medium whitespace-nowrap">{dict.colSignalDate}</th>
-                            <th className="px-3 py-2.5 font-medium whitespace-nowrap">{dict.colEntryDate}</th>
-                            <th className="px-3 py-2.5 font-medium whitespace-nowrap">{dict.colExitDate}</th>
-                            <th className="px-3 py-2.5 font-medium text-right whitespace-nowrap">{dict.colReturn}</th>
-                            <th className="px-3 py-2.5 font-medium text-right whitespace-nowrap">{dict.colHoldingDays}</th>
-                            <th className="px-3 py-2.5 font-medium whitespace-nowrap">{dict.colExitReason}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {detail.trades.map((t, i) => (
-                            <tr key={i} className="border-b border-white/5 last:border-b-0 align-top">
-                              <td className="px-3 py-3 whitespace-nowrap text-[var(--text-secondary)]">{formatFullDate(t.signalDate)}</td>
-                              <td className="px-3 py-3 whitespace-nowrap">
-                                <div>{formatFullDate(t.entryDate)}</div>
-                                <div className="text-xs text-[var(--text-secondary)] tabular-nums">{fmt(t.entryPrice, 2)}</div>
-                              </td>
-                              <td className="px-3 py-3 whitespace-nowrap">
-                                <div>{formatFullDate(t.exitDate)}</div>
-                                {t.exitPrice != null ? (
-                                  <div className="text-xs text-[var(--text-secondary)] tabular-nums">{fmt(t.exitPrice, 2)}</div>
-                                ) : null}
-                              </td>
-                              <td
-                                className={`px-3 py-3 text-right whitespace-nowrap tabular-nums font-semibold ${
-                                  t.outcome === 'win'
-                                    ? 'text-[var(--accent-green)]'
-                                    : t.outcome === 'loss'
-                                      ? 'text-[var(--accent-red)]'
-                                      : 'text-[var(--text-secondary)]'
-                                }`}
-                              >
-                                {fmtPct(t.returnPct)}
-                              </td>
-                              <td className="px-3 py-3 text-right whitespace-nowrap tabular-nums text-[var(--text-secondary)]">
-                                {t.holdingDays ?? '—'}
-                              </td>
-                              <td className="px-3 py-3 text-xs text-[var(--text-secondary)] whitespace-nowrap">
-                                {t.exitReason === 'target'
-                                  ? dict.exitReasonTarget
-                                  : t.exitReason === 'stop'
-                                    ? dict.exitReasonStop
-                                    : dict.exitReasonTimeout}
-                              </td>
+                    <>
+                      <div className="overflow-x-auto rounded-xl border border-white/10">
+                        <table className="w-full text-sm min-w-full">
+                          <thead>
+                            <tr className="border-b border-white/10 text-left text-xs text-[var(--text-secondary)]">
+                              <th className="px-3 py-2.5 font-medium whitespace-nowrap">{dict.colSignalDate}</th>
+                              <th className="px-3 py-2.5 font-medium whitespace-nowrap">{dict.colEntryDate}</th>
+                              <th className="px-3 py-2.5 font-medium whitespace-nowrap">{dict.colExitDate}</th>
+                              <th className="px-3 py-2.5 font-medium text-right whitespace-nowrap">{dict.colReturn}</th>
+                              <th className="px-3 py-2.5 font-medium text-right whitespace-nowrap">{dict.colHoldingDays}</th>
+                              <th className="px-3 py-2.5 font-medium whitespace-nowrap">{dict.colExitReason}</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                          </thead>
+                          <tbody>
+                            {detail.trades.map((t, i) => (
+                              <tr key={i} className="border-b border-white/5 last:border-b-0 align-top">
+                                <td className="px-3 py-3 whitespace-nowrap text-[var(--text-secondary)]">{formatFullDate(t.signalDate)}</td>
+                                <td className="px-3 py-3 whitespace-nowrap">
+                                  <div>{formatFullDate(t.entryDate)}</div>
+                                  <div className="text-xs text-[var(--text-secondary)] tabular-nums">{fmt(t.entryPrice, 2)}</div>
+                                </td>
+                                <td className="px-3 py-3 whitespace-nowrap">
+                                  {t.outcome === 'open' ? (
+                                    <span className="text-[var(--text-secondary)]">—</span>
+                                  ) : (
+                                    <>
+                                      <div>{formatFullDate(t.exitDate)}</div>
+                                      {t.exitPrice != null ? (
+                                        <div className="text-xs text-[var(--text-secondary)] tabular-nums">{fmt(t.exitPrice, 2)}</div>
+                                      ) : null}
+                                    </>
+                                  )}
+                                </td>
+                                <td
+                                  className={`px-3 py-3 text-right whitespace-nowrap tabular-nums font-semibold ${
+                                    t.outcome === 'win'
+                                      ? 'text-[var(--accent-green)]'
+                                      : t.outcome === 'loss'
+                                        ? 'text-[var(--accent-red)]'
+                                        : 'text-[var(--text-secondary)]'
+                                  }`}
+                                >
+                                  {t.outcome === 'open' ? '—' : fmtPct(t.netReturnPct ?? t.returnPct)}
+                                </td>
+                                <td className="px-3 py-3 text-right whitespace-nowrap tabular-nums text-[var(--text-secondary)]">
+                                  {t.holdingDays ?? '—'}
+                                </td>
+                                <td className="px-3 py-3 text-xs whitespace-nowrap">
+                                  {t.outcome === 'open' ? (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-sky-500/15 text-sky-400 border border-sky-500/25">
+                                      {dict.exitReasonOpen}
+                                    </span>
+                                  ) : t.exitReason === 'target' ? (
+                                    <span className="text-[var(--text-secondary)]">{dict.exitReasonTarget}</span>
+                                  ) : t.exitReason === 'stop' ? (
+                                    <span className="text-[var(--text-secondary)]">{dict.exitReasonStop}</span>
+                                  ) : (
+                                    <span className="text-[var(--text-secondary)]">{dict.exitReasonTimeout}</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="text-[11px] text-[var(--text-secondary)] mt-2">
+                        * {dict.netReturnNote}
+                      </p>
+                    </>
                   ) : null}
                 </div>
               )}
@@ -502,16 +543,31 @@ export function CycleEntryDetailModal({ signal, dict, onClose }: Props) {
                     </div>
                     <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-line">{dict.winRateFormulaText}</p>
                     {decided > 0 ? (
-                      <p className="mt-2.5 inline-flex flex-wrap items-center gap-x-2 text-sm font-semibold tabular-nums">
-                        <span className="text-[var(--accent)]">{dict.btWinRate}</span>
-                        <span className="text-[var(--text-primary)]">
-                          {signal.btWins ?? 0} ÷ ({signal.btWins ?? 0} + {signal.btLosses ?? 0})
-                        </span>
-                        <span className="text-[var(--text-secondary)]">=</span>
-                        <span className={signal.btWinRate != null && signal.btWinRate >= 50 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}>
-                          {formatWinRate(signal.btWinRate)}
-                        </span>
-                      </p>
+                      <div className="mt-2.5 pt-2.5 border-t border-white/10 space-y-1.5">
+                        <div className="inline-flex flex-wrap items-center gap-x-2 text-sm font-semibold tabular-nums">
+                          <span className="text-[var(--accent)]">{dict.btWinRate}</span>
+                          <span className="text-[var(--text-primary)]">
+                            {signal.btWins ?? 0} ÷ ({signal.btWins ?? 0} + {signal.btLosses ?? 0})
+                          </span>
+                          <span className="text-[var(--text-secondary)]">=</span>
+                          <span className={signal.btWinRate != null && signal.btWinRate >= 50 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}>
+                            {formatWinRate(signal.btWinRate)}
+                          </span>
+                        </div>
+                        {wilsonCi ? (
+                          <div className="text-xs text-[var(--text-secondary)] flex flex-wrap items-center gap-1.5 pt-0.5">
+                            <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[var(--text-primary)] text-[11px]">
+                              {dict.ciLabel}
+                            </span>
+                            <span className="tabular-nums font-semibold text-[var(--text-primary)]">
+                              {wilsonCi.lower}% ~ {wilsonCi.upper}%
+                            </span>
+                            <span className="text-[11px] text-[var(--text-secondary)]">
+                              ({dict.sampleBadge}: {decided}{detail.stats.openTrades ? `，${detail.stats.openTrades} 筆${dict.openBadge}` : ''})
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
 

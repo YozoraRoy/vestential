@@ -196,6 +196,8 @@ export class BacktestEngine {
 export interface GridSearchOptions {
   /** 勝率目標（預設 0.75） */
   targetWinRate?: number
+  /** 最低可採樣交易筆數（低於此值的參數視為樣本不足，不得選為最佳；預設 10） */
+  minTrades?: number
   /** 起始閾值（%，負值，預設 -3） */
   startPct?: number
   /** 結束閾值（%，負值，預設 -15） */
@@ -209,6 +211,7 @@ export interface GridSearchOptions {
 /** 遍歷進場閾值，並依「勝率>目標 → trades 多 → avgDays 少」選最佳參數。 */
 export function runGridSearch(ohlcv: OHLCV[], options: GridSearchOptions = {}): GridResult {
   const targetWinRate = options.targetWinRate ?? 0.75
+  const minTrades = options.minTrades ?? 10
   const startPct = options.startPct ?? -3
   const endPct = options.endPct ?? -15
   const stepPct = options.stepPct ?? 0.5
@@ -222,9 +225,12 @@ export function runGridSearch(ohlcv: OHLCV[], options: GridSearchOptions = {}): 
 
   const allThresholds: ThresholdResult[] = thresholds.map((t) => BacktestEngine.run(ohlcv, t, params))
 
-  // 排序：先決 WinRate >= target → trades 多 → avgDaysToTarget 少（null 視為最差）
-  const qualified = allThresholds.filter((r) => r.winRate != null && r.winRate >= targetWinRate)
-  const pool = qualified.length > 0 ? qualified : allThresholds.filter((r) => r.winRate != null)
+  // 排序：先決 WinRate >= target 且樣本 >= minTrades → trades 多 → avgDaysToTarget 少（null 視為最差）
+  const qualified = allThresholds.filter(
+    (r) => r.winRate != null && r.winRate >= targetWinRate && r.totalTrades >= minTrades,
+  )
+  // fallback 亦須過樣本門檻：低樣本的高勝率不得因「達標者從缺」而被選為最佳
+  const pool = qualified.length > 0 ? qualified : allThresholds.filter((r) => r.winRate != null && r.totalTrades >= minTrades)
   const belowTarget = qualified.length === 0
 
   const sortFn = (a: ThresholdResult, b: ThresholdResult) => {

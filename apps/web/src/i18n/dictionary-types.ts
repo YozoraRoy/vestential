@@ -724,6 +724,11 @@ export interface Dict {
     exitReasonTarget: string
     exitReasonStop: string
     exitReasonTimeout: string
+    exitReasonOpen: string
+    openBadge: string
+    ciLabel: string
+    sampleBadge: string
+    netReturnNote: string
     tradesEmpty: string
     winRateFormulaTitle: string
     winRateFormulaText: string

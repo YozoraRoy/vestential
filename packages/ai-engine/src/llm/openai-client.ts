@@ -99,11 +99,13 @@ export class OpenAICompatibleClient implements LLMClient {
           const errText = await res.text()
           const retryAfter = this.parseRetryAfter(res, errText)
           const quotaBlocked = res.status === 429 && retryAfter > 30
+          // 400, 401, 403, 404 等客戶端致命錯誤（如認證失敗、FreeTier 限制、端點不存在）：重試無法解決，直接跳過重試讓 Fallback 接手
+          const fatalClientError = res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404
           const err = new AIError(
             `API ${res.status}: ${errText}${retryAfter > 0 ? ` (retry after ~${Math.round(retryAfter / 60)} min)` : ''}`,
           )
-          // 帳戶層級配額封鎖（例如 free tier 用量上限）：重試無意義，直接拋出讓 Fallback 接手。
-          if (quotaBlocked) {
+          // 帳戶層級配額封鎖或客戶端驗證錯誤：重試無意義，直接拋出讓 Fallback 接手。
+          if (quotaBlocked || fatalClientError) {
             err.retryable = false
           }
           throw err

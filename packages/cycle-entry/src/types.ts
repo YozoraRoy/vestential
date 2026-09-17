@@ -36,16 +36,20 @@ export interface EntryStatsParams {
   maxDrawdown?: number
   /** 持有天數上限（預設 40） */
   holdingDays?: number
+  /** 交易手續費與稅負來回成本（比值，預設 0.006 = 0.6%） */
+  costPct?: number
 }
 
 /** 進場後擬合回測統計（simulation on signal day 之後）。 */
 export interface EntryStats {
-  /** 歷史觸發訊號次數（扣除重疊後） */
+  /** 歷史觸發訊號次數（含已結算與持倉中，扣除重疊後） */
   totalSignals: number
   wins: number
   losses: number
   neutral: number
-  /** 勝率百分比數值（0~100，保留一位小數，如 66.7 代表 66.7%）；無判定結果時 null */
+  /** 資料末端未滿持有天數且未觸及停利停損之持倉中交易數 */
+  openTrades?: number
+  /** 勝率百分比數值（0~100，保留一位小數，如 66.7 代表 66.7%）；分母僅計 wins+losses，無判定結果時 null */
   winRate: number | null
   /** 獲利交易平均達成天數；無 win 時 null */
   avgDaysToTarget: number | null
@@ -59,17 +63,19 @@ export interface TradeRecord {
   entryDate: string
   /** 進場價（進場日開盤價） */
   entryPrice: number
-  /** 出場日（ISO 日期）；持有到期且資料終止時為最後一根交易日 */
+  /** 出場日（ISO 日期）；持有到期為到期日，未平倉 open 為 null */
   exitDate: string | null
-  /** 出場價（停利 / 停損價或到期收盤價） */
+  /** 出場價（停利 / 停損價或到期收盤價）；未平倉 open 為 null */
   exitPrice: number | null
-  /** 單筆報酬率（比值，如 0.08 = +8%、-0.05 = -5%） */
+  /** 單筆毛報酬率（比值，如 0.08 = +8%、-0.05 = -5%）；未平倉 open 為 null */
   returnPct: number | null
-  /** 持有交易天數 */
+  /** 單筆淨報酬率（扣除交易成本 costPct 後，如 0.074 = +7.4%）；未平倉 open 為 null */
+  netReturnPct?: number | null
+  /** 持有交易天數（已平倉為持有天數，持倉中為當前已持有天數） */
   holdingDays: number | null
-  outcome: 'win' | 'loss' | 'neutral'
-  /** 出場原因：target=達成目標停利 / stop=跌破停損 / timeout=持有到期 */
-  exitReason: 'target' | 'stop' | 'timeout'
+  outcome: 'win' | 'loss' | 'neutral' | 'open'
+  /** 出場原因：target=達成目標停利 / stop=跌破停損 / timeout=持有到期 / open=持倉中 */
+  exitReason: 'target' | 'stop' | 'timeout' | 'open'
 }
 
 /** 候選標的（通過門檻：score≥3 且 R1/R2 至少一項）。 */

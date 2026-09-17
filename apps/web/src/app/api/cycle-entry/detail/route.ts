@@ -40,7 +40,7 @@ export async function GET(req: Request) {
     const provider = registry.get('yahoo-finance')
     const end = new Date()
     const start = new Date(end)
-    start.setFullYear(start.getFullYear() - 1)
+    start.setFullYear(start.getFullYear() - 5)
     const history = await provider.getHistory(
       found.symbol,
       'TW',

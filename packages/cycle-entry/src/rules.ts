@@ -8,6 +8,9 @@ export const MIN_EVAL_INDEX = 60
 export const MIN_SCORE = 3
 export const MAX_CANDIDATES = 10
 
+/** 最小歷史樣本：同規則訊號筆數低於此值不具統計意義，不列入公開名單（寫入端＋讀取端雙層使用）。 */
+export const MIN_SAMPLE_SIGNALS = 10
+
 /** R1 參數 */
 export const R1_MIN_OFF_HIGH = -0.4
 export const R1_MAX_OFF_HIGH = -0.15
@@ -143,6 +146,35 @@ export function passesGate(score: number, matchedRules: RuleKey[]): boolean {
   return matchedRules.includes('R1') || matchedRules.includes('R2')
 }
 
+/** 預設交易手續費與證交稅單趟來回成本比值（0.6% round-trip）。 */
+export const DEFAULT_COST_PCT = 0.006
+
+/**
+ * 計算二項比例之 Wilson 95% 信賴區間（Wilson score interval）。
+ * @param wins 獲利筆數
+ * @param total 總決定筆數（wins + losses）
+ * @param z 臨界值（預設 1.96 對應 95% 信心水準）
+ * @returns 百分比區間 { lower: number, upper: number }（0~100，保留一位小數），total <= 0 時回傳 null
+ */
+export function computeWilsonScoreInterval(
+  wins: number,
+  total: number,
+  z = 1.96,
+): { lower: number; upper: number } | null {
+  if (total <= 0) return null
+  const p = wins / total
+  const z2 = z * z
+  const denominator = 1 + z2 / total
+  const center = (p + z2 / (2 * total)) / denominator
+  const margin = (z / denominator) * Math.sqrt((p * (1 - p)) / total + z2 / (4 * total * total))
+  const lower = Math.max(0, center - margin) * 100
+  const upper = Math.min(1, center + margin) * 100
+  return {
+    lower: Math.round(lower * 10) / 10,
+    upper: Math.round(upper * 10) / 10,
+  }
+}
+
 /** 取最後一根（目前狀態）的比對結果；無法評估時回傳 null。 */
 export function evaluateLastBar(ohlcv: OHLCV[]): SeriesEval | null {
   const series = evaluateSeries(ohlcv)
@@ -155,7 +187,7 @@ function simulateTrade(
   startIdx: number,
   entryPrice: number,
   params: EntryStatsParams,
-): { outcome: 'win' | 'loss' | 'neutral'; daysToTarget: number | null; exitPrice: number | null; exitIndex: number | null } {
+): { outcome: 'win' | 'loss' | 'neutral' | 'open'; daysToTarget: number | null; exitPrice: number | null; exitIndex: number | null } {
   const targetProfit = params.targetProfit ?? 0.08
   const maxDrawdown = params.maxDrawdown ?? 0.05
   const holdingDays = params.holdingDays ?? 40
@@ -176,7 +208,19 @@ function simulateTrade(
       return { outcome: 'loss', daysToTarget: null, exitPrice: stopPrice, exitIndex: i }
     }
   }
-  // 到期（持有滿 holdingDays 或資料結束）未觸及停利/停損 → 以最後一根收盤視為出場
+
+  // 若資料結束但尚未持有滿 holdingDays（endIdx == ohlcv.length 且 endIdx < startIdx + holdingDays），
+  // 屬於資料截斷之尾單 → 標為持倉中 open（不顯示強制平倉價，exitPrice 為 null）
+  if (endIdx === ohlcv.length && endIdx < startIdx + holdingDays) {
+    return {
+      outcome: 'open',
+      daysToTarget: null,
+      exitPrice: null,
+      exitIndex: null,
+    }
+  }
+
+  // 持滿 holdingDays 到期未觸及停利/停損 → 以最後一根收盤視為出場（timeout / neutral）
   return {
     outcome: 'neutral',
     daysToTarget: null,
@@ -201,6 +245,7 @@ export function runSignalBacktestDetail(
 ): { stats: EntryStats; trades: TradeRecord[] } {
   const series = evaluateSeries(ohlcv)
   const holdingDays = params.holdingDays ?? 40
+  const costPct = params.costPct ?? DEFAULT_COST_PCT
   const n = ohlcv.length
   const evalByIndex = new Map(series.map((s) => [s.index, s]))
 
@@ -215,8 +260,12 @@ export function runSignalBacktestDetail(
       if (entryPrice > 0) {
         const res = simulateTrade(ohlcv, i + 1, entryPrice, params)
         const exitIndex = res.exitIndex
+        const isClosed = res.outcome !== 'open' && exitIndex != null && res.exitPrice != null
         const returnPct =
-          entryPrice > 0 && res.exitPrice != null ? (res.exitPrice - entryPrice) / entryPrice : null
+          isClosed && entryPrice > 0 ? (res.exitPrice! - entryPrice) / entryPrice : null
+        const netReturnPct =
+          returnPct != null ? Math.round((returnPct - costPct) * 10000) / 10000 : null
+
         trades.push({
           signalDate: toISODate(ohlcv[i].timestamp),
           entryDate: toISODate(ohlcv[i + 1].timestamp),
@@ -224,9 +273,22 @@ export function runSignalBacktestDetail(
           exitDate: exitIndex != null ? toISODate(ohlcv[exitIndex].timestamp) : null,
           exitPrice: res.exitPrice,
           returnPct,
-          holdingDays: exitIndex != null ? (exitIndex < i + 1 ? null : exitIndex - (i + 1) + 1) : null,
+          netReturnPct,
+          holdingDays:
+            res.outcome === 'open'
+              ? ohlcv.length - (i + 1)
+              : exitIndex != null
+                ? (exitIndex < i + 1 ? null : exitIndex - (i + 1) + 1)
+                : null,
           outcome: res.outcome,
-          exitReason: res.outcome === 'win' ? 'target' : res.outcome === 'loss' ? 'stop' : 'timeout',
+          exitReason:
+            res.outcome === 'win'
+              ? 'target'
+              : res.outcome === 'loss'
+                ? 'stop'
+                : res.outcome === 'open'
+                  ? 'open'
+                  : 'timeout',
         })
         i = Math.min(i + 1 + holdingDays, n)
         continue
@@ -238,16 +300,17 @@ export function runSignalBacktestDetail(
   const wins = trades.filter((t) => t.outcome === 'win').length
   const losses = trades.filter((t) => t.outcome === 'loss').length
   const neutral = trades.filter((t) => t.outcome === 'neutral').length
+  const openTrades = trades.filter((t) => t.outcome === 'open').length
   const decided = wins + losses
   const winRate = decided > 0 ? Math.round((wins / decided) * 1000) / 10 : null
   const winTrades = trades.filter((t) => t.outcome === 'win' && t.holdingDays != null)
   const avgDaysToTarget =
     winTrades.length > 0
-      ? winTrades.reduce((s, t) => s + (t.holdingDays ?? 0), 0) / winTrades.length
+      ? Math.round((winTrades.reduce((s, t) => s + (t.holdingDays ?? 0), 0) / winTrades.length) * 10) / 10
       : null
 
   return {
-    stats: { totalSignals: trades.length, wins, losses, neutral, winRate, avgDaysToTarget },
+    stats: { totalSignals: trades.length, wins, losses, neutral, openTrades, winRate, avgDaysToTarget },
     trades,
   }
 }
