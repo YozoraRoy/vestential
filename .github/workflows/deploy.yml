@@ -63,9 +63,9 @@ jobs:
               FALLBACK2_DEEP_THINK_MODEL="" \
               FALLBACK2_QUICK_THINK_MODEL="" \
               FALLBACK2_DEEP_LLM_BACKEND_URL="" \
-              FALLBACK2_DEEP_LLM_API_KEY="" \
+              FALLBACK2_DEEP_LLM_API_KEY="${{ secrets.FALLBACK2_DEEP_LLM_API_KEY }}" \
               FALLBACK2_QUICK_LLM_BACKEND_URL="" \
-              FALLBACK2_QUICK_LLM_API_KEY="" \
+              FALLBACK2_QUICK_LLM_API_KEY="${{ secrets.FALLBACK2_QUICK_LLM_API_KEY }}" \
               LLM_TEMPERATURE=0.7 \
               LLM_DISABLE_THINKING=true \
               LLM_TIMEOUT_MS=180000 \
@@ -124,17 +124,26 @@ jobs:
 
           SCM_URL="https://stock-platform-roy.scm.azurewebsites.net"
 
-          echo "Uploading deploy.zip..."
-          HTTP=$(curl -s -o /tmp/deploy_resp.txt -w "%{http_code}" \
-            --max-time 900 \
-            --connect-timeout 60 \
-            -u "$USER:$PASS" \
-            -H "Content-Type: application/zip" \
-            --data-binary @./deploy.zip \
-            "$SCM_URL/api/zipdeploy?clean=true" 2>/dev/null || echo "000")
-          echo "zipdeploy HTTP $HTTP"
-          if [ "$HTTP" != "200" ] && [ "$HTTP" != "201" ] && [ "$HTTP" != "202" ]; then
-            echo "::error::zipdeploy failed (HTTP $HTTP)"
+          echo "Uploading deploy.zip (with retry for transient SCM restart 502/503)..."
+          SUCCESS=0
+          for attempt in 1 2 3 4; do
+            HTTP=$(curl -s -o /tmp/deploy_resp.txt -w "%{http_code}" \
+              --max-time 900 \
+              --connect-timeout 60 \
+              -u "$USER:$PASS" \
+              -H "Content-Type: application/zip" \
+              --data-binary @./deploy.zip \
+              "$SCM_URL/api/zipdeploy?clean=true" 2>/dev/null || echo "000")
+            echo "Attempt $attempt: zipdeploy HTTP $HTTP"
+            if [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ] || [ "$HTTP" = "202" ]; then
+              SUCCESS=1
+              break
+            fi
+            echo "SCM returned HTTP $HTTP, waiting 20s for SCM container to stabilize..."
+            sleep 20
+          done
+          if [ "$SUCCESS" != "1" ]; then
+            echo "::error::zipdeploy failed after multiple attempts (HTTP $HTTP)"
             cat /tmp/deploy_resp.txt
             echo "Ensuring app is Running even though deploy failed..."
             az webapp start --name stock-platform-roy --resource-group rg-yuzora_roy_ai || true
