@@ -842,7 +842,9 @@ export default function BacktestPage() {
               <div className="flex items-center gap-2 text-[var(--text-secondary)] text-xs mb-2">
                 <TrendingDown className="w-3.5 h-3.5" /> {ui.statBestBias}
               </div>
-              <div className="text-2xl font-bold text-[var(--accent)]">{fmtPct(result.bestThreshold / 100)}</div>
+              <div className="text-2xl font-bold text-[var(--accent)]">
+                {result.bestThreshold < 0 && result.totalTrades > 0 ? fmtPct(result.bestThreshold / 100) : '—'}
+              </div>
             </div>
             <div className="p-4 rounded-xl bg-[var(--bg-card)] border border-white/5">
               <div className="flex items-center gap-2 text-[var(--text-secondary)] text-xs mb-2">
@@ -1265,12 +1267,14 @@ export default function BacktestPage() {
                             ? (insight.livePriceBias ?? insight.latestBias)
                             : (insight.latestBias ?? insight.livePriceBias))
                         : null
+                    const hasValidThreshold =
+                      ready && insight.bestThreshold != null && insight.bestThreshold < 0
                     const insightDistance =
-                      insightBias != null && ready && insight.bestThreshold != null
-                        ? (insightBias - insight.bestThreshold / 100) * 100
+                      insightBias != null && hasValidThreshold
+                        ? (insightBias - insight.bestThreshold! / 100) * 100
                         : null
                     const insightReached =
-                      ready && insightBias != null && insight.bestThreshold != null && insightBias <= insight.bestThreshold / 100
+                      hasValidThreshold && insightBias != null && insightBias <= insight.bestThreshold! / 100
                     return (
                       <button
                         key={item.symbol}
@@ -1303,15 +1307,15 @@ export default function BacktestPage() {
                             <div className="text-[11px] text-[var(--text-secondary)]">—</div>
                           ) : insight ? (
                             <div className="text-[11px] tabular-nums">
-                              {insightReached ? (
+                              {insightReached && hasValidThreshold ? (
                                 <span className="inline-flex items-center gap-1 text-[var(--accent-green)] font-semibold">
                                   <Zap className="w-3 h-3" />
-                                  <span>{fmtPct(insight.bestThreshold != null ? insight.bestThreshold / 100 : 0)}</span>
+                                  <span>{fmtPct(insight.bestThreshold! / 100)}</span>
                                   <span className="hidden sm:inline">· {ui.topEntryZone}</span>
                                 </span>
-                              ) : insightDistance != null && insight.bestThreshold != null ? (
+                              ) : hasValidThreshold && insightDistance != null ? (
                                 <span className="text-[var(--text-secondary)]">
-                                  <span>{fmtPct(insight.bestThreshold / 100)}</span>
+                                  <span>{fmtPct(insight.bestThreshold! / 100)}</span>
                                   <span className="hidden sm:inline"> (距 {insightDistance.toFixed(1)}%)</span>
                                 </span>
                               ) : (

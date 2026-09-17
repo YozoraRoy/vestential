@@ -84,7 +84,6 @@ export async function GET(req: Request) {
       return NextResponse.json(data)
     }
 
-    // 最佳進場乖離閾值：與 /api/backtest 相同的年份窗口 + 表單參數計算。
     let bestThreshold: number | null = null
     try {
       const g = runGridSearch(history, {
@@ -94,7 +93,8 @@ export async function GET(req: Request) {
           maxDrawdown: stopPct / 100,
         },
       })
-      bestThreshold = g.bestThreshold ?? null
+      // 乖離率閾值搜尋範圍全為負值（-3% ~ -15%）；若 bestThreshold 為 0 或無交易紀錄表示樣本不足無有效最佳閾值
+      bestThreshold = g.bestThreshold != null && g.bestThreshold < 0 && g.totalTrades > 0 ? g.bestThreshold : null
     } catch (_) {
       bestThreshold = null
     }
