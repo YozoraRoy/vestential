@@ -336,6 +336,9 @@ export const SUMMARY_SYSTEM_PROMPT = `你是 Vestential 的市場焦點主筆。
 6. 聚焦價值核心：關注基本面動能、實質營收獲利、總經數據（就業/通膨/利率）與資金流向，精準傳達重點。
 7. 只輸出 JSON，不要任何其他文字：{"summary":"..."}`
 
+/** 每日總覽安全預算上限（總覽約 200~300 字，450 token 即可容納，避免佔滿 Groq OTPM=1000 限額）。 */
+const DAILY_SUMMARY_SAFE_MAX_TOKENS = 450
+
 /** 依精選新聞生成當日市場總覽;失敗時以新聞標題兜底。 */
 export async function generateDailySummary(items: MarketFocusItem[]): Promise<string> {
   let threw = false
@@ -343,7 +346,8 @@ export async function generateDailySummary(items: MarketFocusItem[]): Promise<st
     const config = loadConfig()
     // 透過 createQuickLLM 帶上 fallback chain:primary(OpenAI)被配額 429 封鎖時自動切換備援模型
     const rawToken = (await getAgentSetting('market_focus.summary_max_tokens')) ?? ''
-    const maxTokens = Number(rawToken) > 0 ? Math.min(Number(rawToken), FALLBACK_SAFE_MAX_TOKENS) : FALLBACK_SAFE_MAX_TOKENS
+    const maxTokens =
+      Number(rawToken) > 0 ? Math.min(Number(rawToken), FALLBACK_SAFE_MAX_TOKENS) : DAILY_SUMMARY_SAFE_MAX_TOKENS
     const { llm } = createQuickLLM(config, { maxTokens })
     attachLlmUsageRecorder(llm, 'market-focus.summary')
     const promptOverride = (await getAgentSetting('market_focus.summary_prompt')) ?? ''

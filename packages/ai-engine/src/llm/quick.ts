@@ -26,16 +26,17 @@ export function createQuickLLM(config: AppConfig, opts?: QuickLLMOptions): { llm
   let fallbackModel: string | null = null
   if (fallbackProvider) {
     fallbackModel = process.env.FALLBACK_QUICK_THINK_MODEL ?? 'gemini-2.5-flash'
-    const baseUrl =
-      process.env.FALLBACK_QUICK_LLM_BACKEND_URL?.trim() ||
-      process.env.FALLBACK_LLM_BACKEND_URL?.trim() ||
-      (fallbackProvider !== 'google' ? config.backendUrl : '') ||
-      undefined
     const apiKey =
       process.env.FALLBACK_QUICK_LLM_API_KEY?.trim() ||
       process.env.FALLBACK_QUICK_OPENAI_API_KEY?.trim() ||
       process.env.FALLBACK_LLM_API_KEY?.trim() ||
       process.env.FALLBACK_OPENAI_API_KEY?.trim() ||
+      undefined
+    const baseUrl =
+      process.env.FALLBACK_QUICK_LLM_BACKEND_URL?.trim() ||
+      process.env.FALLBACK_LLM_BACKEND_URL?.trim() ||
+      (apiKey?.startsWith('gsk_') ? 'https://api.groq.com/openai/v1' : '') ||
+      (fallbackProvider !== 'google' ? config.backendUrl : '') ||
       undefined
     const fallback = LLMFactory.create({
       provider: fallbackProvider,
@@ -59,17 +60,20 @@ export function createQuickLLM(config: AppConfig, opts?: QuickLLMOptions): { llm
     if (hasTier2) {
       const provider2 = process.env.FALLBACK2_LLM_PROVIDER?.trim() || fallbackProvider
       const model2 = process.env.FALLBACK2_QUICK_THINK_MODEL?.trim() || fallbackModel
-      const baseUrl2 =
-        process.env.FALLBACK2_QUICK_LLM_BACKEND_URL?.trim() ||
-        process.env.FALLBACK2_LLM_BACKEND_URL?.trim() ||
-        process.env.FALLBACK_LLM_BACKEND_URL?.trim() ||
-        (provider2 !== 'google' ? config.backendUrl : '') ||
-        undefined
       const apiKey2 =
         process.env.FALLBACK2_QUICK_LLM_API_KEY?.trim() ||
         process.env.FALLBACK2_QUICK_OPENAI_API_KEY?.trim() ||
         process.env.FALLBACK2_LLM_API_KEY?.trim() ||
         process.env.FALLBACK2_OPENAI_API_KEY?.trim() ||
+        undefined
+      const baseUrl2 =
+        process.env.FALLBACK2_QUICK_LLM_BACKEND_URL?.trim() ||
+        process.env.FALLBACK2_LLM_BACKEND_URL?.trim() ||
+        process.env.FALLBACK_QUICK_LLM_BACKEND_URL?.trim() ||
+        process.env.FALLBACK_LLM_BACKEND_URL?.trim() ||
+        (apiKey2?.startsWith('gsk_') ? 'https://api.groq.com/openai/v1' : '') ||
+        (provider2 !== 'google' ? config.backendUrl : '') ||
+        baseUrl ||
         undefined
       const fallback2 = LLMFactory.create({
         provider: provider2,

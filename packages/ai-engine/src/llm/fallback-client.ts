@@ -3,8 +3,10 @@ import { AIError } from '@stock/core'
 
 /** primary 連續失敗達此數即短熔斷（秒鐘層級，讓備援鏈承接並節省重試時間）。 */
 const PRIMARY_SOFT_COOLDOWN_MS = 3 * 60 * 1000
-/** primary 確定性壞掉（配額封鎖／4xx 客戶端錯誤）：長熔斷，避免每個 call 白等重試。 */
+/** primary 確定性壞掉（無效 key／4xx 客戶端錯誤，排除 429）：長熔斷，避免每個 call 白等重試。 */
 const PRIMARY_HARD_COOLDOWN_MS = 10 * 60 * 1000
+/** primary 頻率/配額限制（429 / Rate limit）：短冷卻 60 秒，讓備援鏈消化該分鐘峰值後自動切回。 */
+const PRIMARY_RATE_LIMIT_COOLDOWN_MS = 60 * 1000
 /** 觸發短熔斷所需的 primary 連續失敗次數。 */
 const PRIMARY_CONSECUTIVE_FAIL_LIMIT = 2
 
@@ -68,19 +70,22 @@ export class FallbackClient implements LLMClient {
 
   private onPrimaryFailure(err: unknown): void {
     const msg = String((err as Error)?.message ?? err)
+    const isRateLimit = /API 429|rate_limit|quota_exceeded|resource_exhausted/i.test(msg)
     const isHard =
-      (err instanceof AIError && err.retryable === false) || /API 4\d\d/.test(msg)
+      !isRateLimit && ((err instanceof AIError && err.retryable === false) || /API 4\d\d/.test(msg))
     const st = this.pstate
     st.failStreak += 1
     const cooldown = isHard
       ? PRIMARY_HARD_COOLDOWN_MS
-      : st.failStreak >= PRIMARY_CONSECUTIVE_FAIL_LIMIT
-        ? PRIMARY_SOFT_COOLDOWN_MS
-        : 0
+      : isRateLimit
+        ? PRIMARY_RATE_LIMIT_COOLDOWN_MS
+        : st.failStreak >= PRIMARY_CONSECUTIVE_FAIL_LIMIT
+          ? PRIMARY_SOFT_COOLDOWN_MS
+          : 0
     if (cooldown > 0) {
       st.skippedUntil = Date.now() + cooldown
       console.warn(
-        `[Fallback] primary ${this.primary.model} 熔斷 ${Math.round(cooldown / 1000)}s，暫由備援鏈接手（streak=${st.failStreak}, hard=${isHard}）`,
+        `[Fallback] primary ${this.primary.model} 熔斷 ${Math.round(cooldown / 1000)}s，暫由備援鏈接手（streak=${st.failStreak}, hard=${isHard}, rateLimit=${isRateLimit}）`,
       )
     }
   }
