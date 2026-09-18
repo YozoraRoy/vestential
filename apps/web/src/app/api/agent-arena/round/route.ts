@@ -40,8 +40,8 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     roundDate,
-    briefing: briefing ? { content: briefing.content, model: briefing.model } : null,
-    discussion: discussion ? { content: discussion.content, model: discussion.model } : null,
+    briefing: briefing ? { content: briefing.content, model: briefing.model, fallbackUsed: briefing.fallback_used === 1 } : null,
+    discussion: discussion ? { content: discussion.content, model: discussion.model, fallbackUsed: discussion.fallback_used === 1 } : null,
     decisionLogs,
     intradayPrices,
   })

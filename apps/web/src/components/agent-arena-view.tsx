@@ -27,6 +27,7 @@ import {
 import { useI18n } from '@/i18n/LanguageProvider'
 import type { Dict } from '@/i18n/dictionaries'
 import { MarkdownText } from '@/components/markdown-text'
+import { roundFreshness, taipeiTodayStr } from '@/lib/twse-calendar'
 
 type Division = 'season' | 'open'
 type Tone = 'aggressive' | 'neutral' | 'conservative'
@@ -69,15 +70,23 @@ interface DecisionLog {
   created_at?: string
 }
 
+interface RoundContent {
+  content: string
+  model?: string | null
+  fallbackUsed: boolean
+}
+
+interface RoundDetail {
+  roundDate: string
+  briefing: RoundContent | null
+  discussion: RoundContent | null
+}
+
 interface StateData {
   season: Season | null
   leaderboards: { season: LeaderboardRow[]; open: LeaderboardRow[] }
   agentsCount: number
-  latestRound?: {
-    roundDate: string
-    briefing: { content: string; model?: string | null } | null
-    discussion: { content: string; model?: string | null } | null
-  } | null
+  latestRound?: RoundDetail | null
 }
 
 interface Holding {
@@ -188,8 +197,16 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
   const [fMinCash, setFMinCash] = useState(10)
   const [fMaxTrades, setFMaxTrades] = useState(2)
 
-  const [briefingOpen, setBriefingOpen] = useState(false)
-  const [discussionOpen, setDiscussionOpen] = useState(false)
+  const [briefingOpen, setBriefingOpen] = useState(true)
+  const [discussionOpen, setDiscussionOpen] = useState(true)
+
+  // 歷史輪次回看（時間軸＋分頁）：selectedDate=null 表示最新
+  const [roundDates, setRoundDates] = useState<string[]>([])
+  const [roundsCursor, setRoundsCursor] = useState<string | null>(null)
+  const [roundsLoading, setRoundsLoading] = useState(false)
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [roundDetail, setRoundDetail] = useState<RoundDetail | null>(null)
+  const [roundLoading, setRoundLoading] = useState(false)
 
   // 任何 Agent 的持股與決策歷程查看狀態
   const [detailAgentId, setDetailAgentId] = useState<number | null>(null)
@@ -303,6 +320,26 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
     setEditing(true)
   }
 
+  const loadRoundsPage = useCallback(async (cursor?: string | null) => {
+    setRoundsLoading(true)
+    try {
+      const url = cursor
+        ? `/api/agent-arena/rounds?limit=10&cursor=${encodeURIComponent(cursor)}`
+        : '/api/agent-arena/rounds?limit=10'
+      const res = await fetch(url, { cache: 'no-store' })
+      const json = await res.json().catch(() => null)
+      if (res.ok && Array.isArray(json?.dates)) {
+        const dates: string[] = json.dates.filter((x: unknown): x is string => typeof x === 'string')
+        setRoundDates((prev) => (cursor ? [...prev, ...dates.filter((x) => !prev.includes(x))] : dates))
+        setRoundsCursor(json.nextCursor ?? null)
+      }
+    } catch {
+      // 時間軸載入失敗不擋主流程，保留既有清單
+    } finally {
+      setRoundsLoading(false)
+    }
+  }, [])
+
   const reload = useCallback(async () => {
     const [stateRes, myRes] = await Promise.all([
       fetch('/api/agent-arena/state', { cache: 'no-store', next: { revalidate: 0 } }),
@@ -313,6 +350,30 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
     if (myRes.ok) {
       const m = await myRes.json()
       setMy(m?.agent ? m : { agent: null, holdings: [], snapshots: [], trades: [] })
+    }
+    // 回到最新輪次並重整時間軸首頁
+    setSelectedDate(null)
+    setRoundDetail(null)
+    await loadRoundsPage(null)
+  }, [loadRoundsPage])
+
+  const selectRoundDate = useCallback(async (date: string | null) => {
+    setSelectedDate(date)
+    if (!date) {
+      setRoundDetail(null)
+      return
+    }
+    setRoundLoading(true)
+    try {
+      const res = await fetch(`/api/agent-arena/round?date=${encodeURIComponent(date)}`, { cache: 'no-store' })
+      const json = await res.json().catch(() => null)
+      if (res.ok && typeof json?.roundDate === 'string') {
+        setRoundDetail({ roundDate: json.roundDate, briefing: json.briefing ?? null, discussion: json.discussion ?? null })
+      }
+    } catch {
+      // 切換失敗保留舊內容，由使用者重試
+    } finally {
+      setRoundLoading(false)
     }
   }, [])
 
@@ -407,6 +468,11 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
   const toneName = (t: string) =>
     t === 'aggressive' ? d.toneAggressive : t === 'conservative' ? d.toneConservative : d.toneNeutral
   const divisionName = (dv: Division) => (dv === 'open' ? d.divisionOpen : d.divisionSeason)
+
+  // 當前顯示輪次：未選日期 → 最新；已選 → 該日快照（經 round?date= 載入）
+  const shownRound: RoundDetail | null | undefined = selectedDate ? roundDetail : (data.latestRound ?? null)
+  const activeRoundDate = selectedDate ?? data.latestRound?.roundDate ?? null
+  const freshness = activeRoundDate ? roundFreshness(activeRoundDate, taipeiTodayStr()) : null
 
   return (
     <div className="space-y-8">
@@ -915,56 +981,142 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
       </section>
 
       {/* 輪次情報（盤前情報與圓桌討論） */}
-      {data.latestRound && (data.latestRound.briefing || data.latestRound.discussion) && (
-        <section className="rounded-xl border border-white/5 bg-[var(--bg-card)] p-5 space-y-3" aria-label="輪次情報">
-          <div className="flex items-center justify-between">
+      {shownRound && (shownRound.briefing || shownRound.discussion) && (
+        <section className="rounded-xl border border-white/5 bg-[var(--bg-card)] p-5 space-y-3" aria-label={d.intelTitle}>
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-[var(--accent)]" />
-              輪次情報（{data.latestRound.roundDate}）
+              {d.intelTitle}
             </h3>
+            {activeRoundDate && (
+              <span className="inline-flex items-center rounded-full bg-[var(--accent)]/15 px-2.5 py-0.5 text-xs font-medium text-[var(--accent)]">
+                {activeRoundDate}
+              </span>
+            )}
+            {freshness && freshness.kind !== 'latest' && (
+              <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-400">
+                {freshness.kind === 'closed'
+                  ? d.closedNotice.replace('{date}', freshness.roundDate)
+                  : d.staleNotice.replace('{date}', freshness.roundDate)}
+              </span>
+            )}
           </div>
+          {/* 歷史輪次時間軸＋分頁 */}
+          {roundDates.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-[var(--text-secondary)]">{d.historyTitle}</div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {roundDates.map((rd) => {
+                  const isActive = (selectedDate ?? data.latestRound?.roundDate) === rd
+                  const isLatest = data.latestRound?.roundDate === rd
+                  return (
+                    <button
+                      key={rd}
+                      type="button"
+                      onClick={() => selectRoundDate(isLatest ? null : rd)}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                        isActive
+                          ? 'bg-[var(--accent)] text-white'
+                          : 'border border-white/10 text-[var(--text-secondary)] hover:border-white/30'
+                      }`}
+                    >
+                      {rd}
+                      {isLatest && (
+                        <span
+                          className={`rounded-full px-1.5 py-px text-[10px] ${
+                            isActive ? 'bg-white/20 text-white' : 'bg-[var(--accent)]/15 text-[var(--accent)]'
+                          }`}
+                        >
+                          {d.historyLatest}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+                {selectedDate && (
+                  <button
+                    type="button"
+                    onClick={() => selectRoundDate(null)}
+                    className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium text-[var(--accent)] hover:underline"
+                  >
+                    {d.historyBackToLatest}
+                  </button>
+                )}
+              </div>
+              {roundsCursor && (
+                <button
+                  type="button"
+                  onClick={() => loadRoundsPage(roundsCursor)}
+                  disabled={roundsLoading}
+                  className="text-xs text-[var(--text-secondary)] hover:text-[var(--accent)] transition disabled:opacity-50"
+                >
+                  {d.historyOlder}
+                </button>
+              )}
+            </div>
+          )}
+          {roundLoading ? (
+            <div className="py-6 text-sm text-[var(--text-secondary)]">{d.loading}</div>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {data.latestRound.briefing && (
+            {shownRound.briefing && (
               <div className="rounded-lg border border-white/5 bg-[var(--bg-secondary)] p-3.5">
                 <button
                   type="button"
                   onClick={() => setBriefingOpen((v) => !v)}
                   className="flex w-full items-center justify-between text-left text-sm font-medium text-[var(--text-primary)] hover:text-[var(--accent)]"
                 >
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex flex-wrap items-center gap-1.5">
                     <FileText className="w-4 h-4 text-blue-400" />
                     {d.briefingTitle}
+                    <span className="inline-flex items-center rounded-full bg-white/5 px-2 py-px text-[11px] font-normal text-[var(--text-secondary)]">
+                      {shownRound.briefing.model || '—'}
+                    </span>
+                    {shownRound.briefing.fallbackUsed && (
+                      <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-px text-[11px] font-normal text-amber-400">
+                        {d.fallbackBadge}
+                      </span>
+                    )}
                   </span>
-                  {briefingOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  {briefingOpen ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
                 </button>
                 {briefingOpen && (
                   <div className="mt-3 text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed border-t border-white/5 pt-2.5 max-h-80 overflow-y-auto">
-                    <MarkdownText text={data.latestRound.briefing.content} />
+                    <MarkdownText text={shownRound.briefing.content} />
                   </div>
                 )}
               </div>
             )}
-            {data.latestRound.discussion && (
+            {shownRound.discussion && (
               <div className="rounded-lg border border-white/5 bg-[var(--bg-secondary)] p-3.5">
                 <button
                   type="button"
                   onClick={() => setDiscussionOpen((v) => !v)}
                   className="flex w-full items-center justify-between text-left text-sm font-medium text-[var(--text-primary)] hover:text-[var(--accent)]"
                 >
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex flex-wrap items-center gap-1.5">
                     <MessageSquare className="w-4 h-4 text-purple-400" />
                     {d.discussionTitle}
+                    <span className="inline-flex items-center rounded-full bg-white/5 px-2 py-px text-[11px] font-normal text-[var(--text-secondary)]">
+                      {shownRound.discussion.model || '—'}
+                    </span>
+                    {shownRound.discussion.fallbackUsed && (
+                      <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-px text-[11px] font-normal text-amber-400">
+                        {d.fallbackBadge}
+                      </span>
+                    )}
                   </span>
-                  {discussionOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  {discussionOpen ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
                 </button>
                 {discussionOpen && (
                   <div className="mt-3 text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed border-t border-white/5 pt-2.5 max-h-80 overflow-y-auto">
-                    <MarkdownText text={data.latestRound.discussion.content} />
+                    <MarkdownText text={shownRound.discussion.content} />
                   </div>
                 )}
               </div>
             )}
           </div>
+          )}
         </section>
       )}
 

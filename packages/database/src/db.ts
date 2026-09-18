@@ -4718,6 +4718,26 @@ export function getArenaDiscussion(roundDate: string): Promise<ArenaDiscussionRo
   )
 }
 
+/**
+ * 歷史輪次日期清單（keyset 分頁，供 agent-arena 時間軸回看用）。
+ * 以 arena_equity_snapshots 的 distinct round_date 為權威輪次列表（每輪跑完必寫 snapshots）。
+ * @param limit 每頁筆數（呼叫端已夾取 1~30）
+ * @param cursor 僅回傳早於此日期（YYYY-MM-DD）的輪次；省略則從最新開始
+ */
+export function listArenaRoundDates(limit: number, cursor?: string): Promise<Array<{ round_date: string }>> {
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || 10, 1), 30)
+  if (cursor) {
+    return dbQueryAll<{ round_date: string }>(
+      'SELECT DISTINCT round_date FROM arena_equity_snapshots WHERE round_date < @cursor ORDER BY round_date DESC LIMIT @limit',
+      { cursor, limit: safeLimit },
+    )
+  }
+  return dbQueryAll<{ round_date: string }>(
+    'SELECT DISTINCT round_date FROM arena_equity_snapshots ORDER BY round_date DESC LIMIT @limit',
+    { limit: safeLimit },
+  )
+}
+
 // ─── 社群小編 (social_posts) ─────────────────────────────────────
 export type SocialPostPlatform = 'instagram' | 'threads' | 'facebook'
 export type SocialPostStatus = 'pending' | 'container_created' | 'published' | 'failed' | 'dry_run'

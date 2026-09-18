@@ -25,15 +25,15 @@ export async function GET() {
       ),
     ])
     const maxDate = latestRound?.max_date ?? null
-    let briefing: { content: string; model?: string | null } | null = null
-    let discussion: { content: string; model?: string | null } | null = null
+    let briefing: { content: string; model?: string | null; fallbackUsed: boolean } | null = null
+    let discussion: { content: string; model?: string | null; fallbackUsed: boolean } | null = null
     if (maxDate) {
       const [b, d] = await Promise.all([
         getArenaMarketBriefing(maxDate),
         getArenaDiscussion(maxDate),
       ])
-      if (b) briefing = { content: b.content, model: b.model }
-      if (d) discussion = { content: d.content, model: d.model }
+      if (b) briefing = { content: b.content, model: b.model, fallbackUsed: b.fallback_used === 1 }
+      if (d) discussion = { content: d.content, model: d.model, fallbackUsed: d.fallback_used === 1 }
     }
 
     const agents = await listActiveArenaAgents()

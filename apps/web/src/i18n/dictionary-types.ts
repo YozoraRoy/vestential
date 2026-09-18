@@ -813,6 +813,14 @@ export interface Dict {
     timelineEmpty: string
     briefingTitle: string
     discussionTitle: string
+    intelTitle: string
+    closedNotice: string
+    staleNotice: string
+    fallbackBadge: string
+    historyTitle: string
+    historyLatest: string
+    historyOlder: string
+    historyBackToLatest: string
     phasePremarket: string
     phaseTrade: string
     phasePostclose: string
