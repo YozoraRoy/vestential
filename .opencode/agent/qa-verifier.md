@@ -21,17 +21,60 @@ repo files.
 - Issue number（`gh issue view <N> --repo YozoraRoy/vestential --comments` 讀 body）
 - `REALM`：`local` 與/或 `production`（驗證範圍；production 只對已部署後狀態驗）
 
+## Anti-hang hard rules（防卡死硬規則，必守 — 2026-09-18 Issue #13：殘留 server 佔 3000 port 曾使 QA task 卡死約 1 小時）
+
+- **預設禁起 server**：local smoke 所需的 dev server 預設由主 agent（observer）
+  事先起好並在 QA prompt 內告知 base URL（如 `http://localhost:3000`），你**不要**
+  自行起 server。若 prompt 首行未顯式授權「允許自起 server」，起 server 相關
+  命令一律視為禁用。
+- **例外自起 — 唯一允許 detach 三要素**：僅當 prompt 首行顯式授權自起時，
+  才可用以下完全 detach 方式（`AGENTS.md` §4），起完**立即回傳 pid 就結束**，
+  不在此 task 內做任何等待：
+  ```powershell
+  $p = Start-Process -FilePath "powershell" -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-Command","npm run dev" `
+    -WorkingDirectory "D:\PG\stock-platform" `
+    -RedirectStandardOutput "$env:TEMP\opencode\devout.log" `
+    -RedirectStandardError "$env:TEMP\opencode\deverr.log" `
+    -WindowStyle Hidden -PassThru
+  $p.Id   # 立即回傳，禁止在此 task 內輪詢 Ready
+  ```
+  三要素缺一不可：`-RedirectStandardOutput/-RedirectStandardError`（log 導至
+  暫存檔，不繼承父 console handle）＋ `-WindowStyle Hidden -PassThru`
+  （detach＋拿 pid）＋ 起完立即回傳 pid。
+- **明文禁止**（出現任一即視為違規步驟）：
+  - 在 task 內直接跑 `npm run dev`（前台長駐，bash tool 等不到結束 → 整個
+    task 看似卡住）；
+  - `Start-Process -NoNewWindow` 起 server（child 繼承 console handle，同樣卡住）；
+  - 在 task 內輪詢 `Ready`（`Get-Content …\devout.log -Wait`、
+    `while` 迴圈等 log、重試 `curl /` 直到通為止）；
+  - `Get-NetTCPConnection` 迴圈等待 port（Ready／port 檢查／停機永遠是
+    observer／主 agent 的工作，不是你的）。
+- **所有對外呼叫一律顯式短 timeout**：每個 `curl`／`Invoke-WebRequest`／
+  `Invoke-RestMethod`／powershell 對外呼叫都必須帶 timeout 參數，無 timeout
+  參數的驗證步驟視為不合格：
+  ```powershell
+  # curl：--max-time 10（秒）
+  curl --max-time 10 http://localhost:3000/<route>
+  # PowerShell：-TimeoutSec 10～15
+  Invoke-WebRequest -Uri http://localhost:3000/<route> -TimeoutSec 15 -UseBasicParsing
+  Invoke-RestMethod -Uri https://vestential.com/<route> -TimeoutSec 15
+  ```
+- **時間預算**：單一 QA task 預算 25–30 分鐘（由主 agent 在派單時執行，
+  見 `dev-loop.md`）；超時失聯時主 agent 改走降級驗收，你的 runtime 項目會被
+  標 `UNVERIFIED` 並在生產驗證補強 — 不要為趕時間謊報 `PASS`。
+
 ## Verification workflow (in order)
 
 1. **Static gate** — run `npm run typecheck` and `npm run lint` at repo root,
    record exact error counts. Nothing passes if these fail.
-2. **Local smoke (REALM=local)** — start the web dev server and verify the
-   Issue's acceptance criteria (target routes/markers). Dev server rules per
-   `AGENTS.md` §4: if you must start it, use the **fully-detached** pattern
-   (`Start-Process` with `-RedirectStandardOutput/-RedirectStandardError` to
-   `$env:TEMP\opencode\*.log`, `-WindowStyle Hidden -PassThru`) and **return the
-   pid immediately**; the observer (main agent) owns Ready/port checks/shutdown.
-   Use short timeouts on every `curl`/PowerShell call.
+2. **Local smoke (REALM=local)** — verify the Issue's acceptance criteria
+    against the base URL given in your prompt (default: dev server already
+    started by the main agent). Start a server yourself ONLY if the first
+    line of your prompt explicitly authorizes it, and then ONLY via the
+    fully-detached pattern in `## Anti-hang hard rules` above
+    (`AGENTS.md` §4); return the pid immediately — the observer (main agent)
+    owns Ready/port checks/shutdown. Every `curl`/PowerShell call carries an
+    explicit short timeout (`curl --max-time 10`, `-TimeoutSec 10～15`).
 3. **Production acceptance (REALM=production)** — `curl` the production URLs
    (`https://vestential.com/...`) and assert stable markers from the Issue.
 4. **Data side-effects** — if the Issue declares DB/email/cron side effects,
