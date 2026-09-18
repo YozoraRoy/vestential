@@ -862,6 +862,7 @@ export const zhTW: Dict = {
     closedNotice: '截至 {date}・休市無新盤',
     staleNotice: '截至 {date}・舊篇回看',
     fallbackBadge: '備援模板',
+    modelFallbackBadge: '備援模型',
     historyTitle: '歷史輪次',
     historyLatest: '最新',
     historyOlder: '載入更早輪次',

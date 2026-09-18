@@ -7,6 +7,7 @@ import {
   getArenaIntradayPrices,
   dbQueryFirst,
 } from '@stock/database'
+import { isTemplateFallbackContent } from '@/lib/arena-fallback'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,8 +41,8 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     roundDate,
-    briefing: briefing ? { content: briefing.content, model: briefing.model, fallbackUsed: briefing.fallback_used === 1 } : null,
-    discussion: discussion ? { content: discussion.content, model: discussion.model, fallbackUsed: discussion.fallback_used === 1 } : null,
+    briefing: briefing ? { content: briefing.content, model: briefing.model, fallbackUsed: briefing.fallback_used === 1, isTemplateFallback: isTemplateFallbackContent(briefing.content, 'briefing') } : null,
+    discussion: discussion ? { content: discussion.content, model: discussion.model, fallbackUsed: discussion.fallback_used === 1, isTemplateFallback: isTemplateFallbackContent(discussion.content, 'discussion') } : null,
     decisionLogs,
     intradayPrices,
   })

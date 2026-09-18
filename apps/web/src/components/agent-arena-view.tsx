@@ -28,6 +28,7 @@ import { useI18n } from '@/i18n/LanguageProvider'
 import type { Dict } from '@/i18n/dictionaries'
 import { MarkdownText } from '@/components/markdown-text'
 import { roundFreshness, taipeiTodayStr } from '@/lib/twse-calendar'
+import { resolveFallbackKind, type ArenaTemplateKind } from '@/lib/arena-fallback'
 
 type Division = 'season' | 'open'
 type Tone = 'aggressive' | 'neutral' | 'conservative'
@@ -74,6 +75,8 @@ interface RoundContent {
   content: string
   model?: string | null
   fallbackUsed: boolean
+  /** 後端依模板特徵字串判定；缺席時前台以 content 回退判定（Issue #14） */
+  isTemplateFallback?: boolean
 }
 
 interface RoundDetail {
@@ -172,6 +175,38 @@ const PERSONALITY_PRESETS = [
 
 const fmt = (n: number | null | undefined, digits = 0): string =>
   n == null ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: digits })
+
+/**
+ * 備援徽章判定（Issue #14）：模板備援 →「備援模板」（amber）；
+ * 模型備援（fallbackUsed 但非模板原文，如 2026-09-18 discussion）→「備援模型」（sky）；
+ * 無備援 → 不顯示。後端 `isTemplateFallback` 缺席時以前台 content 比對回退。
+ */
+function FallbackBadge({ item, kind, d }: { item: RoundContent | null; kind: ArenaTemplateKind; d: Dict['agentArena'] }) {
+  if (!item) return null
+  const resolved =
+    item.isTemplateFallback === true
+      ? ('template' as const)
+      : item.isTemplateFallback === false
+        ? item.fallbackUsed
+          ? ('model' as const)
+          : null
+        : resolveFallbackKind(item, kind)
+  if (resolved === 'template') {
+    return (
+      <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-px text-[11px] font-normal text-amber-400">
+        {d.fallbackBadge}
+      </span>
+    )
+  }
+  if (resolved === 'model') {
+    return (
+      <span className="inline-flex items-center rounded-full bg-sky-500/15 px-2 py-px text-[11px] font-normal text-sky-400">
+        {d.modelFallbackBadge}
+      </span>
+    )
+  }
+  return null
+}
 
 export function AgentArenaView({ homePath, loginPath }: { homePath: string; loginPath: string }) {
   const { dict } = useI18n()
@@ -1072,11 +1107,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                     <span className="inline-flex items-center rounded-full bg-white/5 px-2 py-px text-[11px] font-normal text-[var(--text-secondary)]">
                       {shownRound.briefing.model || '—'}
                     </span>
-                    {shownRound.briefing.fallbackUsed && (
-                      <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-px text-[11px] font-normal text-amber-400">
-                        {d.fallbackBadge}
-                      </span>
-                    )}
+                    <FallbackBadge item={shownRound.briefing} kind="briefing" d={d} />
                   </span>
                   {briefingOpen ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
                 </button>
@@ -1100,11 +1131,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                     <span className="inline-flex items-center rounded-full bg-white/5 px-2 py-px text-[11px] font-normal text-[var(--text-secondary)]">
                       {shownRound.discussion.model || '—'}
                     </span>
-                    {shownRound.discussion.fallbackUsed && (
-                      <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-px text-[11px] font-normal text-amber-400">
-                        {d.fallbackBadge}
-                      </span>
-                    )}
+                    <FallbackBadge item={shownRound.discussion} kind="discussion" d={d} />
                   </span>
                   {discussionOpen ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
                 </button>

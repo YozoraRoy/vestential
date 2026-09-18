@@ -862,6 +862,7 @@ export const ja: Dict = {
     closedNotice: '{date} 時点・休場のため新ラウンドなし',
     staleNotice: '{date} 時点のアーカイブ',
     fallbackBadge: 'フォールバックテンプレート',
+    modelFallbackBadge: 'フォールバックモデル',
     historyTitle: '過去ラウンド',
     historyLatest: '最新',
     historyOlder: 'さらに前のラウンドを読み込む',

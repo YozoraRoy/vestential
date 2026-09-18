@@ -7,6 +7,7 @@ import {
   getArenaDiscussion,
   dbQueryFirst,
 } from '@stock/database'
+import { isTemplateFallbackContent } from '@/lib/arena-fallback'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,15 +26,15 @@ export async function GET() {
       ),
     ])
     const maxDate = latestRound?.max_date ?? null
-    let briefing: { content: string; model?: string | null; fallbackUsed: boolean } | null = null
-    let discussion: { content: string; model?: string | null; fallbackUsed: boolean } | null = null
+    let briefing: { content: string; model?: string | null; fallbackUsed: boolean; isTemplateFallback: boolean } | null = null
+    let discussion: { content: string; model?: string | null; fallbackUsed: boolean; isTemplateFallback: boolean } | null = null
     if (maxDate) {
       const [b, d] = await Promise.all([
         getArenaMarketBriefing(maxDate),
         getArenaDiscussion(maxDate),
       ])
-      if (b) briefing = { content: b.content, model: b.model, fallbackUsed: b.fallback_used === 1 }
-      if (d) discussion = { content: d.content, model: d.model, fallbackUsed: d.fallback_used === 1 }
+      if (b) briefing = { content: b.content, model: b.model, fallbackUsed: b.fallback_used === 1, isTemplateFallback: isTemplateFallbackContent(b.content, 'briefing') }
+      if (d) discussion = { content: d.content, model: d.model, fallbackUsed: d.fallback_used === 1, isTemplateFallback: isTemplateFallbackContent(d.content, 'discussion') }
     }
 
     const agents = await listActiveArenaAgents()

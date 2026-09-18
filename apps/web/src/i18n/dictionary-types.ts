@@ -817,6 +817,7 @@ export interface Dict {
     closedNotice: string
     staleNotice: string
     fallbackBadge: string
+    modelFallbackBadge: string
     historyTitle: string
     historyLatest: string
     historyOlder: string

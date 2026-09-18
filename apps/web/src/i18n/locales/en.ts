@@ -862,6 +862,7 @@ export const en: Dict = {
     closedNotice: 'As of {date} · market closed, no new round',
     staleNotice: 'Archive as of {date}',
     fallbackBadge: 'Fallback Template',
+    modelFallbackBadge: 'Fallback Model',
     historyTitle: 'Round History',
     historyLatest: 'Latest',
     historyOlder: 'Load older rounds',
