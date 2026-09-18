@@ -1104,9 +1104,6 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   <span className="flex flex-wrap items-center gap-1.5">
                     <FileText className="w-4 h-4 text-blue-400" />
                     {d.briefingTitle}
-                    <span className="inline-flex items-center rounded-full bg-white/5 px-2 py-px text-[11px] font-normal text-[var(--text-secondary)]">
-                      {shownRound.briefing.model || '—'}
-                    </span>
                     <FallbackBadge item={shownRound.briefing} kind="briefing" d={d} />
                   </span>
                   {briefingOpen ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
@@ -1128,9 +1125,6 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                   <span className="flex flex-wrap items-center gap-1.5">
                     <MessageSquare className="w-4 h-4 text-purple-400" />
                     {d.discussionTitle}
-                    <span className="inline-flex items-center rounded-full bg-white/5 px-2 py-px text-[11px] font-normal text-[var(--text-secondary)]">
-                      {shownRound.discussion.model || '—'}
-                    </span>
                     <FallbackBadge item={shownRound.discussion} kind="discussion" d={d} />
                   </span>
                   {discussionOpen ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
