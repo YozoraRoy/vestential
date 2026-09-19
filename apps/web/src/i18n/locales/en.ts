@@ -26,6 +26,7 @@ export const en: Dict = {
     oddLot: 'Odd Lots',
     portfolio: 'Portfolio',
     backtest: 'Backtest Lab',
+    cycleEntry: 'Entry Picks',
     marketFocus: 'Market Focus',
     agentArena: 'AI Arena',
   },

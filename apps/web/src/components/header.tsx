@@ -14,6 +14,7 @@ const navItems: { key: keyof Dict['nav']; href: string }[] = [
   { key: 'home', href: '/' },
   { key: 'oddLot', href: '/odd-lot' },
   { key: 'backtest', href: '/backtest' },
+  { key: 'cycleEntry', href: '/cycle-entry' },
   { key: 'portfolio', href: '/portfolio' },
   { key: 'analyze', href: '/analyze' },
   { key: 'marketFocus', href: '/market-focus' },

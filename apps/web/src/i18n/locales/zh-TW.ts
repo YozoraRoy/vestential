@@ -26,6 +26,7 @@ export const zhTW: Dict = {
     oddLot: '零股情報',
     portfolio: '個人損益',
     backtest: '回測實驗室',
+    cycleEntry: '進場標的',
     marketFocus: '市場焦點',
     agentArena: 'AI 競技場',
   },

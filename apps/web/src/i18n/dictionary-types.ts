@@ -33,6 +33,7 @@ export interface Dict {
     oddLot: string
     portfolio: string
     backtest: string
+    cycleEntry: string
     marketFocus: string
     agentArena: string
   }
