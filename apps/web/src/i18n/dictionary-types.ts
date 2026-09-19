@@ -392,6 +392,9 @@ export interface Dict {
     agentComplete: string
     resumingAnalysis: string
     jobPartial: string
+    searchPlaceholder: string
+    invalidTaiwanSymbol: string
+    onlyStockEtf: string
   }
   errorPage: {
     title: string

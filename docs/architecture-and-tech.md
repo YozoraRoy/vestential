@@ -71,7 +71,7 @@ flowchart TB
 
 ---
 
-## 3. 8-Agent AI 協作引擎
+## 3. 8-Agent AI 協作引擎（`/analyze` 僅支援台股）
 
 進入 `/analyze` 進行深度分析時，系統循序啟動 8 個分工代理人，各司其職：
 
@@ -86,6 +86,12 @@ flowchart TB
 
 > **0.3 秒無效代號熔斷門禁 (Early-Exit Guard)**：
 > 在耗費 LLM 額度之前，系統先於記憶體高速驗證股票代號真實性。若輸入不存在代碼，立即在 0.3 秒內回傳錯誤並提示修正，避免浪費使用者的等待時間與每日配額。
+>
+> **台股限定門禁（`/analyze` 不支援美股）**：
+> `/analyze` 僅接受台股代號（純數字 4~6 碼，可附 `.TW`／`.TWO`，大小寫皆可）。
+> 前台先做即時格式驗證（不符不發 API）；`/api/analyze` 後端再做格式驗證（不符回 400，不扣 quota、不建 job）；
+> 權證／牛熊證以後端 Yahoo `quoteType` 為準（僅 `EQUITY`／`ETF` 放行，其餘擋，判定在 quota 扣除前）。
+> 後端 market-data／ai-engine 的 Yahoo US 讀取能力保留（共用元件，`/portfolio` 仍維持台美雙市場）。
 
 ---
 

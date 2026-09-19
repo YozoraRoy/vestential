@@ -47,7 +47,7 @@ openssl rand -base64 32
 
 | 功能項目 | 適用對象 | 免費額度上限 | 重置週期 | 紀錄資料表 |
 | :--- | :--- | :--- | :--- | :--- |
-| **8-Agent AI 深度分析 (`/analyze`)** | 登入使用者 | 每日 **3 次** | 台灣時間午夜 00:00 | `analysis_quota` |
+| **8-Agent AI 深度分析 (`/analyze`，僅限台股代號)** | 登入使用者 | 每日 **3 次** | 台灣時間午夜 00:00 | `analysis_quota` |
 | **個人損益 AI 投資建議 (`/portfolio`)**| 登入使用者 | 與上方共用每日 3 次 | 台灣時間午夜 00:00 | `analysis_quota` |
 | **券商截圖 AI 圖片辨識 (`/portfolio`)** | 登入使用者 | 每日 **10 次** | 台灣時間午夜 00:00 | `recognition_usage` |
 | **自訂持股損益試算 (`/portfolio`)** | 免登入訪客 / 登入者 | 無限制 | — | `portfolio_records` |

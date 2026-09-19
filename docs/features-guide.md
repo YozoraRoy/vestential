@@ -7,7 +7,7 @@
 ## 1. 💰 個人損益試算與 AI 投資建議 (`/portfolio`)
 
 ### 1.1 多市場持倉管理
-- **台股與美股雙支援**：台股輸入純數字代號自動辨識上市櫃（`.TW` / `.TWO`），美股輸入代號直接讀取報價。
+- **台股與美股雙支援**：台股輸入純數字代號自動辨識上市櫃（`.TW` / `.TWO`），美股輸入代號直接讀取報價。（本節 `/portfolio` 仍維持台美雙市場；`/analyze` 僅支援台股，詳見 §9。）
 - **自動與手動計價**：系統自動串接最新盤中報價與歷史股息，計算持股成本、現前市值、未實現損益、總報酬率與成本殖利率（Yield on Cost）。使用者亦可手動覆蓋現價進行情境試算。
 
 ### 1.2 📷 券商截圖 AI 辨識批次匯入
@@ -151,3 +151,11 @@
 
 ### 8.3 資料庫清理保護
 - `market-focus` job 成功收尾時 fire-and-forget 執行 `cleanupMarketFocusLogs(7)`（保留近 7 天）與 `cleanupSocialCardImages(30)`（保留近 30 期圖卡），避免 Azure SQL 囤積。
+
+---
+
+## 9. 🤖 AI 智能分析 (`/analyze`，僅支援台股)
+
+- **範圍**：`/analyze` 僅接受台股代號（純數字 **4~6 碼**，可附 `.TW` / `.TWO`，大小寫皆可）；美股代號（如 AAPL / SPCX）、`2330.US`、含字母代號與 3 碼以下數字一律拒絕。`/portfolio` 仍維持台美雙市場，不受影響。
+- **雙層門禁（quota 扣除前）**：前台即時格式驗證（不發 API）＋後端 `/api/analyze` 格式驗證（回 400，不扣 `analysis_quota`、不建 `analysis_jobs`）；權證／牛熊證以後端 Yahoo `quoteType` 為準（僅 `EQUITY`／`ETF` 放行，其餘擋，不扣 quota、不建 job、不寫 `analysis_records`）。
+- **呈現**：結果 badge 僅 stock／etf／index；既有歷史分析紀錄（含美股 ticker）原樣保留顯示，僅阻擋新建美股分析。

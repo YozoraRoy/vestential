@@ -12,6 +12,7 @@ import { AgentReportSection, REPORT_FIELD_TO_AGENT } from '@/components/agent-re
 import { useI18n } from '@/i18n/LanguageProvider'
 import { localizePath } from '@/i18n/paths'
 import type { Dict } from '@/i18n/dictionaries'
+import { isTaiwanSymbol, normalizeTaiwanSymbol } from '@/lib/taiwan-symbol'
 
 function formatLLMError(raw: string, dict: Dict): string {
   const ui = dict.analyzePage
@@ -153,6 +154,16 @@ function AnalyzeContent() {
     fetchHistory(symbolParam)
   }, [fetchHistory, symbolParam, authChecking])
 
+  // 舊深連結防禦：?symbol=AAPL 等非台股格式顯示同款台股格式錯誤，不自動分析。
+  useEffect(() => {
+    if (authChecking) return
+    if (symbolParam && !isTaiwanSymbol(symbolParam)) {
+      setError(dict.analyzePage.invalidTaiwanSymbol)
+    } else {
+      setError(prev => (prev === dict.analyzePage.invalidTaiwanSymbol ? null : prev))
+    }
+  }, [symbolParam, authChecking, dict])
+
   // LLM 重試倒數計時器
   useEffect(() => {
     if (retryCountdown === null || retryCountdown <= 0) return
@@ -229,6 +240,13 @@ function AnalyzeContent() {
       setError(ui.minAgentError)
       return
     }
+    // 台股格式 gate（後端亦有同款防禦）：不符即時顯示三語錯誤，不發 API、不扣 quota。
+    const normalizedSymbol = normalizeTaiwanSymbol(symbol)
+    if (!isTaiwanSymbol(normalizedSymbol)) {
+      setError(ui.invalidTaiwanSymbol)
+      return
+    }
+    symbol = normalizedSymbol
     setLoading(true)
     setAnalysis(null)
     setError(null)
@@ -267,6 +285,15 @@ function AnalyzeContent() {
           setError(body.error || ui.rateLimitError.replace('{used}', String(body.quota?.used ?? 3)))
           return
         }
+        // 後端台股門禁（格式／權證）：以後端 code 對應三語文案顯示。
+        if (body.code === 'ONLY_STOCK_ETF') {
+          setError(ui.onlyStockEtf)
+          return
+        }
+        if (body.code === 'INVALID_TAIWAN_SYMBOL') {
+          setError(ui.invalidTaiwanSymbol)
+          return
+        }
         throw new Error(body.error || `HTTP ${res.status}`)
       }
 
@@ -278,7 +305,7 @@ function AnalyzeContent() {
             if (m) setRetryCountdown(parseInt(m[1], 10))
           }
           if (progress.step === 'Instrument Classifier' && typeof progress.detail === 'string') {
-            const cm = progress.detail.match(/\bas (stock|etf|index|crypto|future)\b/i)
+            const cm = progress.detail.match(/\bas (stock|etf|index)\b/i)
             if (cm) setAssetType(cm[1].toLowerCase())
           }
         }

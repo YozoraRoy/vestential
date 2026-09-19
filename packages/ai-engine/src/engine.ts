@@ -418,7 +418,7 @@ export class TradingEngine {
       const hasValidProfile = profile && profile.name && profile.name !== resolvedTicker
 
       if (!hasValidQuote && !hasValidProfile) {
-        throw new Error(`無法驗證股票代號 [${ticker}]。查無此股票之即時市場數據與基本面資料，已終止 AI 分析。請確認代號是否正確（例如台股 2330 / 2330.TW 或美股 AAPL）。`)
+        throw new Error(`無法驗證股票代號 [${ticker}]。查無此股票之即時市場數據與基本面資料，已終止 AI 分析。請確認代號是否正確（例如台股 2330 / 2330.TW）。`)
       }
 
       try {
