@@ -129,6 +129,13 @@ export const en: Dict = {
     newsFallback: 'The AI summary and selection reason are still being prepared. Please visit the original article for details.',
     newsExcerptToggle: 'View original article excerpt (reference)',
     newsReadOriginal: 'Read the full article at the source',
+    ttsPlay: 'Play overview audio',
+    ttsPause: 'Pause',
+    ttsResume: 'Resume',
+    ttsStop: 'Stop',
+    ttsSpeed: 'Speed',
+    ttsPlaying: 'Playing',
+    ttsPaused: 'Paused',
   },
   about: {
     metaTitle: 'About Vestential — Investment Information for Working Professionals',

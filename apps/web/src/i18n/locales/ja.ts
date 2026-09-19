@@ -129,6 +129,13 @@ export const ja: Dict = {
     newsFallback: 'AI の要約と選定理由は整理中です。詳しくは原文をご覧ください。',
     newsExcerptToggle: '原文抜粋を見る（参考）',
     newsReadOriginal: '出典で全文を読む',
+    ttsPlay: 'サマリーを音声再生',
+    ttsPause: '一時停止',
+    ttsResume: '再開',
+    ttsStop: '停止',
+    ttsSpeed: '再生速度',
+    ttsPlaying: '再生中',
+    ttsPaused: '一時停止中',
   },
   about: {
     metaTitle: 'Vestential について — 会社員・小口投資家のための投資情報プラットフォーム',

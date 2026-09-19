@@ -105,6 +105,13 @@ export interface Dict {
     newsFallback: string
     newsExcerptToggle: string
     newsReadOriginal: string
+    ttsPlay: string
+    ttsPause: string
+    ttsResume: string
+    ttsStop: string
+    ttsSpeed: string
+    ttsPlaying: string
+    ttsPaused: string
   }
   about: {
     metaTitle: string

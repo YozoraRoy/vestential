@@ -7,6 +7,7 @@ import { getMarketFocus, getMarketFocusMeta } from '@stock/database'
 import { SectionHeading } from '@/components/section-heading'
 import { NewsCard } from '@/components/news-card'
 import { MarketFocusSubscribe } from '@/components/market-focus-subscribe'
+import { MarketFocusTtsBar } from '@/components/market-focus-tts-bar'
 
 const BASE_URL = 'https://vestential.com'
 
@@ -102,7 +103,8 @@ export default async function MarketFocusPage() {
               <h2 id="market-summary" className="text-base font-semibold text-[var(--text-primary)]">{dict.marketFocus.summaryTitle}</h2>
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-[var(--text-secondary)]">AI</span>
             </div>
-            <p className="text-sm leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap">{meta.summary}</p>
+            <MarketFocusTtsBar summary={meta.summary} locale={locale} t={dict.marketFocus} />
+            <p className="text-sm leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap mt-3">{meta.summary}</p>
             {meta.generated_at && (
               <p className="flex items-center gap-1.5 mt-3 text-xs text-[var(--text-secondary)]">
                 <RefreshCw className="w-3.5 h-3.5" />

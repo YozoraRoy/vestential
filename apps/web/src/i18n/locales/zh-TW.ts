@@ -129,6 +129,13 @@ export const zhTW: Dict = {
     newsFallback: 'AI 摘要與遴選原因尚在整理中，請前往原文閱讀詳情。',
     newsExcerptToggle: '查看新聞原文摘錄（參考）',
     newsReadOriginal: '前往新聞出處閱讀原文',
+    ttsPlay: '播放總覽語音',
+    ttsPause: '暫停',
+    ttsResume: '繼續播放',
+    ttsStop: '停止',
+    ttsSpeed: '語速',
+    ttsPlaying: '播放中',
+    ttsPaused: '已暫停',
   },
   about: {
     metaTitle: '關於 Vestential — 上班族與小資族的投資資訊參考平台',
