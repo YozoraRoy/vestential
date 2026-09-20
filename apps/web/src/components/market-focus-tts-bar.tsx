@@ -284,7 +284,7 @@ export function MarketFocusTtsBar({ summary, locale, t: tProp }: MarketFocusTtsB
             value={accent}
             onChange={(e) => setAccent(e.target.value as TtsAccent)}
             aria-label={t.ttsAccent}
-            className="px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/60"
+            className="px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/60 [&>option]:bg-[var(--bg-secondary)] [&>option]:text-[var(--text-primary)]"
           >
             <option value="auto">{t.ttsAccentAuto}</option>
             {accentFound.tw && <option value="tw">{t.ttsAccentTW}</option>}
