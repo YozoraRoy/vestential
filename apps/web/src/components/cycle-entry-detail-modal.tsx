@@ -236,6 +236,13 @@ export function CycleEntryDetailModal({ signal, dict, onClose }: Props) {
             <div className="min-w-0">
               <h2 className="text-base font-bold truncate">{resolvedName}</h2>
               <p className="text-xs text-[var(--text-secondary)]">{dict.detailSubtitle}</p>
+              {/* Issue #19（A1）點子卡一鍵帶參數跳回測：?symbol=&preset=，回測頁自動帶入 */}
+              <a
+                href={`/backtest?symbol=${encodeURIComponent(shortSymbol(signal.symbol))}&preset=short`}
+                className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--accent)] hover:underline"
+              >
+                {dict.openBacktestLab} →
+              </a>
             </div>
           </div>
           <button

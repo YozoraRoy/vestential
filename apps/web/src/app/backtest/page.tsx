@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import {
   LineChart,
   Line,
@@ -11,8 +12,9 @@ import {
   ReferenceDot,
   ResponsiveContainer,
 } from 'recharts'
-import { Search as SearchIcon, TrendingDown, Target, Repeat, Clock, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, HelpCircle, Activity, ListOrdered, X, Zap, SlidersHorizontal, CheckCircle2, Info } from 'lucide-react'
+import { Search as SearchIcon, TrendingDown, Target, Repeat, Clock, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, HelpCircle, Activity, ListOrdered, X, Zap, SlidersHorizontal, CheckCircle2, Info, Sparkles } from 'lucide-react'
 import { searchStocks, StockCandidateList, type StockCandidate } from '@/components/stock-search'
+import { buildBacktestInsight } from '@/lib/backtest-interpret'
 import { useI18n } from '@/i18n/LanguageProvider'
 import type { Dict } from '@/i18n/dictionaries'
 
@@ -218,6 +220,13 @@ function parsePresetText(raw: string) {
   return { title: raw, desc: '' }
 }
 
+/** Issue #19 點子流：preset 代號對應的回測參數（URL ?preset= 與一鍵跳轉共用）。 */
+const PRESET_PARAMS = {
+  short: { years: '5', holdingDays: '40', targetPct: '8', stopPct: '5' },
+  medium: { years: '10', holdingDays: '120', targetPct: '15', stopPct: '8' },
+  long: { years: '15', holdingDays: '252', targetPct: '25', stopPct: '12' },
+} as const
+
 export default function BacktestPage() {
   const { dict, locale } = useI18n()
   const ui = dict.backtest
@@ -337,19 +346,7 @@ export default function BacktestPage() {
     if (paramSym) {
       const cleanSym = paramSym.replace(/\.(TW|TWO)$/i, '').trim()
       setSymbol(cleanSym)
-      const paramPreset = params.get('preset')
-      if (paramPreset === 'short') {
-        applyPreset('short')
-        void runFromSymbol(cleanSym, undefined, { years: '5', holdingDays: '40', targetPct: '8', stopPct: '5' })
-      } else if (paramPreset === 'medium') {
-        applyPreset('medium')
-        void runFromSymbol(cleanSym, undefined, { years: '10', holdingDays: '120', targetPct: '15', stopPct: '8' })
-      } else if (paramPreset === 'long') {
-        applyPreset('long')
-        void runFromSymbol(cleanSym, undefined, { years: '15', holdingDays: '252', targetPct: '25', stopPct: '12' })
-      } else {
-        void runFromSymbol(cleanSym)
-      }
+      runWithPreset(cleanSym, undefined, params.get('preset'))
     }
   }, [])
 
@@ -404,6 +401,20 @@ export default function BacktestPage() {
     if (!sym) return
     setShowDropdown(false)
     await runFromSymbol(sym, stockName)
+  }
+
+  // Issue #19 點子流：一鍵帶參數（?symbol=&preset=）跳轉落點，與 URL 直連、Top 排行連結共用。
+  const runWithPreset = (
+    sym: string,
+    nameOpt?: string,
+    preset?: string | null,
+  ) => {
+    if (preset === 'short' || preset === 'medium' || preset === 'long') {
+      applyPreset(preset)
+      void runFromSymbol(sym, nameOpt, { ...PRESET_PARAMS[preset] })
+    } else {
+      void runFromSymbol(sym, nameOpt)
+    }
   }
 
   // 抓取「成交量 Top 20」清單（依所選範圍），並非同步逐檔計算進場閾值與目前乖離。
@@ -877,6 +888,73 @@ export default function BacktestPage() {
             </div>
           </div>
 
+          {/* Issue #19（A4+B5）AI 解讀：數字一律由引擎 JSON 注入、原樣顯示；純計算、不扣 quota */}
+          {(() => {
+            const insight = buildBacktestInsight(result, currentBias)
+            const n = insight.numbers
+            const sym = symbol.toUpperCase()
+            const name = stockName ? `（${stockName}）` : ''
+            const body = insight.kind === 'no-trades'
+              ? ui.aiNoTrades
+                .replace('{symbol}', sym)
+                .replace('{name}', name)
+                .replace('{years}', years || '15')
+                .replace('{trades}', String(n.totalTrades))
+              : insight.kind === 'in-zone'
+                ? ui.aiInZone
+                  .replace('{symbol}', sym)
+                  .replace('{name}', name)
+                  .replace('{bias}', fmtPct(currentBias))
+                  .replace('{threshold}', fmtPct(n.bestThreshold != null ? n.bestThreshold / 100 : null))
+                  .replace('{trades}', String(n.totalTrades))
+                  .replace('{wins}', String(n.wins))
+                  .replace('{losses}', String(n.losses))
+                  .replace('{neutral}', String(n.neutral))
+                  .replace('{winRate}', fmtPct(n.winRate))
+                  .replace('{days}', fmtDays(n.avgDaysToTarget, ui.daysUnit))
+                : ui.aiWatch
+                  .replace('{symbol}', sym)
+                  .replace('{name}', name)
+                  .replace('{bias}', fmtPct(currentBias))
+                  .replace('{threshold}', fmtPct(n.bestThreshold != null ? n.bestThreshold / 100 : null))
+                  .replace('{pct}', distanceToTargetPct != null ? distanceToTargetPct.toFixed(1) : '—')
+                  .replace('{trades}', String(n.totalTrades))
+                  .replace('{winRate}', fmtPct(n.winRate))
+                  .replace('{days}', fmtDays(n.avgDaysToTarget, ui.daysUnit))
+            return (
+              <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--accent)]/25 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="w-4 h-4 text-[var(--accent)]" />
+                  <h2 className="text-sm font-semibold">{ui.aiTitle}</h2>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-[var(--text-secondary)]">AI</span>
+                </div>
+                <p className="text-xs text-[var(--text-secondary)] leading-relaxed mb-2.5">{ui.aiHardRule}</p>
+                <p className="text-sm text-[var(--text-primary)] leading-relaxed">{body}</p>
+                <details className="mt-2.5 text-xs">
+                  <summary className="cursor-pointer text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition select-none">
+                    {ui.aiJsonToggle}
+                  </summary>
+                  <pre className="mt-2 p-3 rounded-lg bg-white/[0.02] border border-white/5 overflow-x-auto font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
+                    {JSON.stringify(
+                      {
+                        bestThreshold: n.bestThreshold,
+                        totalTrades: n.totalTrades,
+                        winRate: n.winRate,
+                        avgDaysToTarget: n.avgDaysToTarget,
+                        wins: n.wins,
+                        losses: n.losses,
+                        neutral: n.neutral,
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
+                <p className="mt-2.5 text-[11px] text-[var(--text-secondary)] leading-relaxed">{ui.aiDisclaimer}</p>
+              </div>
+            )
+          })()}
+
           {liveBias && (
             <div className="rounded-xl bg-[var(--bg-card)] border border-white/5 p-4">
               <div className="flex items-center justify-between gap-2 mb-3">
@@ -1275,15 +1353,20 @@ export default function BacktestPage() {
                         : null
                     const insightReached =
                       hasValidThreshold && insightBias != null && insightBias <= insight.bestThreshold! / 100
+                    // Issue #19 點子流：逐檔回測連結帶 ?symbol=&preset=（自訂參數時退回 medium）
+                    const rowPreset = activePreset === 'custom' ? 'medium' : activePreset
                     return (
-                      <button
+                      <div
                         key={item.symbol}
-                        onClick={() => pickTopStock(item)}
-                        className={`w-full grid grid-cols-12 gap-2 items-center px-3 py-2.5 rounded-xl hover:bg-white/5 transition text-left ${
+                        className={`w-full flex items-center gap-1 pr-1 rounded-xl transition ${
                           insightReached
                             ? 'bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/20'
                             : 'border border-transparent'
                         }`}
+                      >
+                      <button
+                        onClick={() => pickTopStock(item)}
+                        className="flex-1 grid grid-cols-12 gap-2 items-center px-3 py-2.5 rounded-lg hover:bg-white/5 transition text-left"
                       >
                         <span className="col-span-1 text-center font-mono text-xs text-[var(--text-secondary)]">
                           {item.rank}
@@ -1325,6 +1408,20 @@ export default function BacktestPage() {
                           ) : null}
                         </div>
                       </button>
+                      <Link
+                        href={`/backtest?symbol=${encodeURIComponent(item.symbol)}&preset=${rowPreset}`}
+                        onClick={() => {
+                          // 同頁內以 SPA 直接帶入（含 preset 參數）；href 保留深連結可分享／重整
+                          setShowTop(false)
+                          setSymbol(item.symbol)
+                          setStockName(item.name)
+                          runWithPreset(item.symbol, item.name, rowPreset)
+                        }}
+                        className="shrink-0 inline-flex items-center gap-0.5 px-2 py-1 rounded-lg text-[11px] font-semibold text-[var(--accent)] border border-transparent hover:bg-[var(--accent)]/15 hover:border-[var(--accent)]/30 transition whitespace-nowrap"
+                      >
+                        {ui.topBacktestLink}
+                      </Link>
+                      </div>
                     )
                   })}
                 </div>

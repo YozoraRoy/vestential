@@ -404,8 +404,15 @@ export const SYSTEM_PROMPT = `你是 Vestential(台灣股票投資資訊平台)�
 2. 領域平衡偏好：盡量兼顧「半導體/科技硬體」、「傳產/金融/綠能重電」、「總體經濟/利率政策」等不同面向，避免單一族群過度集中。
 3. 排除:短線明牌、個股炒作、小道消息、未證實的利多利空、娛樂/八卦,或與台灣投資無關的新聞。
 4. 每則給一句 30 字以內的繁體中文理由，說明它為何值得看。說人話，直陳核心基本面或實質影響，嚴禁「值得注意的是」、「不可否認」等空泛廢話。
-5. 只輸出 JSON，不要任何其他文字:
-{"selected":[{"index":0,"reason":"..."}]}`
+5. 同時為每則輸出新聞影響結構化欄位（Issue #19：供新聞卡呈現，同一 LLM 呼叫內完成，不新增 quota 消耗）：
+   - impact_direction：三選一 positive（偏多）/ negative（偏空）/ neutral（中性）
+   - scope：影響範圍，20 字內（如「台股大盤」「半導體族群」「個股」）
+   - horizon：影響時程，15 字內（如「短線數日」「中期數季」）
+   - affected_sectors：受影響族群或產業，30 字內、逗號分隔
+   - action：投資人可做的關注行動，30 字內、非投資建議（如「追蹤下季法說營收指引」）
+   - related_symbols：標題提及的台股代號，4~6 碼數字、逗號分隔（如「2330,2317」）；無則空字串
+6. 只輸出 JSON，不要任何其他文字:
+{"selected":[{"index":0,"reason":"...","impact_direction":"neutral","scope":"...","horizon":"...","affected_sectors":"...","action":"...","related_symbols":""}]}`
 
 function buildUserPrompt(candidates: NewsCandidate[]): string {
   const list = candidates
@@ -417,6 +424,65 @@ function buildUserPrompt(candidates: NewsCandidate[]): string {
 interface SelectEntry {
   index: number
   reason: string
+  impact_direction?: unknown
+  scope?: unknown
+  horizon?: unknown
+  affected_sectors?: unknown
+  action?: unknown
+  related_symbols?: unknown
+}
+
+/** Issue #19 新聞影響結構化欄位（filterNewsByAI 與 generateArticleSummaries 共用輸出）。 */
+export interface NewsImpact {
+  impact_direction: 'positive' | 'negative' | 'neutral' | null
+  scope: string | null
+  horizon: string | null
+  affected_sectors: string | null
+  action: string | null
+  related_symbols: string | null
+}
+
+export const EMPTY_IMPACT: NewsImpact = {
+  impact_direction: null,
+  scope: null,
+  horizon: null,
+  affected_sectors: null,
+  action: null,
+  related_symbols: null,
+}
+
+const IMPACT_DIRECTIONS = new Set(['positive', 'negative', 'neutral'])
+
+function asShortText(v: unknown, max: number): string | null {
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  if (!t) return null
+  return t.slice(0, max)
+}
+
+/** 將 LLM 回傳的影響欄位清洗為可存 DB 的結構；方向非三選一律視為 null。 */
+export function sanitizeImpact(raw: {
+  impact_direction?: unknown
+  scope?: unknown
+  horizon?: unknown
+  affected_sectors?: unknown
+  action?: unknown
+  related_symbols?: unknown
+}): NewsImpact {
+  const dir = typeof raw.impact_direction === 'string' ? raw.impact_direction.trim().toLowerCase() : ''
+  let related: string | null = null
+  if (typeof raw.related_symbols === 'string' && raw.related_symbols.trim()) {
+    const codes = raw.related_symbols.match(/\b\d{4,6}\b/g) ?? []
+    if (codes.length > 0) related = [...new Set(codes)].join(',').slice(0, 200)
+  }
+  return {
+    impact_direction: IMPACT_DIRECTIONS.has(dir) ? (dir as NewsImpact['impact_direction']) : null,
+    scope: asShortText(raw.scope, 200),
+    horizon: asShortText(raw.horizon, 200),
+    affected_sectors: asShortText(raw.affected_sectors, 500),
+    action: asShortText(raw.action, 500),
+    related_symbols: related,
+  }
 }
 
 /** 依「價值投資」精神用 LLM 過濾候選新聞;失敗時回傳原始前 N 則(理由為空)當兜底。 */
@@ -447,6 +513,8 @@ export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<Marke
         source: c.source,
         published_at: c.publishedAt,
         reason: typeof s.reason === 'string' ? s.reason.trim() : null,
+        // Issue #19：影響欄位與遴選同一次 LLM 呼叫產出，不新增 quota 消耗
+        ...sanitizeImpact(s),
       })
       if (items.length >= selectCount) break
     }
@@ -478,11 +546,12 @@ export async function filterNewsByAI(candidates: NewsCandidate[]): Promise<Marke
     source: c.source,
     published_at: c.publishedAt,
     reason: null,
+    ...EMPTY_IMPACT,
   }))
 }
 
 // ─── 每則新聞 AI 說人話重點摘要 ──────────────────────────────────
-const ARTICLE_SUMMARIES_SYSTEM_PROMPT = `你是 Vestential 的資深台股主筆。請為以下精選新聞，逐則撰寫一份 100~180 字的繁體中文「說人話重點摘要」。
+const ARTICLE_SUMMARIES_SYSTEM_PROMPT = `你是 Vestential 的資深台股主筆。請為以下精選新聞，逐則撰寫一份 100~180 字的繁體中文「說人話重點摘要」，並附上新聞影響結構化欄位。
 
 核心原則（嚴格遵守 speak-human-tw 去 AI 味規範）：
 1. 開門見山：首句直接點出核心事件與關鍵數據（如營收增減幅、毛利率、簽約金額、資本支出、政策決議）。嚴禁「在...背景下」、「隨著...發展」等套話開場。
@@ -491,27 +560,37 @@ const ARTICLE_SUMMARIES_SYSTEM_PROMPT = `你是 Vestential 的資深台股主筆
 4. 剔除解說導引贅詞：嚴禁使用「值得注意的是」、「不可否認的是」、「顯而易見的是」、「這意味著」、「不是 A 而是 B」。直接陳述客觀事實。
 5. 自然收尾，禁罐頭總結：直接停在關鍵數字或結論，嚴禁「總結來說」、「綜上所述」。
 6. 台灣金融語境：使用繁體中文（台灣習慣詞彙），全形標點符號（，、。！？）。
-7. 只輸出純 JSON，不要任何其他文字：
-{"summaries":[{"index":0,"summary":"..."},{"index":1,"summary":"..."}]}`
+7. 影響欄位（Issue #19，供新聞卡呈現；無法從正文判斷時填空字串，related_symbols 只填正文明確提及的台股 4~6 碼代號）：
+   impact_direction（positive 偏多 / negative 偏空 / neutral 中性三選一）、scope（影響範圍 20 字內）、horizon（影響時程 15 字內）、affected_sectors（受影響族群 30 字內）、action（關注行動 30 字內、非投資建議）、related_symbols（逗號分隔）。
+8. 只輸出純 JSON，不要任何其他文字：
+{"summaries":[{"index":0,"summary":"...","impact_direction":"neutral","scope":"...","horizon":"...","affected_sectors":"...","action":"...","related_symbols":""}]}`
 
-/** 依據每則新聞的標題與正文內容，由 LLM 生成說人話重點摘要。 */
+/** 逐則摘要結果：說人話摘要＋新聞影響結構化欄位（Issue #19）。 */
+export interface ArticleSummaryResult extends NewsImpact {
+  summary: string
+}
+
+/** 依據每則新聞的標題與正文內容，由 LLM 生成說人話重點摘要（含影響欄位；同一次 LLM 呼叫，不新增 quota）。 */
 export async function generateArticleSummaries(
   items: { title: string; source: string | null; content?: string | null; reason?: string | null }[],
-): Promise<string[]> {
+): Promise<ArticleSummaryResult[]> {
   if (items.length === 0) return []
+  const toFallback = (it: { reason?: string | null }): ArticleSummaryResult => ({
+    summary: it.reason ? `核心重點：${it.reason}` : '',
+    ...EMPTY_IMPACT,
+  })
   try {
     const config = loadConfig()
     const { llm } = createQuickLLM(config, { maxTokens: FALLBACK_SAFE_MAX_TOKENS })
     attachLlmUsageRecorder(llm, 'market-focus.article-summaries')
 
-    const summaryMap = new Map<number, string>()
-    // 每批輸出估算：180 字 × 1.5 ≈270 token/則（不含 JSON overhead，故直接以 270/則保守估算）；
-    // budget=850、baseOverhead=40 ⇒ 每批最多 3 則（270×3+40=850 ≤850，遠低於 1000 硬上限）：
-    // 12 則 ⇒ 4 批（≥3 批）、40 則 ⇒ 14 批（≥8 批），皆滿足驗收批數。
+    const summaryMap = new Map<number, ArticleSummaryResult>()
+    // 每批輸出估算：180 字摘要 ≈270 token ＋ 影響 6 欄位 ≈70 token ⇒ 340/則；
+    // budget=850、baseOverhead=40 ⇒ 每批最多 2 則（340×2+40=720 ≤850，遠低於 1000 硬上限）。
     const chunks = chunkByOutputBudget(
       items,
       850,
-      () => 270,
+      () => 340,
       40,
     )
     let chunkStartIndex = 0
@@ -525,19 +604,33 @@ export async function generateArticleSummaries(
       try {
         const raw = await llm.generate(
           ARTICLE_SUMMARIES_SYSTEM_PROMPT,
-          `請為以下 ${chunk.length} 則新聞分別產出說人話重點摘要：\n\n${promptList}`,
+          `請為以下 ${chunk.length} 則新聞分別產出說人話重點摘要（含影響欄位）：\n\n${promptList}`,
         )
         const cleaned = raw.replace(/```json[\s\S]*?```/g, (m) => m.slice(7, -3)).trim()
-        const parsed = JSON.parse(cleaned) as { summaries?: { index: number; summary: string }[] }
-        const entries: { index: number; value: string }[] = []
+        const parsed = JSON.parse(cleaned) as {
+          summaries?: {
+            index: number
+            summary: string
+            impact_direction?: unknown
+            scope?: unknown
+            horizon?: unknown
+            affected_sectors?: unknown
+            action?: unknown
+            related_symbols?: unknown
+          }[]
+        }
+        const entries: { index: number; value: ArticleSummaryResult }[] = []
         if (Array.isArray(parsed?.summaries)) {
           for (const entry of parsed.summaries) {
             if (typeof entry.index === 'number' && typeof entry.summary === 'string') {
-              entries.push({ index: entry.index, value: entry.summary })
+              entries.push({ index: entry.index, value: { summary: entry.summary, ...sanitizeImpact(entry) } })
             }
           }
         }
-        mergeChunkEntries(summaryMap, entries, chunkStartIndex)
+        // Issue #19：值為物件故不用字串專用的 mergeChunkEntries；沿用相同 offset 合併語意
+        for (const e of entries) {
+          if (e.value.summary.trim()) summaryMap.set(e.index + chunkStartIndex, e.value)
+        }
       } catch (e) {
         // 單批失敗只退該批（空白 → 下方既有 `核心重點：reason` 兜底），其餘批次照常合併
         console.error(`[MarketFocus] article summary chunk failed (batch start=${chunkStartIndex}, size=${chunk.length}), skipping batch:`, e)
@@ -555,7 +648,7 @@ export async function generateArticleSummaries(
     return items.map((it, idx) => {
       const s = summaryMap.get(idx)
       if (s) return s
-      return it.reason ? `核心重點：${it.reason}` : ''
+      return toFallback(it)
     })
   } catch (err) {
     console.error('[MarketFocus] generateArticleSummaries failed, falling back:', err)
@@ -566,7 +659,7 @@ export async function generateArticleSummaries(
       message: '逐則新聞摘要 LLM 失敗，退回精選理由短述',
       detail: formatErrorDetail(err),
     })
-    return items.map((it) => (it.reason ? `核心重點：${it.reason}` : ''))
+    return items.map((it) => toFallback(it))
   }
 }
 
@@ -591,9 +684,17 @@ export async function backfillMissingSummaries(): Promise<number> {
     const recent = await getMarketFocus(MAX_BACKFILL_ITEMS, 4)
     const gaps = recent.filter((it) => !it.summary).slice(0, MAX_BACKFILL_ITEMS)
     if (gaps.length === 0) return 0
-    const summaries = await generateArticleSummaries(gaps)
+    const results = await generateArticleSummaries(gaps)
     const filled = gaps
-      .map((it, i) => ({ ...it, summary: summaries[i] || null }))
+      .map((it, i) => {
+        const r = results[i]
+        const next: MarketFocusItem = { ...it, summary: r?.summary || null }
+        // 摘要階段的影響欄位一併回填（僅補空缺，不覆蓋既有值）
+        for (const k of ['impact_direction', 'scope', 'horizon', 'affected_sectors', 'action', 'related_symbols'] as const) {
+          if (!next[k] && r?.[k]) next[k] = r[k]
+        }
+        return next
+      })
       .filter((it) => !!it.summary)
     if (filled.length > 0) await saveMarketFocus(filled)
     return filled.length
@@ -758,10 +859,16 @@ async function runMarketFocusPipeline(dryRun: boolean): Promise<MarketFocusPipel
     if (!it.content) console.warn(`[MarketFocus] no article content saved for: ${it.title} (${it.source_url ?? it.url})`)
   }
 
-  // 為每則新聞生成說人話 AI 重點摘要
-  const articleSummaries = await generateArticleSummaries(enriched)
+  // 為每則新聞生成說人話 AI 重點摘要（含影響欄位；摘要見全文後可修正篩選階段的初判）
+  const articleResults = await generateArticleSummaries(enriched)
   for (let i = 0; i < enriched.length; i++) {
-    enriched[i].summary = articleSummaries[i] || null
+    const r = articleResults[i]
+    if (r?.summary) enriched[i].summary = r.summary
+    else if (!enriched[i].summary) enriched[i].summary = null
+    // 影響欄位：摘要階段（見全文）優先；缺失時保留篩選階段（見標題）的值
+    for (const k of ['impact_direction', 'scope', 'horizon', 'affected_sectors', 'action', 'related_symbols'] as const) {
+      if (r?.[k]) enriched[i][k] = r[k]
+    }
   }
 
   const summary = await generateDailySummary(enriched)

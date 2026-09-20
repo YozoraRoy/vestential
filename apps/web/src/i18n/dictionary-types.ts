@@ -116,6 +116,15 @@ export interface Dict {
     ttsAccentAuto: string
     ttsAccentTW: string
     ttsAccentHK: string
+    newsImpactTitle: string
+    newsImpactScope: string
+    newsImpactHorizon: string
+    newsImpactSectors: string
+    newsImpactAction: string
+    newsDirPositive: string
+    newsDirNegative: string
+    newsDirNeutral: string
+    newsBacktestSymbol: string
   }
   about: {
     metaTitle: string
@@ -514,6 +523,14 @@ export interface Dict {
     errorTopVolume: string
     errorTopNetwork: string
     cycleEntryDiffBanner: string
+    aiTitle: string
+    aiHardRule: string
+    aiNoTrades: string
+    aiInZone: string
+    aiWatch: string
+    aiDisclaimer: string
+    aiJsonToggle: string
+    topBacktestLink: string
   }
   portfolio: {
     llmRateLimited: string

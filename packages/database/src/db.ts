@@ -217,6 +217,12 @@ function getSqliteDb(): Database.Database | null {
         summary TEXT,
         content TEXT,
         source_url TEXT,
+        impact_direction TEXT,
+        scope TEXT,
+        horizon TEXT,
+        affected_sectors TEXT,
+        action TEXT,
+        related_symbols TEXT,
         created_at TEXT DEFAULT (datetime('now', 'localtime'))
       );
       CREATE INDEX IF NOT EXISTS idx_market_focus_created ON market_focus(created_at);
@@ -327,6 +333,19 @@ function getSqliteDb(): Database.Database | null {
     try {
       _db.exec('ALTER TABLE market_focus ADD COLUMN summary TEXT;')
     } catch {}
+    // Issue #19 新聞影響結構化欄位（冪等；全新 DB 欄位已存在時 ALTER 會拋錯，故獨立 try/catch）。
+    for (const col of [
+      'impact_direction TEXT',
+      'scope TEXT',
+      'horizon TEXT',
+      'affected_sectors TEXT',
+      'action TEXT',
+      'related_symbols TEXT',
+    ]) {
+      try {
+        _db.exec(`ALTER TABLE market_focus ADD COLUMN ${col};`)
+      } catch {}
+    }
 
     // 既有 arena_agents 表補齊較晚期加入的欄位（冪等；全新 DB 欄位已存在時 ALTER 會拋錯，故獨立 try/catch）。
     try {
@@ -772,6 +791,12 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           reason       NVARCHAR(MAX),
           content      NVARCHAR(MAX),
           source_url   NVARCHAR(2000),
+          impact_direction NVARCHAR(20),
+          scope        NVARCHAR(200),
+          horizon      NVARCHAR(200),
+          affected_sectors NVARCHAR(500),
+          action       NVARCHAR(500),
+          related_symbols NVARCHAR(200),
           created_at   DATETIME DEFAULT GETDATE()
         );
         CREATE INDEX idx_market_focus_created ON market_focus(created_at);
@@ -794,6 +819,18 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
         ALTER TABLE market_focus ADD reason NVARCHAR(MAX);
       IF COL_LENGTH('market_focus', 'summary') IS NULL
         ALTER TABLE market_focus ADD summary NVARCHAR(MAX);
+      IF COL_LENGTH('market_focus', 'impact_direction') IS NULL
+        ALTER TABLE market_focus ADD impact_direction NVARCHAR(20);
+      IF COL_LENGTH('market_focus', 'scope') IS NULL
+        ALTER TABLE market_focus ADD scope NVARCHAR(200);
+      IF COL_LENGTH('market_focus', 'horizon') IS NULL
+        ALTER TABLE market_focus ADD horizon NVARCHAR(200);
+      IF COL_LENGTH('market_focus', 'affected_sectors') IS NULL
+        ALTER TABLE market_focus ADD affected_sectors NVARCHAR(500);
+      IF COL_LENGTH('market_focus', 'action') IS NULL
+        ALTER TABLE market_focus ADD action NVARCHAR(500);
+      IF COL_LENGTH('market_focus', 'related_symbols') IS NULL
+        ALTER TABLE market_focus ADD related_symbols NVARCHAR(200);
       IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'market_focus_meta')
       BEGIN
         CREATE TABLE market_focus_meta (
@@ -2706,6 +2743,18 @@ export interface MarketFocusItem {
   content?: string | null
   /** 解析後的原始新聞來源 URL（優先 Google 轉址後的網址）。 */
   source_url?: string | null
+  /** Issue #19 新聞影響結構化：對台股的影響方向（positive 偏多／negative 偏空／neutral 中性）。 */
+  impact_direction?: 'positive' | 'negative' | 'neutral' | string | null
+  /** 影響範圍（如：大盤／半導體族群／個股）。 */
+  scope?: string | null
+  /** 影響時程（如：短線數日／中期數季）。 */
+  horizon?: string | null
+  /** 受影響族群／產業（逗號分隔）。 */
+  affected_sectors?: string | null
+  /** 投資人可採取的關注行動（非投資建議）。 */
+  action?: string | null
+  /** 文中提及的台股代號（逗號分隔，如 2330,2317），供新聞卡連回回測。 */
+  related_symbols?: string | null
   created_at?: string
 }
 
@@ -2722,7 +2771,7 @@ export async function saveMarketFocus(items: MarketFocusItem[]): Promise<void> {
     const existing = await dbQueryFirst<{ id: number }>('SELECT id FROM market_focus WHERE url = @url', { url: it.url })
     if (existing?.id) {
       await dbExecute(
-        'UPDATE market_focus SET title = @title, source = @source, published_at = @published_at, reason = @reason, summary = @summary, content = @content, source_url = @source_url WHERE id = @id',
+        'UPDATE market_focus SET title = @title, source = @source, published_at = @published_at, reason = @reason, summary = @summary, content = @content, source_url = @source_url, impact_direction = @impact_direction, scope = @scope, horizon = @horizon, affected_sectors = @affected_sectors, action = @action, related_symbols = @related_symbols WHERE id = @id',
         {
           id: existing.id,
           title: it.title.slice(0, 500),
@@ -2732,11 +2781,17 @@ export async function saveMarketFocus(items: MarketFocusItem[]): Promise<void> {
           summary: it.summary ?? null,
           content: it.content ?? null,
           source_url: it.source_url ? it.source_url.slice(0, 2000) : null,
+          impact_direction: it.impact_direction ? String(it.impact_direction).slice(0, 20) : null,
+          scope: it.scope ? it.scope.slice(0, 200) : null,
+          horizon: it.horizon ? it.horizon.slice(0, 200) : null,
+          affected_sectors: it.affected_sectors ? it.affected_sectors.slice(0, 500) : null,
+          action: it.action ? it.action.slice(0, 500) : null,
+          related_symbols: it.related_symbols ? it.related_symbols.slice(0, 200) : null,
         },
       )
     } else {
       await dbExecute(
-        'INSERT INTO market_focus (title, url, source, published_at, reason, summary, content, source_url) VALUES (@title, @url, @source, @published_at, @reason, @summary, @content, @source_url)',
+        'INSERT INTO market_focus (title, url, source, published_at, reason, summary, content, source_url, impact_direction, scope, horizon, affected_sectors, action, related_symbols) VALUES (@title, @url, @source, @published_at, @reason, @summary, @content, @source_url, @impact_direction, @scope, @horizon, @affected_sectors, @action, @related_symbols)',
         {
           title: it.title.slice(0, 500),
           url: it.url.slice(0, 2000),
@@ -2746,6 +2801,12 @@ export async function saveMarketFocus(items: MarketFocusItem[]): Promise<void> {
           summary: it.summary ?? null,
           content: it.content ?? null,
           source_url: it.source_url ? it.source_url.slice(0, 2000) : null,
+          impact_direction: it.impact_direction ? String(it.impact_direction).slice(0, 20) : null,
+          scope: it.scope ? it.scope.slice(0, 200) : null,
+          horizon: it.horizon ? it.horizon.slice(0, 200) : null,
+          affected_sectors: it.affected_sectors ? it.affected_sectors.slice(0, 500) : null,
+          action: it.action ? it.action.slice(0, 500) : null,
+          related_symbols: it.related_symbols ? it.related_symbols.slice(0, 200) : null,
         },
       )
     }
@@ -2756,7 +2817,7 @@ export async function saveMarketFocus(items: MarketFocusItem[]): Promise<void> {
 export async function getMarketFocus(limit: number = 6, days: number = 2): Promise<MarketFocusItem[]> {
   const sinceDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
   const recent = await dbQueryAll<MarketFocusItem>(
-    `SELECT id, title, url, source, published_at, reason, summary, content, source_url FROM market_focus WHERE published_at >= @sinceDate ORDER BY published_at DESC, id DESC LIMIT ${limit}`,
+    `SELECT id, title, url, source, published_at, reason, summary, content, source_url, impact_direction, scope, horizon, affected_sectors, action, related_symbols FROM market_focus WHERE published_at >= @sinceDate ORDER BY published_at DESC, id DESC LIMIT ${limit}`,
     { sinceDate },
   )
   if (recent.length > 0) {
@@ -2764,7 +2825,7 @@ export async function getMarketFocus(limit: number = 6, days: number = 2): Promi
   }
   // 遇週末或長假時若無 2 天內新聞，回傳最新資料以維持介面體驗
   return dbQueryAll<MarketFocusItem>(
-    `SELECT id, title, url, source, published_at, reason, summary, content, source_url FROM market_focus ORDER BY published_at DESC, id DESC LIMIT ${limit}`,
+    `SELECT id, title, url, source, published_at, reason, summary, content, source_url, impact_direction, scope, horizon, affected_sectors, action, related_symbols FROM market_focus ORDER BY published_at DESC, id DESC LIMIT ${limit}`,
   )
 }
 

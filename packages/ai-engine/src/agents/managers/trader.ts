@@ -59,17 +59,38 @@ const TraderProposalSchema = z.object({
   reasoning: z.string(),
   entryPrice: z.number().optional(),
   entry_price: z.number().optional(),
+  /** Issue #19 Trader 結構化：進場區間（上限／下限；未知時可為文字描述）。 */
+  entryRangeLow: z.number().optional(),
+  entry_range_low: z.number().optional(),
+  entryRangeHigh: z.number().optional(),
+  entry_range_high: z.number().optional(),
   stopLoss: z.number().optional(),
   stop_loss: z.number().optional(),
+  /** 失效條件：哪些情況出現即代表本次交易假設被推翻、應出場或重新評估。 */
+  invalidation: z.string().optional(),
+  /** 分批進場計畫（文字描述，如「分兩批：首批 50% 現價，第二批 50% 回測支撐」）。 */
+  tranches: z.string().optional(),
+  /** 單一標的部位上限（佔總資金 %，數字）。 */
+  maxPositionPct: z.number().optional(),
+  max_position_pct: z.number().optional(),
   positionSizing: z.union([z.string(), PositionSizingSchema]).optional(),
   position_sizing: z.union([z.string(), PositionSizingSchema]).optional(),
 }).transform((data) => ({
   action: data.action,
   reasoning: data.reasoning,
   entryPrice: data.entryPrice ?? data.entry_price,
+  entryRangeLow: data.entryRangeLow ?? data.entry_range_low,
+  entryRangeHigh: data.entryRangeHigh ?? data.entry_range_high,
   stopLoss: data.stopLoss ?? data.stop_loss,
+  invalidation: data.invalidation,
+  tranches: data.tranches,
+  maxPositionPct: data.maxPositionPct ?? data.max_position_pct,
   positionSizing: formatPositionSizing(data.positionSizing ?? data.position_sizing),
 }))
+
+/** Issue #19：Trader 報告固定結尾免責句（隨報告語言輸出；此為繁中版本，英文／日文由 outputInstruction 在地化同義句）。 */
+export const TRADER_DISCLAIMER_ZH =
+  '免責聲明：本交易計畫僅供資訊參考，不構成任何投資建議。投資一定有風險，請審慎評估後自行決策。'
 
 export function createTrader(llm: LLMClient) {
   return async (state: AnalysisState): Promise<Partial<AnalysisState>> => {
@@ -79,7 +100,15 @@ export function createTrader(llm: LLMClient) {
       truncateField(state.instrumentContext, 'Resources:', undefined, state.outputLanguage),
       truncateField(state.investmentPlan, `Investment Plan:`, undefined, state.outputLanguage),
       '',
-      `Specify: action (Buy/Hold/Sell), reasoning, entry price, stop loss, and position sizing.`,
+      `Specify ALL of the following structured fields (use null only when truly unknowable):`,
+      `- action (Buy/Hold/Sell)`,
+      `- reasoning`,
+      `- entry range (entryRangeLow / entryRangeHigh): a price zone to scale in, not a single point; fall back to entryPrice when only one level is known`,
+      `- stop loss (stopLoss): the hard exit price`,
+      `- invalidation: 1-3 concrete conditions that prove this trade thesis wrong (e.g. daily close below support, thesis catalyst fails to materialize)`,
+      `- tranches: phased entry plan (e.g. batch sizes with triggers)`,
+      `- maxPositionPct: max position size for this single ticker as % of total capital`,
+      `- position sizing`,
       '',
       state.outputInstruction,
     ].join('\n')
@@ -90,13 +119,34 @@ export function createTrader(llm: LLMClient) {
       TraderProposalSchema,
     )
 
+    const entryRange =
+      proposal.entryRangeLow != null && proposal.entryRangeHigh != null
+        ? `${proposal.entryRangeLow} ~ ${proposal.entryRangeHigh}`
+        : proposal.entryRangeLow != null
+          ? `≥ ${proposal.entryRangeLow}`
+          : proposal.entryRangeHigh != null
+            ? `≤ ${proposal.entryRangeHigh}`
+            : undefined
+    const disclaimer =
+      state.outputLanguage === 'en'
+        ? 'Disclaimer: This trading plan is for informational purposes only and does not constitute investment advice. All investments involve risk; please evaluate carefully and decide on your own.'
+        : state.outputLanguage === 'ja'
+          ? '免責事項：本取引計画は情報提供のみを目的としており、投資助言ではありません。投資にはリスクが伴いますので、ご自身で慎重にご判断ください。'
+          : TRADER_DISCLAIMER_ZH
+
     const traderPlan = [
       `**Action**: ${proposal.action}`,
       `**Reasoning**: ${proposal.reasoning}`,
+      entryRange ? `**Entry Range**: ${entryRange}` : '',
       proposal.entryPrice ? `**Entry Price**: ${proposal.entryPrice}` : '',
       proposal.stopLoss ? `**Stop Loss**: ${proposal.stopLoss}` : '',
+      proposal.invalidation ? `**Invalidation**: ${proposal.invalidation}` : '',
+      proposal.tranches ? `**Phased Entry**: ${proposal.tranches}` : '',
+      proposal.maxPositionPct != null ? `**Max Position**: ${proposal.maxPositionPct}%` : '',
       proposal.positionSizing ? `**Position Sizing**: ${proposal.positionSizing}` : '',
       `FINAL TRANSACTION PROPOSAL: **${proposal.action.toUpperCase()}**`,
+      '',
+      disclaimer,
     ].filter(Boolean).join('\n')
 
     return { traderProposal: traderPlan }

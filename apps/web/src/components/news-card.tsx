@@ -1,6 +1,8 @@
-import { ArrowUpRight, Sparkles, FileText, ShieldCheck } from 'lucide-react'
+import { ArrowUpRight, Sparkles, FileText, ShieldCheck, Gauge, LineChart } from 'lucide-react'
+import Link from 'next/link'
 import type { MarketFocusItem } from '@stock/database'
 import { getDict, getLocale } from '@/i18n/server'
+import { localizePath } from '@/i18n/paths'
 
 function formatDateTime(s: string, locale: string): string {
   const dt = new Date(s)
@@ -19,6 +21,29 @@ export async function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
   const dict = await getDict()
   const locale = await getLocale()
   const href = item.source_url || item.url
+
+  // Issue #19：影響方向 badge 文案與顏色
+  const direction = item.impact_direction === 'positive' || item.impact_direction === 'negative' || item.impact_direction === 'neutral'
+    ? item.impact_direction
+    : null
+  const directionLabel = direction === 'positive'
+    ? dict.marketFocus.newsDirPositive
+    : direction === 'negative'
+      ? dict.marketFocus.newsDirNegative
+      : direction === 'neutral'
+        ? dict.marketFocus.newsDirNeutral
+        : null
+  const directionCls = direction === 'positive'
+    ? 'bg-[var(--accent-green)]/15 text-[var(--accent-green)] border-[var(--accent-green)]/30'
+    : direction === 'negative'
+      ? 'bg-[var(--accent-red)]/15 text-[var(--accent-red)] border-[var(--accent-red)]/30'
+      : 'bg-white/5 text-[var(--text-secondary)] border-white/10'
+  const hasImpact = Boolean(directionLabel || item.scope || item.horizon || item.affected_sectors || item.action)
+  const relatedSymbols = (item.related_symbols ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => /^\d{4,6}$/.test(s))
+    .slice(0, 3)
 
   return (
     <li className="bg-[var(--bg-card)] rounded-xl p-5 border border-white/5 hover:border-white/10 transition">
@@ -58,8 +83,69 @@ export async function NewsCard({ item, variant = 'compact' }: NewsCardProps) {
         </div>
       )}
 
+      {/* Issue #19：新聞影響結構化（影響方向＋族群＋時程＋行動） */}
+      {hasImpact && (
+        <div className="mt-3 pt-3 border-t border-white/5">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--accent)] mb-1.5">
+            <Gauge className="w-3.5 h-3.5" />
+            <span>{dict.marketFocus.newsImpactTitle}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+            {directionLabel && (
+              <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${directionCls}`}>
+                {directionLabel}
+              </span>
+            )}
+            {item.horizon && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[var(--text-secondary)]">
+                {dict.marketFocus.newsImpactHorizon}：{item.horizon}
+              </span>
+            )}
+          </div>
+          <dl className="space-y-1 text-xs leading-relaxed">
+            {item.scope && (
+              <div className="flex gap-1.5">
+                <dt className="shrink-0 text-[var(--text-secondary)]">{dict.marketFocus.newsImpactScope}：</dt>
+                <dd className="text-[var(--text-primary)]">{item.scope}</dd>
+              </div>
+            )}
+            {item.affected_sectors && (
+              <div className="flex gap-1.5">
+                <dt className="shrink-0 text-[var(--text-secondary)]">{dict.marketFocus.newsImpactSectors}：</dt>
+                <dd className="text-[var(--text-primary)]">{item.affected_sectors}</dd>
+              </div>
+            )}
+            {item.action && (
+              <div className="flex gap-1.5">
+                <dt className="shrink-0 text-[var(--text-secondary)]">{dict.marketFocus.newsImpactAction}：</dt>
+                <dd className="text-[var(--text-primary)]">{item.action}</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+      )}
+
+      {/* Issue #19：可連回對應回測標的 */}
+      {relatedSymbols.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-white/5 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
+            <LineChart className="w-3.5 h-3.5 text-[var(--accent)]" />
+          </span>
+          {relatedSymbols.map((sym) => (
+            <Link
+              key={sym}
+              href={localizePath(locale, `/backtest?symbol=${sym}&preset=medium`)}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/25 text-[var(--accent)] hover:bg-[var(--accent)]/20 transition"
+            >
+              {dict.marketFocus.newsBacktestSymbol.replace('{symbol}', sym)}
+              <ArrowUpRight className="w-3 h-3" />
+            </Link>
+          ))}
+        </div>
+      )}
+
       {/* 摘要與遴選原因皆缺時的最小兜底 */}
-      {!item.summary && !item.reason && (
+      {!item.summary && !item.reason && !hasImpact && (
         <div className="mt-3 pt-3 border-t border-white/5">
           <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
             {dict.marketFocus.newsFallback}
