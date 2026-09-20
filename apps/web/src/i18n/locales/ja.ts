@@ -136,6 +136,10 @@ export const ja: Dict = {
     ttsSpeed: '再生速度',
     ttsPlaying: '再生中',
     ttsPaused: '一時停止中',
+    ttsAccent: 'アクセント',
+    ttsAccentAuto: '自動',
+    ttsAccentTW: '台湾',
+    ttsAccentHK: '香港',
   },
   about: {
     metaTitle: 'Vestential について — 会社員・小口投資家のための投資情報プラットフォーム',

@@ -136,6 +136,10 @@ export const en: Dict = {
     ttsSpeed: 'Speed',
     ttsPlaying: 'Playing',
     ttsPaused: 'Paused',
+    ttsAccent: 'Accent',
+    ttsAccentAuto: 'Auto',
+    ttsAccentTW: 'Taiwan',
+    ttsAccentHK: 'Hong Kong',
   },
   about: {
     metaTitle: 'About Vestential — Investment Information for Working Professionals',

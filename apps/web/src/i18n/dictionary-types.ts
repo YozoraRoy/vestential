@@ -112,6 +112,10 @@ export interface Dict {
     ttsSpeed: string
     ttsPlaying: string
     ttsPaused: string
+    ttsAccent: string
+    ttsAccentAuto: string
+    ttsAccentTW: string
+    ttsAccentHK: string
   }
   about: {
     metaTitle: string

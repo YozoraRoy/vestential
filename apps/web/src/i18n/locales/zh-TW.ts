@@ -136,6 +136,10 @@ export const zhTW: Dict = {
     ttsSpeed: '語速',
     ttsPlaying: '播放中',
     ttsPaused: '已暫停',
+    ttsAccent: '口音',
+    ttsAccentAuto: '自動',
+    ttsAccentTW: '台灣',
+    ttsAccentHK: '香港',
   },
   about: {
     metaTitle: '關於 Vestential — 上班族與小資族的投資資訊參考平台',

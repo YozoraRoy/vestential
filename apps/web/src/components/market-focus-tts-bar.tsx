@@ -8,13 +8,45 @@ import type { Locale } from '@/i18n/config'
 
 type TtsStatus = 'idle' | 'playing' | 'paused'
 
+/** 中文口音選擇：自動（瀏覽器預設）／台灣國語／香港粵語。 */
+type TtsAccent = 'auto' | 'tw' | 'hk'
+
 const SPEECH_RATES = [0.75, 1, 1.25, 1.5] as const
 
-/** locale → utterance.lang 對應；不指定 voice，交由瀏覽器自動選聲。 */
+/** locale → utterance.lang 對應；中文口音由 voice 選擇覆寫。 */
 function localeToLang(locale: string): string {
   if (locale === 'ja') return 'ja-JP'
   if (locale === 'en') return 'en-US'
   return 'zh-TW'
+}
+
+/** 從裝置 voice 清單找台灣／香港中文語音（找不到回 null，由瀏覽器 fallback）。 */
+function findAccentVoice(accent: 'tw' | 'hk'): SpeechSynthesisVoice | null {
+  try {
+    const voices = window.speechSynthesis?.getVoices() ?? []
+    const norm = (s: string) => s.toLowerCase()
+    if (accent === 'tw') {
+      return (
+        voices.find((v) => norm(v.lang).startsWith('zh-tw')) ??
+        voices.find((v) => norm(v.name).includes('taiwan') || v.name.includes('台灣')) ??
+        null
+      )
+    }
+    return (
+      voices.find((v) => norm(v.lang).startsWith('zh-hk') || norm(v.lang).startsWith('yue')) ??
+      voices.find(
+        (v) =>
+          norm(v.name).includes('hong kong') ||
+          norm(v.name).includes('hongkong') ||
+          v.name.includes('香港') ||
+          v.name.includes('粵語') ||
+          norm(v.name).includes('cantonese'),
+      ) ??
+      null
+    )
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -53,12 +85,17 @@ export function MarketFocusTtsBar({ summary, locale, t: tProp }: MarketFocusTtsB
   const [supported, setSupported] = useState(false)
   const [status, setStatus] = useState<TtsStatus>('idle')
   const [rate, setRate] = useState<number>(1)
+  const [accent, setAccent] = useState<TtsAccent>('auto')
+  /** 裝置是否找得到台灣／香港中文語音（voiceschanged 非同步，載入後更新）。 */
+  const [accentFound, setAccentFound] = useState<{ tw: boolean; hk: boolean }>({ tw: false, hk: false })
   const chunksRef = useRef<string[]>([])
   const indexRef = useRef(0)
   const rateRef = useRef(1)
+  const accentRef = useRef<TtsAccent>('auto')
   const lang = localeToLang(locale)
 
   rateRef.current = rate
+  accentRef.current = accent
 
   // client 掛載後才偵測 speechSynthesis；不支援直接隱藏（不報錯、不提示）。
   useEffect(() => {
@@ -67,10 +104,27 @@ export function MarketFocusTtsBar({ summary, locale, t: tProp }: MarketFocusTtsB
       'speechSynthesis' in window &&
       typeof window.speechSynthesis?.speak === 'function'
     setSupported(ok)
-    if (ok) {
-      // 預熱 voice 清單（部分瀏覽器需 voiceschanged 後才載入），但不指定 voice。
+    if (!ok) return
+    // 預熱＋偵測口音語音（部分瀏覽器需 voiceschanged 後才載入）。
+    const detect = () => {
       try {
         window.speechSynthesis.getVoices()
+      } catch {
+        /* 忽略 */
+      }
+      setAccentFound({ tw: findAccentVoice('tw') !== null, hk: findAccentVoice('hk') !== null })
+    }
+    detect()
+    try {
+      window.speechSynthesis.onvoiceschanged = detect
+    } catch {
+      /* 忽略 */
+    }
+    return () => {
+      try {
+        if (window.speechSynthesis && window.speechSynthesis.onvoiceschanged === detect) {
+          window.speechSynthesis.onvoiceschanged = null
+        }
       } catch {
         /* 忽略 */
       }
@@ -88,9 +142,20 @@ export function MarketFocusTtsBar({ summary, locale, t: tProp }: MarketFocusTtsB
       }
       indexRef.current = index
       const utter = new SpeechSynthesisUtterance(chunks[index])
-      utter.lang = localeToLang(locale)
+      // 口音有選且裝置找得到對應 voice 就指定；否則沿用 locale 預設由瀏覽器選聲。
+      const accentNow = accentRef.current
+      if (accentNow !== 'auto') {
+        const voice = findAccentVoice(accentNow)
+        if (voice) {
+          utter.voice = voice
+          utter.lang = voice.lang
+        } else {
+          utter.lang = localeToLang(locale)
+        }
+      } else {
+        utter.lang = localeToLang(locale)
+      }
       utter.rate = rateRef.current
-      // 不指定 voice：無對應 voice 時由瀏覽器 fallback 預設 voice 照常發聲。
       utter.onend = () => {
         // 使用者中途按停止會 cancel 並觸發 onend，需以狀態守衛避免自動續播。
         if (indexRef.current !== index) return
@@ -212,6 +277,21 @@ export function MarketFocusTtsBar({ summary, locale, t: tProp }: MarketFocusTtsB
           ))}
         </select>
       </label>
+      {(accentFound.tw || accentFound.hk) && (
+        <label className="inline-flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+          <span>{t.ttsAccent}</span>
+          <select
+            value={accent}
+            onChange={(e) => setAccent(e.target.value as TtsAccent)}
+            aria-label={t.ttsAccent}
+            className="px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/60"
+          >
+            <option value="auto">{t.ttsAccentAuto}</option>
+            {accentFound.tw && <option value="tw">{t.ttsAccentTW}</option>}
+            {accentFound.hk && <option value="hk">{t.ttsAccentHK}</option>}
+          </select>
+        </label>
+      )}
       {status !== 'idle' && (
         <span
           aria-live="polite"
