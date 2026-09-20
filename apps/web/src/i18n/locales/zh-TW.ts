@@ -887,4 +887,10 @@ export const zhTW: Dict = {
     phasePostclose: '收後自評',
     drawerClose: '關閉',
   },
+  festival: {
+    midAutumn: {
+      message: '中秋快樂！今晚抬頭看看月亮，Vesty 陪你過節。',
+      dismiss: '關閉節慶橫幅',
+    },
+  },
 }

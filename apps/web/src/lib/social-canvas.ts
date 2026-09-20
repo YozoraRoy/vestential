@@ -46,15 +46,17 @@ export interface SocialCardData {
   items: MarketFocusItem[]
 }
 
-export type SocialCardStyle = 'classic' | 'meme' | 'ai'
+export type SocialCardStyle = 'classic' | 'meme' | 'ai' | 'festival'
 
 export interface SocialCardOptions {
-  /** classic＝品牌資訊卡；meme＝梗圖大字版式；ai＝FLUX 專屬藝術圖＋大字 Hero。 */
+  /** classic＝品牌資訊卡；meme＝梗圖大字版式；ai＝FLUX 專屬藝術圖＋大字 Hero；festival＝節慶賀卡（中秋）。 */
   style?: SocialCardStyle
   /** style=meme 或 style=ai 時的梗圖內容。 */
   meme?: { title: string; punchline: string } | null
   /** AI 生成的高品質科技底圖 Buffer（選填，未傳入或失敗時使用純色漸層兜底）。 */
   backgroundImage?: Buffer | null
+  /** style=festival 時的賀詞大字（預設「中秋快樂」）與副標。 */
+  festival?: { title?: string; subtitle?: string } | null
 }
 
 /** 依市場焦點總覽與新聞生成 1080×1080 PNG buffer。 */
@@ -65,19 +67,36 @@ export async function renderSocialCard(data: SocialCardData, opts: SocialCardOpt
   const ctx = canvas.getContext('2d')
 
   // ── 背景：若有傳入底圖則繪製並疊上深色遮罩，否則使用深色純色漸層 ──────
-  // AI 全圖卡全幅展示藝術構圖，遮罩最淺；classic/meme 以可讀性優先，遮罩較深。
+  // AI 全圖卡／節慶賀卡全幅展示藝術構圖，遮罩最淺；classic/meme 以可讀性優先，遮罩較深。
   let drawnBg = false
   if (opts.backgroundImage && opts.backgroundImage.length > 0) {
     try {
       const bgImg = await loadImage(opts.backgroundImage)
       ctx.drawImage(bgImg, 0, 0, CARD_W, CARD_H)
-      const overlay = createMask(ctx, style === 'ai' ? 0.2 : 0.55)
+      const overlay = createMask(ctx, style === 'ai' || style === 'festival' ? 0.2 : 0.55)
       ctx.fillStyle = overlay
       ctx.fillRect(0, 0, CARD_W, CARD_H)
       drawnBg = true
     } catch (err) {
       console.warn('[SocialCanvas] 載入背景圖失敗，降級使用純色漸層:', err)
     }
+  }
+
+  if (!drawnBg && style === 'festival') {
+    // 節慶賀卡兜底：深藍夜空→墨綠的金綠漸層（無 FLUX 底圖時仍可發出）
+    const bg = ctx.createLinearGradient(0, 0, CARD_W, CARD_H)
+    bg.addColorStop(0, '#0d1526')
+    bg.addColorStop(0.55, '#0b1a17')
+    bg.addColorStop(1, '#0b0d13')
+    ctx.fillStyle = bg
+    ctx.fillRect(0, 0, CARD_W, CARD_H)
+    // 右上金色月暈
+    const moon = ctx.createRadialGradient(CARD_W - 190, 220, 20, CARD_W - 190, 220, 220)
+    moon.addColorStop(0, 'rgba(250, 204, 21, 0.55)')
+    moon.addColorStop(1, 'rgba(250, 204, 21, 0)')
+    ctx.fillStyle = moon
+    ctx.fillRect(0, 0, CARD_W, CARD_H)
+    drawnBg = true
   }
 
   if (!drawnBg) {
@@ -113,6 +132,8 @@ export async function renderSocialCard(data: SocialCardData, opts: SocialCardOpt
     renderMeme(ctx, opts.meme, maxWidth, CARD_H)
   } else if (style === 'ai' && opts.meme) {
     renderAiCard(ctx, opts.meme, maxWidth, CARD_H)
+  } else if (style === 'festival') {
+    renderFestival(ctx, opts.festival, dateStr, maxWidth)
   } else {
     renderClassic(ctx, data, maxWidth)
   }
@@ -253,6 +274,98 @@ function renderAiCard(ctx: any, meme: { title: string; punchline: string }, maxW
   }
 
   drawCtaBottom(ctx)
+}
+
+function renderFestival(
+  ctx: any,
+  festival: { title?: string; subtitle?: string } | null | undefined,
+  dateStr: string,
+  maxWidth: number,
+) {
+  const title = festival?.title?.trim() || '中秋快樂'
+  const subtitle = festival?.subtitle?.trim() || '月圓人團圓，Vesty 陪你走長期投資的路'
+
+  // ── 金色滿月 ──────────────────────────────────────────────────
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(CARD_W - 200, 250, 110, 0, Math.PI * 2)
+  ctx.fillStyle = '#facc15'
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(CARD_W - 200, 250, 132, 0, Math.PI * 2)
+  ctx.strokeStyle = 'rgba(250, 204, 21, 0.35)'
+  ctx.lineWidth = 6
+  ctx.stroke()
+  ctx.restore()
+
+  // ── 品牌列沿用上方 Vestential＋日期；此處加節慶徽章 ──────────────
+  ctx.save()
+  ctx.translate(76, 190)
+  ctx.rotate(-Math.PI / 26)
+  ctx.font = `700 34px "${FONT_NAME}"`
+  ctx.fillStyle = '#facc15'
+  ctx.fillText('VESTY × 中秋', 0, 0)
+  ctx.restore()
+
+  // ── 大字賀詞（自適應縮放，最多 2 行）──────────────────────────
+  let titleSize = 148
+  let titleLH = 180
+  let lines: string[] = []
+  for (;;) {
+    ctx.font = `700 ${titleSize}px "${FONT_NAME}"`
+    lines = wrapText(ctx, title, maxWidth, 2)
+    if (titleSize <= 96) break
+    if (lines.length * titleLH <= 400) break
+    titleSize -= 10
+    titleLH -= 12
+  }
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#fde68a'
+  let y = 560
+  for (const line of lines) {
+    ctx.fillText(line, 72, y)
+    y += titleLH
+  }
+
+  // ── 副標 ─────────────────────────────────────────────────────
+  ctx.font = `400 44px "${FONT_NAME}"`
+  ctx.fillStyle = '#d1d5db'
+  const sub = wrapText(ctx, subtitle, maxWidth, 2)
+  y += 24
+  for (const line of sub) {
+    ctx.fillText(line, 72, y)
+    y += 62
+  }
+
+  // ── 節慶 CTA ─────────────────────────────────────────────────
+  const ctaX = 72
+  const ctaY = CARD_H - 196
+  const ctaW = CARD_W - 144
+  const ctaH = 80
+  const ctaBg = ctx.createLinearGradient(ctaX, 0, ctaX + ctaW, 0)
+  ctaBg.addColorStop(0, '#14532d')
+  ctaBg.addColorStop(1, '#713f12')
+  ctx.fillStyle = ctaBg
+  roundRect(ctx, ctaX, ctaY, ctaW, ctaH, 18)
+  ctx.fill()
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  let ctaFontSize = 44
+  ctx.font = `700 ${ctaFontSize}px "${FONT_NAME}"`
+  while (ctx.measureText('月圓，部位也要圓 → vestential.com').width > ctaW - 32 && ctaFontSize > 28) {
+    ctaFontSize -= 2
+    ctx.font = `700 ${ctaFontSize}px "${FONT_NAME}"`
+  }
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText('月圓，部位也要圓 → vestential.com', CARD_W / 2, ctaY + ctaH / 2)
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
+
+  // ── Footer ────────────────────────────────────────────────────
+  ctx.font = `400 26px "${FONT_NAME}"`
+  ctx.fillStyle = '#6b7280'
+  const footerDate = dateStr ? dateStr.slice(0, 10) : ''
+  ctx.fillText(`Vestential 中秋賀卡${footerDate ? ` · ${footerDate}` : ''}`, 72, CARD_H - 60)
 }
 
 function drawCtaBottom(ctx: any) {

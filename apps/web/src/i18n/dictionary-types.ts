@@ -842,6 +842,12 @@ export interface Dict {
     phasePostclose: string
     drawerClose: string
   }
+  festival: {
+    midAutumn: {
+      message: string
+      dismiss: string
+    }
+  }
 }
 
 export type LocaleDict = Record<Locale, Dict>

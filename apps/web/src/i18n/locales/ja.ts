@@ -887,4 +887,10 @@ export const ja: Dict = {
     phasePostclose: '引け後レビュー',
     drawerClose: '閉じる',
   },
+  festival: {
+    midAutumn: {
+      message: '中秋節おめでとう！今夜は満月を見上げて、Vestyと一緒にお祝いしましょう。',
+      dismiss: 'お知らせを閉じる',
+    },
+  },
 }

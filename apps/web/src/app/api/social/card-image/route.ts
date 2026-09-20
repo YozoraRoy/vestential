@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const edition = searchParams.get('edition')?.trim() ?? ''
     const styleParam = searchParams.get('style')?.trim() ?? 'classic'
-    const style: SocialCardStyle = styleParam === 'meme' ? 'meme' : styleParam === 'ai' ? 'ai' : 'classic'
+    const style: SocialCardStyle = styleParam === 'meme' ? 'meme' : styleParam === 'ai' ? 'ai' : styleParam === 'festival' ? 'festival' : 'classic'
 
     let buf = await getSocialCardImage(edition, style).catch(() => null)
     if (!buf || buf.length === 0) {

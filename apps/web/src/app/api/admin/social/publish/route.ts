@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 import { migrate } from '@stock/database'
 import { getCurrentUserFromReq, isAdminUser } from '@/lib/auth'
 import { triggerSocialPublish } from '@/lib/social-trigger'
+import { triggerFestivalPublish } from '@/lib/social-festival-trigger'
 import type { SocialPostPlatform } from '@stock/database'
 import type { SocialCaptions } from '@/lib/social'
 
@@ -19,6 +20,8 @@ export async function POST(req: NextRequest) {
   let body: {
     dryRun?: boolean
     force?: boolean
+    festival?: boolean
+    dateOverride?: string
     platforms?: string[]
     imageUrl?: string | null
     imageUrls?: Partial<Record<SocialPostPlatform, string | null>>
@@ -27,6 +30,18 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json()
   } catch {}
+  // 節慶乾跑：只生成三平台文案＋賀圖預覽，不寫 social_posts、不打外部 API。
+  if (body.festival) {
+    try {
+      const outcome = await triggerFestivalPublish({
+        dryRun: true,
+        dateOverride: typeof body.dateOverride === 'string' ? body.dateOverride : undefined,
+      })
+      return NextResponse.json({ success: true, ...outcome })
+    } catch (e: any) {
+      return NextResponse.json({ success: false, error: e?.message ?? 'festival dry-run 失敗' }, { status: 500 })
+    }
+  }
   const platforms = (body.platforms ?? ['instagram', 'threads']).filter(
     (p): p is SocialPostPlatform => p === 'instagram' || p === 'threads' || p === 'facebook',
   )

@@ -61,6 +61,18 @@ export function SocialClient() {
   const [replyAlreadyReplied, setReplyAlreadyReplied] = useState(false)
   const [replyMaxChars, setReplyMaxChars] = useState(500)
 
+  // 節慶乾跑（中秋 MVP）：只生成賀圖＋三平台文案預覽，不寫 DB、不真發
+  const [festivalPreview, setFestivalPreview] = useState<{
+    editionKey?: string | null
+    card?: string
+    captions?: { instagram: string; threads: string; facebook: string }
+    message?: string
+    skipped?: boolean
+    triggered?: boolean
+    error?: string
+  } | null>(null)
+  const [festivalBusy, setFestivalBusy] = useState(false)
+
   const togglePlatform = (p: SocialPlatform) => {
     setPlatforms((prev) => {
       if (prev.includes(p)) {
@@ -132,6 +144,21 @@ export function SocialClient() {
         ok: false,
         message: r.body?.error ? `底圖生成失敗：${r.body.error}` : '底圖生成連線逾時或網路錯誤',
       })
+    }
+  }
+
+  const runFestivalDryRun = async () => {
+    setFestivalBusy(true)
+    const r = await post('/api/admin/social/publish', { festival: true, dryRun: true }, 180000)
+    setFestivalBusy(false)
+    if (r.ok && r.body.success) {
+      setFestivalPreview(r.body)
+      setResult({
+        ok: true,
+        message: r.body.triggered ? `節慶乾跑完成（edition ${r.body.editionKey}）` : `${r.body.message ?? 'skipped'}`,
+      })
+    } else {
+      setResult({ ok: false, message: r.body?.error ? `失敗：${r.body.error}` : (r.ok ? '失敗：未知錯誤' : '連線逾時或網路錯誤') })
     }
   }
 
@@ -329,8 +356,11 @@ export function SocialClient() {
           <button className={btnGhost} onClick={() => run(false, true)} disabled={busy || platforms.length === 0}>
             強制重發選定平台（清去重）
           </button>
+          <button className={btnGhost} onClick={runFestivalDryRun} disabled={busy || festivalBusy}>
+            {festivalBusy ? '節慶乾跑中…' : '🌕 節慶乾跑（中秋賀圖＋三平台文案）'}
+          </button>
           <div className="flex items-center">
-            <Help text="FB／IG／Threads 一律搭配「AI 吉祥物全圖卡」。乾跑只產出預覽，不呼叫 Meta API 也不寫去重。" />
+            <Help text="FB／IG／Threads 一律搭配「AI 吉祥物全圖卡」。乾跑只產出預覽，不呼叫 Meta API 也不寫去重。節慶乾跑僅在中秋當天產出賀圖＋賀詞，非節日回 skipped。" />
           </div>
         </div>
         {busy && (
@@ -342,6 +372,40 @@ export function SocialClient() {
           <p className="mt-4 text-sm text-[var(--text-secondary)]">尚未乾跑。按下「乾跑預覽」會產出 FB／IG／Threads（AI 吉祥物全圖卡）＋梗圖大字卡供選，共三種圖卡與文案。</p>
         )}
       </Card>
+
+      {festivalPreview?.card && festivalPreview?.captions && !festivalBusy && (
+        <Card title="🌕 節慶乾跑預覽（中秋賀圖＋三平台賀詞，不寫 DB、不真發）">
+          <p className="mb-4 text-sm text-[var(--text-secondary)]">edition：{festivalPreview.editionKey}</p>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={festivalPreview.card}
+                alt="中秋賀圖預覽"
+                className="w-full max-w-[400px] mx-auto rounded-2xl border border-[var(--accent)]/40 shadow-lg"
+              />
+            </div>
+            <div className="space-y-4">
+              {(
+                [
+                  ['Instagram', festivalPreview.captions.instagram],
+                  ['Threads', festivalPreview.captions.threads],
+                  ['Facebook', festivalPreview.captions.facebook],
+                ] as const
+              ).map(([label, text]) => (
+                <div key={label}>
+                  <h3 className="mb-1 text-sm font-semibold text-[var(--accent)]">
+                    {label} 賀詞（{Array.from(text).length}/500）
+                  </h3>
+                  <p className="whitespace-pre-wrap break-words rounded-xl border border-[var(--border)] bg-black/20 p-3 text-sm text-[var(--text-primary)]">
+                    {text}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
 
       {preview?.cards && !busy && (
         <>

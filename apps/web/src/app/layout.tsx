@@ -3,6 +3,9 @@ import Script from 'next/script'
 import './globals.css'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
+import { FestivalBanner } from '@/components/festival-banner'
+import { getCurrentFestival } from '@/lib/festival-calendar'
+import { dictionaries } from '@/i18n/dictionaries'
 import { getCurrentUserFromCookies, isAdminUser } from '@/lib/auth'
 import { LanguageProvider } from '@/i18n/LanguageProvider'
 import { getLocale } from '@/i18n/server'
@@ -19,6 +22,9 @@ export const viewport: Viewport = {
   themeColor: '#0f1118',
 }
 
+// 節慶橫幅跨日快取：必須每請求以 Asia/Taipei 取日判斷，禁止靜態化殘留到隔日。
+export const dynamic = 'force-dynamic'
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUserFromCookies()
   const isAdmin = user ? await isAdminUser(user) : false
@@ -32,6 +38,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       }
     : null
   const locale = await getLocale()
+  const festival = getCurrentFestival()
+  const festivalText = dictionaries[locale].festival.midAutumn
 
   return (
     <html lang={locale} suppressHydrationWarning>
@@ -54,6 +62,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         )}
         <LanguageProvider>
           <Header initialUser={initialUser} />
+          {festival?.id === 'mid-autumn' && (
+            <FestivalBanner
+              message={festivalText.message}
+              dismissLabel={festivalText.dismiss}
+              dateStr={festival.dateStr}
+            />
+          )}
           <main className="flex-1">{children}</main>
           <Footer />
         </LanguageProvider>

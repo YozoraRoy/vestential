@@ -1,0 +1,43 @@
+name: Social festival publisher (Mid-Autumn MVP)
+
+on:
+  schedule:
+    # 每日 00:00 UTC ＝ 08:00 Asia/Taipei（台灣無日光節約，換算固定）
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: '乾跑（只生成文案＋賀圖，不發布）'
+        required: false
+        default: 'false'
+      force:
+        description: '強制重發（忽略去重）'
+        required: false
+        default: 'false'
+
+jobs:
+  festival:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Trigger festival publish
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          DRY_RUN: ${{ inputs.dryRun }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          BODY="{\"dryRun\":${DRY_RUN:-false},\"force\":${FORCE:-false}}"
+          CODE=$(curl -s -o /tmp/festival_resp.json -w "%{http_code}" \
+            --max-time 300 \
+            -X POST \
+            -H "Authorization: Bearer $SYNC_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$BODY" \
+            "https://vestential.com/api/cron/festival")
+          echo "HTTP $CODE"
+          cat /tmp/festival_resp.json
+          echo ""
+          if [ "$CODE" != "200" ]; then
+            echo "::error::festival publish trigger failed (HTTP $CODE)"
+            exit 1
+          fi

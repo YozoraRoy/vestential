@@ -887,4 +887,10 @@ export const en: Dict = {
     phasePostclose: 'Post-close Review',
     drawerClose: 'Close',
   },
+  festival: {
+    midAutumn: {
+      message: 'Happy Mid-Autumn Festival! Look up at the full moon tonight — Vesty celebrates with you.',
+      dismiss: 'Dismiss festival banner',
+    },
+  },
 }

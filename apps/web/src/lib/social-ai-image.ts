@@ -234,3 +234,22 @@ export function buildArtPromptForMeme(meme: { title: string; punchline: string }
 export async function generateSocialArtworkImage(meme: { title: string; punchline: string }): Promise<Buffer | null> {
   return callFluxImage(buildArtPromptForMeme(meme))
 }
+
+// ─── 節慶賀圖（中秋 MVP）──────────────────────────────────────────
+
+/**
+ * 中秋節慶專屬 FLUX 生圖英文 Prompt：Vesty 吉祥物＋中秋元素（滿月、玉兔剪影、
+ * 燈籠、月餅），深色金綠賀卡構圖，上方保留大字排版區，由 canvas 疊上精準中文。
+ */
+export function buildFestivalArtPrompt(festival: 'mid-autumn'): string {
+  void festival
+  return `${VESTY} celebrating mid-autumn festival under a giant glowing golden full moon, jade rabbit silhouette hopping nearby, warm paper lanterns and mooncakes floating around, emerald and gold festive palette on deep dark night sky, kawaii chibi proportions, bold modern vector illustration with thick clean outlines, cinematic contrast, bright empty upper third reserved for bold greeting caption, no text, 8k`
+}
+
+/**
+ * 生成中秋節慶賀圖底圖 Buffer。失敗回傳 null，
+ * 呼叫端以 canvas 金綠漸層兜底（renderSocialCard style=festival），不整單失敗。
+ */
+export async function generateFestivalArtworkImage(festival: 'mid-autumn'): Promise<Buffer | null> {
+  return callFluxImage(buildFestivalArtPrompt(festival))
+}
