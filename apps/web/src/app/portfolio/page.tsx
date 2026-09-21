@@ -148,6 +148,75 @@ export default function PortfolioPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [listTab, setListTab] = useState<'positions' | 'risk'>('positions')
+  // #28：紀錄區檢視切換（卡片｜表格，沿用持倉/風險 segmented 風格）。
+  // 偏好存 localStorage（key portfolio-records-view）；首次依 matchMedia(md) 決定預設。
+  // 手機（md 以下）不渲染切換器與表格本體，一律顯示卡片。
+  const [recordsView, setRecordsView] = useState<'cards' | 'table'>(() => {
+    try {
+      if (typeof window === 'undefined') return 'cards'
+      const stored = window.localStorage.getItem('portfolio-records-view')
+      if (stored === 'cards' || stored === 'table') return stored
+      return window.matchMedia('(min-width: 768px)').matches ? 'table' : 'cards'
+    } catch {
+      return 'cards'
+    }
+  })
+  const [isDesktop, setIsDesktop] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return false
+      return window.matchMedia('(min-width: 768px)').matches
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    try {
+      const mq = window.matchMedia('(min-width: 768px)')
+      const onChange = () => setIsDesktop(mq.matches)
+      mq.addEventListener('change', onChange)
+      return () => mq.removeEventListener('change', onChange)
+    } catch {
+      return
+    }
+  }, [])
+  const handleRecordsViewChange = (v: 'cards' | 'table') => {
+    setRecordsView(v)
+    try {
+      window.localStorage.setItem('portfolio-records-view', v)
+    } catch {}
+  }
+  // #28：表格欄頭排序（名稱/未實現/報酬率/建立時間，純前端 useMemo 排序，不打 API）。
+  const [sortKey, setSortKey] = useState<'name' | 'unrealized' | 'returnRate' | 'created' | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const toggleSort = (k: 'name' | 'unrealized' | 'returnRate' | 'created') => {
+    if (sortKey !== k) {
+      setSortKey(k)
+      setSortDir(k === 'name' ? 'asc' : 'desc')
+    } else {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    }
+  }
+  const sortedHistory = useMemo(() => {
+    if (!sortKey) return history
+    const arr = [...history]
+    const dir = sortDir === 'asc' ? 1 : -1
+    switch (sortKey) {
+      case 'name':
+        arr.sort((a, b) => (a.symbol_name || a.symbol).localeCompare(b.symbol_name || b.symbol, 'zh-Hant') * dir)
+        break
+      case 'unrealized':
+        arr.sort((a, b) => (a.unrealized_pnl - b.unrealized_pnl) * dir)
+        break
+      case 'returnRate':
+        arr.sort((a, b) => (a.total_return_pct - b.total_return_pct) * dir)
+        break
+      case 'created':
+        arr.sort((a, b) => (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir)
+        break
+    }
+    return arr
+  }, [history, sortKey, sortDir])
+  const effectiveRecordsView: 'cards' | 'table' = isDesktop ? recordsView : 'cards'
 
   const [authMode, setAuthMode] = useState<'loading' | 'user' | 'guest'>('loading')
   const [claimOpen, setClaimOpen] = useState(false)
@@ -1474,6 +1543,20 @@ export default function PortfolioPage() {
               ))}
             </div>
           </div>
+          {/* #28：紀錄檢視切換器（沿用持倉/風險 segmented 風格；手機 hidden，只留卡片） */}
+          <div className="hidden md:flex rounded-lg overflow-hidden border border-white/10" role="group" aria-label="records view">
+            {(['cards', 'table'] as const).map(v => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => handleRecordsViewChange(v)}
+                aria-pressed={recordsView === v}
+                className={`px-3 py-1 text-xs transition ${recordsView === v ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+              >
+                {v === 'cards' ? ui.viewCards : ui.viewTable}
+              </button>
+            ))}
+          </div>
         </div>
         {listTab === 'risk' ? (
           <PortfolioRiskPanel ui={ui} isLoggedIn={authMode === 'user'} />
@@ -1490,6 +1573,125 @@ export default function PortfolioPage() {
                 {ui.historyAddFirst}
               </button>
             )}
+          </div>
+        ) : effectiveRecordsView === 'table' ? (
+          <div className="hidden md:block overflow-x-auto rounded-xl border border-white/5 bg-[var(--bg-card)]">
+            <table className="w-full min-w-[1500px] text-sm">
+              <thead>
+                <tr className="text-left text-xs text-[var(--text-secondary)] border-b border-white/10">
+                  <th className="px-3 py-2 whitespace-nowrap font-medium">{ui.colRating}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium">
+                    <RecordsSortHeader label={ui.colName} active={sortKey === 'name'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('name')} />
+                  </th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium">{ui.colSymbol}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailShares}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailCost}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailPrice}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailTotalCost}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailMarketValue}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                    <RecordsSortHeader label={ui.detailUnrealizedPnl} active={sortKey === 'unrealized'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('unrealized')} />
+                  </th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                    <RecordsSortHeader label={ui.resultTotalReturn} active={sortKey === 'returnRate'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('returnRate')} />
+                  </th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailDividend}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailYield}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.netTitle}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium">
+                    <RecordsSortHeader label={ui.detailCreatedAt} active={sortKey === 'created'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('created')} />
+                  </th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium">{ui.colAction}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedHistory.map(item => {
+                  const open = expandedId === item.id
+                  // #28：淨損益單欄沿用 computeNetPnL（與 NetPnlView 同邏輯）；明細放在展開列的 NetPnlView。
+                  const net = computeNetPnL({ market: item.market, symbol: item.symbol, shares: item.shares, cost: item.cost, currentPrice: item.current_price, discount: feeDiscount })
+                  return (
+                    <Fragment key={item.id}>
+                      <tr onClick={() => expandHistory(item)} className="border-b border-white/5 hover:bg-white/5 transition cursor-pointer">
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span className={`px-2 py-0.5 rounded-md text-xs font-bold ${ratingColor(item.recommendation)}`}
+                            style={item.recommendation ? { backgroundColor: `${RATING_STYLE[item.recommendation]?.bg || 'rgba(255,255,255,0.08)'}22` } : undefined}>
+                            {item.recommendation || '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap font-medium">{item.symbol_name || item.symbol}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-xs text-[var(--text-secondary)]">{item.symbol}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{item.shares}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.cost, item.market)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.current_price, item.market)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.cost_basis, item.market)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.market_value, item.market)}</td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${item.unrealized_pnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
+                          {formatMoney(item.unrealized_pnl, item.market)} ({formatPct(item.unrealized_pnl_pct)})
+                        </td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${item.total_return >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
+                          {formatMoney(item.total_return, item.market)} {formatPct(item.total_return_pct)}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.dividend, item.market)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{item.yield_on_cost.toFixed(2)}%</td>
+                        <td className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${net.netPnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
+                          {formatMoney(net.netPnl, item.market)} ({formatPct(net.netPnlPct)})
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-xs">{(item.created_at || '').replace('T', ' ')}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {authMode === 'user' && (
+                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => openEditRecord(item)}
+                                title={ui.btnEditRecord}
+                                aria-label={ui.btnEditRecord}
+                                className="p-1.5 rounded-lg bg-white/5 text-[var(--accent)] hover:bg-white/10 transition"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteRecord(item)}
+                                disabled={deletingId === item.id}
+                                title={ui.btnDeleteRecord}
+                                aria-label={ui.btnDeleteRecord}
+                                className="p-1.5 rounded-lg bg-white/5 text-red-400 hover:bg-red-500/10 transition disabled:opacity-50 disabled:cursor-wait"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr className="border-b border-white/5">
+                          <td colSpan={15} className="px-4 pb-4 pt-2 bg-white/[0.02]">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                              <NetPnlView
+                                market={item.market}
+                                symbol={item.symbol}
+                                shares={item.shares}
+                                cost={item.cost}
+                                currentPrice={item.current_price}
+                                discount={feeDiscount}
+                                ui={ui}
+                              />
+                              {item.summary && (
+                                <div className="col-span-2 md:col-span-4">
+                                  <p className="text-xs text-[var(--text-secondary)]">{ui.detailAiSummary}</p>
+                                  <p className="text-sm">{item.summary}</p>
+                                </div>
+                              )}
+                              {item.report_json && <JsonAdviceView json={item.report_json} market={item.market} ui={ui} />}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         ) : (
           <div className="space-y-2">
@@ -1694,6 +1896,28 @@ export default function PortfolioPage() {
         </div>
       )}
     </div>
+  )
+}
+
+// #28：表格可排序欄頭按鈕（升降冪圖示＋三語 aria-label；排序本身由上層 useMemo 純前端處理）。
+function RecordsSortHeader({ label, active, dir, ascLabel, descLabel, onToggle }: {
+  label: string
+  active: boolean
+  dir: 'asc' | 'desc'
+  ascLabel: string
+  descLabel: string
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={active ? `${label} ${dir === 'asc' ? ascLabel : descLabel}` : label}
+      className="inline-flex items-center gap-1 hover:text-[var(--text-primary)] transition"
+    >
+      {label}
+      {active && (dir === 'asc' ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />)}
+    </button>
   )
 }
 

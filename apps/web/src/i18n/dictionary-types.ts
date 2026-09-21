@@ -730,6 +730,11 @@ export interface Dict {
     riskSectorSource: string
     riskGroupTw: string
     riskGroupUs: string
+    viewCards: string
+    viewTable: string
+    sortAsc: string
+    sortDesc: string
+    colRating: string
   }
   cycleEntry: {
     metaTitle: string

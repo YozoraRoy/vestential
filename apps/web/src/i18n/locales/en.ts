@@ -775,6 +775,11 @@ export const en: Dict = {
     riskSectorSource: 'Sector source',
     riskGroupTw: 'TW group',
     riskGroupUs: 'US group',
+    viewCards: 'Cards',
+    viewTable: 'Table',
+    sortAsc: 'Ascending',
+    sortDesc: 'Descending',
+    colRating: 'Rating',
   },
   cycleEntry: {
     metaTitle: 'Entry Points Now — Cycle Entry Model | Vestential',

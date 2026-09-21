@@ -775,6 +775,11 @@ export const ja: Dict = {
     riskSectorSource: 'セクター出典',
     riskGroupTw: '台灣グループ',
     riskGroupUs: '米国グループ',
+    viewCards: 'カード',
+    viewTable: 'テーブル',
+    sortAsc: '昇順',
+    sortDesc: '降順',
+    colRating: '評価',
   },
   cycleEntry: {
     metaTitle: '好参入ポイント銘柄 — サイクル参入モデル | Vestential',

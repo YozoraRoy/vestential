@@ -775,6 +775,11 @@ export const zhTW: Dict = {
     riskSectorSource: '產業來源',
     riskGroupTw: '台股組',
     riskGroupUs: '美股組',
+    viewCards: '卡片',
+    viewTable: '表格',
+    sortAsc: '升冪',
+    sortDesc: '降冪',
+    colRating: '評等',
   },
   cycleEntry: {
     metaTitle: '已現進場點標的 — 週期進場模型預估 | Vestential',
