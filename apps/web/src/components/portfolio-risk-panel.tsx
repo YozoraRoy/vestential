@@ -270,10 +270,10 @@ export default function PortfolioRiskPanel({ ui, isLoggedIn }: { ui: PortfolioDi
                   <p className="text-base font-bold text-[var(--accent-red)]">{fmtMoney(sc.lossAmount, g.market)}</p>
                   <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{ui.riskLossPct}</p>
                   <p className="text-sm font-bold">{fmtPct(sc.lossPct)}</p>
-                  {sc.excluded.length > 0 && (
+                  {((sc.excluded ?? []).length > 0) && (
                     <p className="mt-2 text-[10px] text-amber-400">
-                      {ui.riskExcluded}：{sc.excluded.map((x) => x.symbol).join('、')}
-                      （{sc.excluded[0].reason === 'missing-sector' ? ui.riskExcludedMissingSector : ui.riskExcludedMissingValue}）
+                      {ui.riskExcluded}：{(sc.excluded ?? []).map((x) => x.symbol).join('、')}
+                      （{(sc.excluded ?? [])[0]?.reason === 'missing-sector' ? ui.riskExcludedMissingSector : ui.riskExcludedMissingValue}）
                     </p>
                   )}
                 </div>
@@ -284,9 +284,9 @@ export default function PortfolioRiskPanel({ ui, isLoggedIn }: { ui: PortfolioDi
       ))}
 
       {/* 市值無效而不納入試算者（全情境） */}
-      {data.excluded.length > 0 && (
+      {((data.excluded ?? []).length > 0) && (
         <p className="text-[11px] text-amber-400">
-          {ui.riskExcluded}：{data.excluded.map((x) => x.symbol).join('、')}（{ui.riskExcludedMissingValue}）
+          {ui.riskExcluded}：{(data.excluded ?? []).map((x) => x.symbol).join('、')}（{ui.riskExcludedMissingValue}）
         </p>
       )}
 

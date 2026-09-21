@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { TrendingUp, Zap, RefreshCw, Sparkles, History, ChevronDown, ChevronUp, Upload, Trash2, CheckCircle2, Plus, X, Search } from 'lucide-react'
+import { TrendingUp, Zap, RefreshCw, Sparkles, History, ChevronDown, ChevronUp, Upload, Trash2, CheckCircle2, Plus, X, Search, Pencil } from 'lucide-react'
 import { searchStocks, StockCandidateList } from '@/components/stock-search'
 import PortfolioRiskPanel from '@/components/portfolio-risk-panel'
 import { useI18n } from '@/i18n/LanguageProvider'
@@ -173,6 +173,18 @@ export default function PortfolioPage() {
   const [savingRows, setSavingRows] = useState<number[]>([])
   const savingRowRef = useRef<Set<number>>(new Set())
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  // #26：紀錄編輯 modal（沿用 journal openEdit 預填風格；驗證沿用 validatePortfolioInput 模型）。
+  const [editingItem, setEditingItem] = useState<HistoryItem | null>(null)
+  const [editMarket, setEditMarket] = useState<Market>('tw')
+  const [editSymbol, setEditSymbol] = useState('')
+  const [editSymbolName, setEditSymbolName] = useState('')
+  const [editShares, setEditShares] = useState('')
+  const [editCost, setEditCost] = useState('')
+  const [editPrice, setEditPrice] = useState('')
+  const [editDividend, setEditDividend] = useState('')
+  const [editStrategy, setEditStrategy] = useState('buffett')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   const buildPayload = () => {
     const nShares = num(shares)
@@ -450,6 +462,82 @@ export default function PortfolioPage() {
       setError(ui.errRecordDeleteFailed.replace('{error}', e.message || ''))
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  // #26：紀錄編輯（modal 欄位預填市場/代號/股數/成本/現價/配息/策略；存檔後刷新列表）。
+  const openEditRecord = (item: HistoryItem) => {
+    setEditingItem(item)
+    setEditMarket(item.market)
+    setEditSymbol(item.symbol)
+    setEditSymbolName(item.symbol_name || '')
+    setEditShares(String(item.shares))
+    setEditCost(String(item.cost))
+    setEditPrice(String(item.current_price))
+    setEditDividend(String(item.dividend ?? 0))
+    setEditStrategy(item.strategy || 'buffett')
+    setEditError(null)
+  }
+
+  const closeEditRecord = () => {
+    if (editSaving) return
+    setEditingItem(null)
+    setEditError(null)
+  }
+
+  const handleUpdateRecord = async () => {
+    if (!editingItem || editSaving) return
+    const nShares = num(editShares)
+    const nCost = num(editCost)
+    const nPrice = num(editPrice)
+    const nDiv = num(editDividend) ?? 0
+    if (!editSymbol.trim()) {
+      setEditError(ui.errSymbolRequired)
+      return
+    }
+    if (nShares == null || !(nShares > 0)) {
+      setEditError(ui.errSharesGreaterThanZero)
+      return
+    }
+    if (nCost == null || nCost < 0) {
+      setEditError(ui.errCostNonNegative)
+      return
+    }
+    if (nPrice == null || !(nPrice > 0)) {
+      setEditError(ui.errPriceGreaterThanZero)
+      return
+    }
+    setEditSaving(true)
+    setEditError(null)
+    setError(null)
+    try {
+      const res = await fetch(`/api/portfolio/records/${editingItem.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          market: editMarket,
+          symbol: editSymbol.trim().toUpperCase(),
+          shares: nShares,
+          cost: nCost,
+          currentPrice: nPrice,
+          dividend: nDiv,
+          symbolName: editSymbolName || undefined,
+          strategy: editStrategy || undefined,
+        }),
+      })
+      const data = await parseJsonSafe(res, safeMsg)
+      if (!res.ok || !data.success) {
+        setEditError(ui.errRecordUpdateFailed.replace('{error}', data.error || `HTTP ${res.status}`))
+        return
+      }
+      const label = editSymbolName || editSymbol.trim().toUpperCase()
+      setNotice(ui.noticeRecordUpdated.replace('{symbol}', label))
+      setEditingItem(null)
+      await fetchHistory()
+    } catch (e: unknown) {
+      setEditError(ui.errRecordUpdateFailed.replace('{error}', e instanceof Error ? e.message : ''))
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -1361,16 +1449,6 @@ export default function PortfolioPage() {
               ))}
             </div>
           </div>
-          {!showAdd && (
-            <button
-              type="button"
-              onClick={() => setShowAdd(true)}
-              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 text-sm hover:bg-white/15 transition"
-            >
-              <Plus className="w-4 h-4" />
-              {ui.headerAdd}
-            </button>
-          )}
         </div>
         {listTab === 'risk' ? (
           <PortfolioRiskPanel ui={ui} isLoggedIn={authMode === 'user'} />
@@ -1435,7 +1513,15 @@ export default function PortfolioPage() {
                         {item.report_json && <JsonAdviceView json={item.report_json} market={item.market} ui={ui} />}
                       </div>
                       {authMode === 'user' && (
-                        <div className="flex justify-end pt-3">
+                        <div className="flex justify-end gap-2 pt-3">
+                          <button
+                            type="button"
+                            onClick={() => openEditRecord(item)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 text-xs text-[var(--accent)] hover:bg-white/10 transition"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            {ui.btnEditRecord}
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleDeleteRecord(item)}
@@ -1455,6 +1541,123 @@ export default function PortfolioPage() {
           </div>
         )}
       </div>
+
+      {/* #26：紀錄編輯 modal（欄位預填市場/代號/股數/成本/現價/配息/策略） */}
+      {editingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closeEditRecord}>
+          <div
+            className="w-full max-w-lg bg-[var(--bg-card)] rounded-2xl border border-white/10 p-5 space-y-4 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={ui.editPanelTitle}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold">{ui.editPanelTitle}</h3>
+              <button type="button" onClick={closeEditRecord} className="p-1 rounded-lg hover:bg-white/10 transition" aria-label={ui.editPanelCancel}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-xs space-y-1">
+                <span className="text-[var(--text-secondary)]">{ui.formMarket}</span>
+                <select
+                  value={editMarket}
+                  onChange={(e) => setEditMarket(e.target.value === 'us' ? 'us' : 'tw')}
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-white/10 text-sm"
+                >
+                  <option value="tw">{ui.marketTw}</option>
+                  <option value="us">{ui.marketUs}</option>
+                </select>
+              </label>
+              <label className="text-xs space-y-1">
+                <span className="text-[var(--text-secondary)]">{ui.colSymbol}</span>
+                <input
+                  value={editSymbol}
+                  onChange={(e) => setEditSymbol(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-white/10 text-sm"
+                />
+              </label>
+              <label className="text-xs space-y-1 col-span-2">
+                <span className="text-[var(--text-secondary)]">{ui.colName}</span>
+                <input
+                  value={editSymbolName}
+                  onChange={(e) => setEditSymbolName(e.target.value)}
+                  placeholder={ui.placeholderName}
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-white/10 text-sm"
+                />
+              </label>
+              <label className="text-xs space-y-1">
+                <span className="text-[var(--text-secondary)]">{ui.formShares}</span>
+                <input
+                  value={editShares}
+                  onChange={(e) => setEditShares(e.target.value)}
+                  inputMode="decimal"
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-white/10 text-sm"
+                />
+              </label>
+              <label className="text-xs space-y-1">
+                <span className="text-[var(--text-secondary)]">{ui.formCostPerShare.replace('{currency}', editMarket === 'tw' ? 'NT$' : '$')}</span>
+                <input
+                  value={editCost}
+                  onChange={(e) => setEditCost(e.target.value)}
+                  inputMode="decimal"
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-white/10 text-sm"
+                />
+              </label>
+              <label className="text-xs space-y-1">
+                <span className="text-[var(--text-secondary)]">{ui.formPricePerShare.replace('{currency}', editMarket === 'tw' ? 'NT$' : '$')}</span>
+                <input
+                  value={editPrice}
+                  onChange={(e) => setEditPrice(e.target.value)}
+                  inputMode="decimal"
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-white/10 text-sm"
+                />
+              </label>
+              <label className="text-xs space-y-1">
+                <span className="text-[var(--text-secondary)]">{ui.formCumDividend.replace('{currency}', editMarket === 'tw' ? 'NT$' : '$')}</span>
+                <input
+                  value={editDividend}
+                  onChange={(e) => setEditDividend(e.target.value)}
+                  inputMode="decimal"
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-white/10 text-sm"
+                />
+              </label>
+              <label className="text-xs space-y-1 col-span-2">
+                <span className="text-[var(--text-secondary)]">{ui.formStrategy}</span>
+                <select
+                  value={editStrategy}
+                  onChange={(e) => setEditStrategy(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-white/10 text-sm"
+                >
+                  {STRATEGIES.map((s) => (
+                    <option key={s.id} value={s.id}>{s.nameZh}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {editError && <p className="text-xs text-red-400">{editError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeEditRecord}
+                disabled={editSaving}
+                className="px-4 py-2 rounded-xl bg-white/10 text-sm hover:bg-white/15 transition disabled:opacity-50"
+              >
+                {ui.editPanelCancel}
+              </button>
+              <button
+                type="button"
+                onClick={handleUpdateRecord}
+                disabled={editSaving}
+                className="px-4 py-2 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+              >
+                {editSaving ? ui.editPanelSaving : ui.editPanelSave}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

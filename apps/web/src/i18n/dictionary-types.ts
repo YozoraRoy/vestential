@@ -619,6 +619,12 @@ export interface Dict {
     btnSaveAll: string
     btnCreating: string
     btnDeleteRecord: string
+    btnEditRecord: string
+    editPanelTitle: string
+    editPanelSave: string
+    editPanelSaving: string
+    editPanelCancel: string
+    errRecordUpdateFailed: string
     confirmDeleteRecord: string
     noticeRecordDeleted: string
     errRecordDeleteFailed: string

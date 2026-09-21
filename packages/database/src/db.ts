@@ -2700,6 +2700,121 @@ export async function deletePortfolioRecord(id: number, userId: number): Promise
   return false
 }
 
+export interface PortfolioRecordUpdate {
+  market: 'tw' | 'us'
+  symbol: string
+  symbolName?: string | null
+  shares: number
+  cost: number
+  currentPrice: number
+  dividend: number
+  costBasis: number
+  marketValue: number
+  unrealizedPnl: number
+  unrealizedPnlPct: number
+  totalReturn: number
+  totalReturnPct: number
+  yieldOnCost: number
+  strategy?: string | null
+}
+
+/**
+ * 更新一筆持股紀錄（限本人，Issue #26）。
+ * 沿用 updateTradeJournalEntry／deletePortfolioRecord 模式：WHERE 同時限定 id ＋ user_id，
+ * 他人 id 更新不到（回 false → API 層回 404，避免洩漏存在性）。
+ */
+export async function updatePortfolioRecord(
+  id: number,
+  userId: number,
+  patch: PortfolioRecordUpdate,
+): Promise<boolean> {
+  const symbolName = patch.symbolName ?? null
+  const strategyStr = patch.strategy ?? null
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return false
+    try {
+      const result = await pool.request()
+        .input('id', sql.Int, id)
+        .input('userId', sql.Int, userId)
+        .input('market', sql.NVarChar(10), patch.market)
+        .input('symbol', sql.NVarChar(30), patch.symbol)
+        .input('symbolName', sql.NVarChar(255), symbolName)
+        .input('shares', sql.Float, patch.shares)
+        .input('cost', sql.Float, patch.cost)
+        .input('currentPrice', sql.Float, patch.currentPrice)
+        .input('dividend', sql.Float, patch.dividend)
+        .input('costBasis', sql.Float, patch.costBasis)
+        .input('marketValue', sql.Float, patch.marketValue)
+        .input('pnl', sql.Float, patch.unrealizedPnl)
+        .input('pnlPct', sql.Float, patch.unrealizedPnlPct)
+        .input('totalReturn', sql.Float, patch.totalReturn)
+        .input('totalReturnPct', sql.Float, patch.totalReturnPct)
+        .input('yieldOnCost', sql.Float, patch.yieldOnCost)
+        .input('strategy', sql.NVarChar(50), strategyStr)
+        .query(`
+          UPDATE portfolio_records SET
+            market = @market, symbol = @symbol, symbol_name = @symbolName,
+            shares = @shares, cost = @cost, current_price = @currentPrice, dividend = @dividend,
+            cost_basis = @costBasis, market_value = @marketValue,
+            unrealized_pnl = @pnl, unrealized_pnl_pct = @pnlPct,
+            total_return = @totalReturn, total_return_pct = @totalReturnPct,
+            yield_on_cost = @yieldOnCost, strategy = @strategy
+          WHERE id = @id AND user_id = @userId
+        `)
+      return (result.rowsAffected[0] ?? 0) > 0
+    } catch (e) {
+      console.error('[AzureSQL] updatePortfolioRecord error:', e)
+      return false
+    }
+  }
+  const db = getSqliteDb()
+  if (db) {
+    try {
+      const info = db.prepare(`
+        UPDATE portfolio_records SET
+          market = ?, symbol = ?, symbol_name = ?,
+          shares = ?, cost = ?, current_price = ?, dividend = ?,
+          cost_basis = ?, market_value = ?,
+          unrealized_pnl = ?, unrealized_pnl_pct = ?,
+          total_return = ?, total_return_pct = ?,
+          yield_on_cost = ?, strategy = ?
+        WHERE id = ? AND user_id = ?
+      `).run(
+        patch.market, patch.symbol, symbolName,
+        patch.shares, patch.cost, patch.currentPrice, patch.dividend,
+        patch.costBasis, patch.marketValue,
+        patch.unrealizedPnl, patch.unrealizedPnlPct,
+        patch.totalReturn, patch.totalReturnPct,
+        patch.yieldOnCost, strategyStr,
+        id, userId,
+      )
+      if (info.changes > 0) return true
+    } catch (e) {
+      console.error('[SQLite] updatePortfolioRecord error:', e)
+      return false
+    }
+  }
+  const row = portfolioMemoryStore.find(r => r.id === id && r.user_id === userId)
+  if (!row) return false
+  row.market = patch.market
+  row.symbol = patch.symbol
+  row.symbol_name = symbolName
+  row.shares = patch.shares
+  row.cost = patch.cost
+  row.current_price = patch.currentPrice
+  row.dividend = patch.dividend
+  row.cost_basis = patch.costBasis
+  row.market_value = patch.marketValue
+  row.unrealized_pnl = patch.unrealizedPnl
+  row.unrealized_pnl_pct = patch.unrealizedPnlPct
+  row.total_return = patch.totalReturn
+  row.total_return_pct = patch.totalReturnPct
+  row.yield_on_cost = patch.yieldOnCost
+  row.strategy = strategyStr
+  return true
+}
+
 // ─── Trade Journal（交易日誌，Issue #21）───────────────────────────
 export type TradeJournalDirection = 'long' | 'short'
 

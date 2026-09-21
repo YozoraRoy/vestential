@@ -5,6 +5,7 @@ import {
   computeStress,
   resolveFallbackSector,
   UNCATEGORIZED_SECTOR,
+  type ExcludedHolding,
   type RiskHoldingInput,
   type RiskMarket,
   type StressScenarioResult,
@@ -67,6 +68,8 @@ export interface RiskSnapshot {
   holdingsCount: number
   sectorSource: 'yahoo' | 'fallback' | 'mixed' | 'none'
   groups: RiskGroupSnapshot[]
+  /** 頂層不納入試算者（各組 concentration.excluded 合併；Issue #26 crash 根因修）。 */
+  excluded: ExcludedHolding[]
 }
 
 /**
@@ -113,8 +116,11 @@ export async function loadRiskSnapshot(
     }),
   )
 
-  const groups: RiskGroupSnapshot[] = (['tw', 'us'] as RiskMarket[]).map((market) => {
-    const concentration = computeConcentration(holdings.filter((h) => h.market === market))
+  const concentrations = (['tw', 'us'] as RiskMarket[]).map((market) =>
+    computeConcentration(holdings.filter((h) => h.market === market)),
+  )
+  const groups: RiskGroupSnapshot[] = (['tw', 'us'] as RiskMarket[]).map((market, i) => {
+    const concentration = concentrations[i]
     return {
       market,
       totalMarketValue: concentration.totalMarketValue,
@@ -139,6 +145,7 @@ export async function loadRiskSnapshot(
     holdingsCount: groups.reduce((s, g) => s + g.includedCount, 0),
     sectorSource,
     groups,
+    excluded: concentrations.flatMap((c) => c.excluded),
   }
 }
 
