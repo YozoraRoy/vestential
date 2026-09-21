@@ -2,7 +2,7 @@ export {
   getDb, hasDb, migrate, closeDb,
   dbQueryAll, dbQueryFirst, dbExecute, dbExecRaw,
   saveAnalysisRecord, getAnalysisRecords, getAnalysisRecordById,
-  savePortfolioRecord, getPortfolioRecords, getPortfolioRecordsByGuest,
+  savePortfolioRecord, getPortfolioRecords, getPortfolioRecordsByGuest, deletePortfolioRecord,
   saveTradeJournalEntry, listTradeJournalEntries, getTradeJournalEntryById,
   updateTradeJournalEntry, deleteTradeJournalEntry,
   saveClaimCode, findGuestByClaimCode, reassignGuestRecords,

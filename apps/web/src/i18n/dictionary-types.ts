@@ -617,6 +617,11 @@ export interface Dict {
     searchCancel: string
     editHint: string
     btnSaveAll: string
+    btnCreating: string
+    btnDeleteRecord: string
+    confirmDeleteRecord: string
+    noticeRecordDeleted: string
+    errRecordDeleteFailed: string
     formMarket: string
     formSymbolLabel: string
     formSymbolExampleTw: string

@@ -165,6 +165,14 @@ export default function PortfolioPage() {
   const [searchResults, setSearchResults] = useState<Array<{ symbol: string; name: string }>>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  // #25：建立 in-flight 守衛。ref 同步擋重入（連點第二次直接 return）＋ state 驅動按鈕 disabled＋「建立中」文案；
+  // finally 釋放避免 throw/early-return 後按鈕永久 disabled 卡死。
+  // 逐筆採 per-row 守衛（savingRowRef/savingRows）；saveAll 期間逐筆按鈕另以 savingAll 統一 disabled，避免並行重複 POST。
+  const [savingAll, setSavingAll] = useState(false)
+  const saveAllRef = useRef(false)
+  const [savingRows, setSavingRows] = useState<number[]>([])
+  const savingRowRef = useRef<Set<number>>(new Set())
+  const [deletingId, setDeletingId] = useState<number | null>(null)
 
   const buildPayload = () => {
     const nShares = num(shares)
@@ -361,6 +369,10 @@ export default function PortfolioPage() {
   }
 
   const saveRecognizedPosition = async (p: RecognizedPosition & { saved?: boolean }, index: number) => {
+    // #25 per-row 守衛：同列建立中時重複點擊直接 return false，不產生重複 POST。
+    if (savingRowRef.current.has(index)) return false
+    savingRowRef.current.add(index)
+    setSavingRows((prev) => (prev.includes(index) ? prev : [...prev, index]))
     try {
       const res = await fetch('/api/portfolio', {
         method: 'POST',
@@ -387,21 +399,57 @@ export default function PortfolioPage() {
     } catch {
       setError(ui.errRecordSaveError.replace('{symbol}', p.symbol))
       return false
+    } finally {
+      savingRowRef.current.delete(index)
+      setSavingRows((prev) => prev.filter((i) => i !== index))
     }
   }
 
   const saveAllRecognized = async () => {
-    const pending = recognized.map((p, i) => ({ p, i })).filter((x) => !x.p.saved)
-    let ok = 0
-    for (const { p, i } of pending) {
-      const r = await saveRecognizedPosition(p, i)
-      if (r) ok++
+    // #25 共用守衛：ref 同步生效，第一次迴圈執行中第二次連點直接 return，不產生重複 POST。
+    if (saveAllRef.current) return
+    saveAllRef.current = true
+    setSavingAll(true)
+    try {
+      const pending = recognized.map((p, i) => ({ p, i })).filter((x) => !x.p.saved)
+      let ok = 0
+      for (const { p, i } of pending) {
+        const r = await saveRecognizedPosition(p, i)
+        if (r) ok++
+      }
+      if (ok > 0) {
+        setNotice(ui.noticeCreatedRecords.replace('{n}', String(ok)))
+        setShowAdd(false)
+      } else {
+        setNotice(null)
+      }
+    } finally {
+      saveAllRef.current = false
+      setSavingAll(false)
     }
-    if (ok > 0) {
-      setNotice(ui.noticeCreatedRecords.replace('{n}', String(ok)))
-      setShowAdd(false)
-    } else {
-      setNotice(null)
+  }
+
+  // #25：歷史紀錄刪除（二次確認沿用 journal 站內風格 window.confirm；成功後刷新列表）。
+  const handleDeleteRecord = async (item: HistoryItem) => {
+    if (deletingId != null) return
+    const label = item.symbol_name || item.symbol
+    if (!window.confirm(ui.confirmDeleteRecord.replace('{symbol}', label))) return
+    setDeletingId(item.id)
+    setError(null)
+    try {
+      const res = await fetch(`/api/portfolio/records?id=${item.id}`, { method: 'DELETE' })
+      const data = await parseJsonSafe(res, safeMsg)
+      if (!res.ok || !data.success) {
+        setError(ui.errRecordDeleteFailed.replace('{error}', data.error || `HTTP ${res.status}`))
+        return
+      }
+      setNotice(ui.noticeRecordDeleted.replace('{symbol}', label))
+      if (expandedId === item.id) setExpandedId(null)
+      await fetchHistory()
+    } catch (e: any) {
+      setError(ui.errRecordDeleteFailed.replace('{error}', e.message || ''))
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -986,9 +1034,10 @@ export default function PortfolioPage() {
                                 <button
                                   type="button"
                                   onClick={() => saveRecognizedPosition(p, i)}
-                                  className="text-[var(--accent)] hover:text-[var(--accent-green)]"
+                                  disabled={savingRows.includes(i) || savingAll}
+                                  className="text-[var(--accent)] hover:text-[var(--accent-green)] disabled:opacity-50 disabled:cursor-wait disabled:hover:text-[var(--accent)]"
                                 >
-                                  {ui.btnCreate}
+                                  {savingRows.includes(i) ? ui.btnCreating : ui.btnCreate}
                                 </button>
                               )}
                               <button
@@ -1058,10 +1107,11 @@ export default function PortfolioPage() {
                   <button
                     type="button"
                     onClick={saveAllRecognized}
-                    className="shrink-0 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[var(--accent-green)] text-white text-sm font-medium hover:opacity-90 transition"
+                    disabled={savingAll}
+                    className="shrink-0 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[var(--accent-green)] text-white text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-wait"
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    {ui.btnSaveAll}
+                    {savingAll ? ui.btnCreating : ui.btnSaveAll}
                   </button>
                 </div>
               </div>
@@ -1384,6 +1434,19 @@ export default function PortfolioPage() {
                         )}
                         {item.report_json && <JsonAdviceView json={item.report_json} market={item.market} ui={ui} />}
                       </div>
+                      {authMode === 'user' && (
+                        <div className="flex justify-end pt-3">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRecord(item)}
+                            disabled={deletingId === item.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 text-xs text-red-400 hover:bg-red-500/10 transition disabled:opacity-50 disabled:cursor-wait"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            {ui.btnDeleteRecord}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

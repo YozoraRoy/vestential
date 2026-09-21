@@ -2660,6 +2660,46 @@ export async function getPortfolioRecords(userId: number, limit: number = 20): P
   return portfolioMemoryStore.filter(r => r.user_id === userId).slice(0, limit)
 }
 
+/**
+ * 刪除一筆持股紀錄（限本人，Issue #25）。
+ * 沿用 deleteTradeJournalEntry 模式：WHERE 同時限定 id ＋ user_id，
+ * 他人 id 刪不到（回 false → API 層回 404，避免洩漏存在性）。
+ */
+export async function deletePortfolioRecord(id: number, userId: number): Promise<boolean> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('id', sql.Int, id)
+          .input('userId', sql.Int, userId)
+          .query('DELETE FROM portfolio_records WHERE id = @id AND user_id = @userId')
+        return (result.rowsAffected[0] ?? 0) > 0
+      } catch (e) {
+        console.error('[AzureSQL] deletePortfolioRecord error:', e)
+        return false
+      }
+    }
+    return false
+  }
+  const db = getSqliteDb()
+  if (db) {
+    try {
+      const info = db.prepare('DELETE FROM portfolio_records WHERE id = ? AND user_id = ?').run(id, userId)
+      if (info.changes > 0) return true
+    } catch (e) {
+      console.error('[SQLite] deletePortfolioRecord error:', e)
+      return false
+    }
+  }
+  const idx = portfolioMemoryStore.findIndex(r => r.id === id && r.user_id === userId)
+  if (idx >= 0) {
+    portfolioMemoryStore.splice(idx, 1)
+    return true
+  }
+  return false
+}
+
 // ─── Trade Journal（交易日誌，Issue #21）───────────────────────────
 export type TradeJournalDirection = 'long' | 'short'
 
