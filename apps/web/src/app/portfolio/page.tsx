@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { TrendingUp, Zap, RefreshCw, Sparkles, History, ChevronDown, ChevronUp, Upload, Trash2, CheckCircle2, Plus, X, Search, Pencil } from 'lucide-react'
 import { searchStocks, StockCandidateList } from '@/components/stock-search'
 import PortfolioRiskPanel from '@/components/portfolio-risk-panel'
+import { computeNetPnL, DEFAULT_FEE_DISCOUNT } from '@/lib/portfolio-net'
 import { useI18n } from '@/i18n/LanguageProvider'
 import { parseJsonSafe, parseSseJson } from '@/lib/safe-parse'
 
@@ -136,8 +137,10 @@ export default function PortfolioPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  const [savedResult, setSavedResult] = useState<(PnL & { id: number; market: Market; symbol: string; symbolName?: string }) | null>(null)
+  const [savedResult, setSavedResult] = useState<(PnL & { id: number; market: Market; symbol: string; symbolName?: string; shares: number; cost: number; currentPrice: number; dividend: number }) | null>(null)
   const [aiResult, setAiResult] = useState<{ advice: Advice; strategy: { nameZh: string; nameEn: string }; usedFallback?: boolean } | null>(null)
+  // #27：後台 portfolio.fee_discount（預設 0.6），試算頁／紀錄詳情淨損益即時生效。
+  const [feeDiscount, setFeeDiscount] = useState<number>(DEFAULT_FEE_DISCOUNT)
   const [progress, setProgress] = useState<{ step: string; detail: string }[]>([])
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null)
 
@@ -239,6 +242,18 @@ export default function PortfolioPage() {
   useEffect(() => {
     if (authMode === 'user') fetchRecognitionQuota()
   }, [authMode])
+
+  // #27：載入後台手續費折讓；失敗沿用預設 0.6（不炸版）。
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const res = await fetch('/api/portfolio/fee-discount')
+        const data = await parseJsonSafe(res, safeMsg)
+        const n = Number(data?.discount)
+        if (Number.isFinite(n) && n >= 0 && n <= 1) setFeeDiscount(n)
+      } catch {}
+    })()
+  }, [])
 
   const resizeImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -1358,6 +1373,16 @@ export default function PortfolioPage() {
                   <p className="text-[var(--text-secondary)] text-xs">{ui.resultYieldOnCost}</p>
                   <p className="font-medium">{savedResult.yieldOnCost.toFixed(2)}%</p>
                 </div>
+                {/* #27：淨損益並列（保留裸損益，稅費明細三行＋公式註腳＋三語） */}
+                <NetPnlView
+                  market={savedResult.market}
+                  symbol={savedResult.symbol}
+                  shares={savedResult.shares}
+                  cost={savedResult.cost}
+                  currentPrice={savedResult.currentPrice}
+                  discount={feeDiscount}
+                  ui={ui}
+                />
               </div>
             </div>
           )}
@@ -1499,6 +1524,16 @@ export default function PortfolioPage() {
                         <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailTotalCost}</p><p>{formatMoney(item.cost_basis, item.market)}</p></div>
                         <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailMarketValue}</p><p>{formatMoney(item.market_value, item.market)}</p></div>
                         <div className="text-[var(--accent-red)]"><p className="text-xs text-[var(--text-secondary)]">{ui.detailUnrealizedPnl}</p><p>{formatMoney(item.unrealized_pnl, item.market)} ({formatPct(item.unrealized_pnl_pct)})</p></div>
+                        {/* #27：舊紀錄向下相容——稅費由既有欄位前端重算，無稅費欄也不炸版 */}
+                        <NetPnlView
+                          market={item.market}
+                          symbol={item.symbol}
+                          shares={item.shares}
+                          cost={item.cost}
+                          currentPrice={item.current_price}
+                          discount={feeDiscount}
+                          ui={ui}
+                        />
                         <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailYield}</p><p>{item.yield_on_cost.toFixed(2)}%</p></div>
                         <div className="col-span-2 md:col-span-4">
                           <p className="text-xs text-[var(--text-secondary)]">{ui.detailCreatedAt}</p>
@@ -1658,6 +1693,35 @@ export default function PortfolioPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// #27：淨損益並列區（裸損益保留，另列淨損益＋稅費明細三行＋公式註腳＋ETF 判定註明）。
+// 純前端重算：舊紀錄無稅費欄也能由 shares/cost/current_price 還原，不炸版。
+function NetPnlView({ market, symbol, shares, cost, currentPrice, discount, ui }: {
+  market: Market
+  symbol: string
+  shares: number
+  cost: number
+  currentPrice: number
+  discount: number
+  ui: { netTitle: string; netBuyFee: string; netSellFee: string; netTax: string; netFormula: string; netEtfNote: string }
+}) {
+  const net = computeNetPnL({ market, symbol, shares, cost, currentPrice, discount })
+  return (
+    <div className="col-span-full rounded-lg bg-[var(--bg-secondary)] border border-white/5 p-3 space-y-1">
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-xs text-[var(--text-secondary)]">{ui.netTitle}</p>
+        <p className={`text-sm font-bold ${net.netPnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
+          {formatMoney(net.netPnl, market)} <span className="text-xs">{formatPct(net.netPnlPct)}</span>
+        </p>
+      </div>
+      <p className="text-xs text-[var(--text-secondary)]">{ui.netBuyFee}：{formatMoney(net.buyFee, market)}</p>
+      <p className="text-xs text-[var(--text-secondary)]">{ui.netSellFee}：{formatMoney(net.sellFee, market)}</p>
+      <p className="text-xs text-[var(--text-secondary)]">{ui.netTax}：{formatMoney(net.tax, market)}</p>
+      <p className="text-[10px] text-[var(--text-secondary)] pt-1">{ui.netFormula}</p>
+      {market === 'tw' && <p className="text-[10px] text-[var(--text-secondary)]">{ui.netEtfNote}</p>}
     </div>
   )
 }

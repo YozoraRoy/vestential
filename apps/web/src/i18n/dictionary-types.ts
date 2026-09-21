@@ -650,6 +650,12 @@ export interface Dict {
     resultUnrealizedPnl: string
     resultTotalReturn: string
     resultYieldOnCost: string
+    netTitle: string
+    netBuyFee: string
+    netSellFee: string
+    netTax: string
+    netFormula: string
+    netEtfNote: string
     aiSuggestionTitle: string
     aiConfidence: string
     aiFairValue: string

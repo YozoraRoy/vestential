@@ -86,6 +86,13 @@ export const DEFAULT_AGENT_SETTINGS: Record<string, AgentSettingMeta> = {
     defaultValue: '',
     help: '覆寫「梗圖概念」生成提示詞；空白＝用內建預設。',
   },
+  // 試算頁
+  'portfolio.fee_discount': {
+    category: 'portfolio',
+    label: '手續費折讓 discount',
+    defaultValue: '0.6',
+    help: '台股手續費折讓（0~1；0.6＝6 折 0.0855%）。試算頁淨損益即時生效；美股不收稅費不受影響。',
+  },
   // 競技場
   'arena.slippage': {
     category: 'arena',

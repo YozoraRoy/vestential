@@ -82,6 +82,21 @@ export function computePnL(input: PnLInput): PnLResult {
   }
 }
 
+// ─── #27：含稅費淨損益（不動 computePnL）─────────────────────
+// 單一真相來源在 `./portfolio-net`（client-safe 零 Node/DB 依賴，供試算頁前端純算）。
+// 此處 re-export 使 `lib/portfolio.ts` 亦提供 computeNetPnL（server 端沿用同一實作）。
+export {
+  FEE_RATE,
+  MIN_FEE,
+  TAX_RATE_TW,
+  TAX_RATE_ETF,
+  DEFAULT_FEE_DISCOUNT,
+  isEtfSymbol,
+  computeNetPnL,
+  type NetPnLInput,
+  type NetPnLResult,
+} from './portfolio-net'
+
 /** 依市場解析 Yahoo 代號：台股純數字 → .TW/.TWO，美股直接用代號。 */
 export async function resolveYahooSymbol(raw: string, market: Market): Promise<string> {
   const trimmed = raw.trim().toUpperCase()
