@@ -5,6 +5,7 @@ import { consumeAnalysisQuota, getPortfolioRecords } from '@stock/database'
 import { DAILY_ANALYSIS_LIMIT, getCurrentUserFromCookies, getTaiwanDateStr } from '../../../../../lib/auth'
 import { loadRiskSnapshot } from '../../../../../lib/portfolio-risk-server'
 import { RISK_DISCLAIMER } from '../../../../../lib/portfolio-risk'
+import { reportServerError } from '../../../../../lib/server-alert'
 
 function fmt(n: number, digits = 2): string {
   return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits }) : '—'
@@ -76,6 +77,8 @@ export async function POST() {
     }
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'AI 風險總結失敗'
+    // #24：通用位置（第三條驗證 route）→ 後端告警（去重 30min，不含個資）。
+    void reportServerError({ route: 'POST /api/portfolio/risk/summary', status: 500, error: message })
     return NextResponse.json({ error: message, fallback: true }, { status: 500 })
   }
 }

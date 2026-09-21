@@ -2,6 +2,12 @@ import { runPortfolioAnalysis, INVESTMENT_FRAMEWORKS, getFramework } from '@stoc
 import { savePortfolioRecord, consumeAnalysisQuota } from '@stock/database'
 import { DAILY_ANALYSIS_LIMIT, getCurrentUserFromCookies, getTaiwanDateStr } from '../../../../lib/auth'
 import { buildMarketContext, computePnL, validatePortfolioInput } from '../../../../lib/portfolio'
+import { reportServerError } from '../../../../lib/server-alert'
+
+export const runtime = 'nodejs'
+// #23：LLM 鏈（market context＋runPortfolioAnalysis＋存檔）耗時與 recognize 相當，
+// 故同取 120s（參照 recognize route 的 maxDuration=120），避免閘道超時噴 HTML。
+export const maxDuration = 120
 
 export async function POST(req: Request) {
   try {
@@ -102,6 +108,8 @@ export async function POST(req: Request) {
 
           send('result', resultPayload)
         } catch (e: any) {
+          // #24：LLM／串流內部失敗（前端只收到 SSE error 事件）→ 後端告警（去重 30min，不含個資）。
+          void reportServerError({ route: 'POST /api/portfolio/analyze', status: 500, error: e?.message || e })
           send('error', { message: e.message })
         } finally {
           controller.close()
@@ -117,6 +125,8 @@ export async function POST(req: Request) {
       },
     })
   } catch (e: any) {
+    // #24：未捕捉異常 → 後端告警（fire-and-forget，不影響回應）。
+    void reportServerError({ route: 'POST /api/portfolio/analyze', status: 500, error: e?.message || e })
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
   }
 }

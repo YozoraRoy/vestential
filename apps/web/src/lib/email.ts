@@ -38,7 +38,7 @@ function smtpConfig() {
   }
 }
 
-async function sendMailCore(subject: string, text: string, html?: string, toOverride?: string): Promise<boolean> {
+export async function sendMailCore(subject: string, text: string, html?: string, toOverride?: string): Promise<boolean> {
   const cfg = smtpConfig()
   if (!cfg) return false
   try {

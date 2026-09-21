@@ -6,6 +6,7 @@ import { TrendingUp, Zap, RefreshCw, Sparkles, History, ChevronDown, ChevronUp, 
 import { searchStocks, StockCandidateList } from '@/components/stock-search'
 import PortfolioRiskPanel from '@/components/portfolio-risk-panel'
 import { useI18n } from '@/i18n/LanguageProvider'
+import { parseJsonSafe, parseSseJson } from '@/lib/safe-parse'
 
 function formatLLMError(raw: string, llmRateLimited: string): string {
   if (/rate.?limit|429|tokens per minute|TPM|exhausted/i.test(raw)) {
@@ -114,6 +115,11 @@ export default function PortfolioPage() {
   const { dict } = useI18n()
   const ui = dict.portfolio
   const STRATEGIES = useMemo(() => buildStrategies(ui), [ui])
+  // #23：safe-parse 友善文案（i18n 三語），傳給 parseJsonSafe。
+  const safeMsg = useMemo(
+    () => ({ connectionInterrupted: ui.errConnectionInterrupted, serverBusy: ui.errServerBusy }),
+    [ui],
+  )
 
   const [market, setMarket] = useState<Market>('tw')
   const [symbol, setSymbol] = useState('')
@@ -195,7 +201,7 @@ export default function PortfolioPage() {
   const fetchHistory = async () => {
     try {
       const res = await fetch('/api/portfolio/records?limit=20')
-      const data = await res.json()
+      const data = await parseJsonSafe(res, safeMsg)
       if (data.success) setHistory(data.records)
     } catch (e) {
       console.error('Failed to fetch portfolio history:', e)
@@ -205,7 +211,7 @@ export default function PortfolioPage() {
   const fetchRecognitionQuota = async () => {
     try {
       const res = await fetch('/api/portfolio/recognize')
-      const data = await res.json()
+      const data = await parseJsonSafe(res, safeMsg)
       if (data && typeof data.remaining === 'number') setRecognitionQuota(data)
     } catch {}
   }
@@ -270,7 +276,7 @@ export default function PortfolioPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: preview }),
       })
-      const data = await res.json()
+      const data = await parseJsonSafe(res, safeMsg)
       if (data.error) {
         setError(data.error)
         if (typeof data?.quota?.used === 'number') setRecognitionQuota(data.quota)
@@ -342,7 +348,7 @@ export default function PortfolioPage() {
     setNotice(ui.noticePickFilled.replace('{symbol}', r.symbol))
     try {
       const res = await fetch(`/api/portfolio/quote?symbol=${encodeURIComponent(r.symbol)}&market=${p.market}`)
-      const data = await res.json()
+      const data = await parseJsonSafe(res, safeMsg)
       if (res.ok && typeof data.price === 'number') {
         updateRecognized(i, { currentPrice: data.price, symbolName: data.name || r.name || undefined })
         setNotice(ui.noticePickPriceFetched.replace('{symbol}', data.symbol).replace('{name}', data.name || r.name).replace('{price}', String(data.price)))
@@ -370,7 +376,7 @@ export default function PortfolioPage() {
           strategyId,
         }),
       })
-      const data = await res.json()
+      const data = await parseJsonSafe(res, safeMsg)
       if (data.error) {
         setError(ui.errRecordSaveFailed.replace('{symbol}', p.symbol).replace('{error}', data.error))
         return false
@@ -414,7 +420,7 @@ export default function PortfolioPage() {
     ;(async () => {
       try {
         const res = await fetch('/api/auth/me')
-        const data = await res.json()
+        const data = await parseJsonSafe(res, safeMsg)
         setAuthMode(data?.success ? 'user' : 'guest')
       } catch {
         setAuthMode('guest')
@@ -432,7 +438,7 @@ export default function PortfolioPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create' }),
       })
-      const data = await res.json()
+      const data = await parseJsonSafe(res, safeMsg)
       if (!res.ok) {
         setClaimError(data.error || '產生認領碼失敗')
         return
@@ -456,7 +462,7 @@ export default function PortfolioPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'redeem', code: claimRedeem }),
       })
-      const data = await res.json()
+      const data = await parseJsonSafe(res, safeMsg)
       if (!res.ok) {
         setClaimError(data.error || '兌換認領碼失敗')
         return
@@ -492,7 +498,7 @@ export default function PortfolioPage() {
     setError(null)
     try {
       const res = await fetch(`/api/portfolio/quote?symbol=${encodeURIComponent(sym)}&market=${market}`)
-      const data = await res.json()
+      const data = await parseJsonSafe(res, safeMsg)
       if (!res.ok) {
         setError(data.error || ui.errQuoteFailed)
         return
@@ -520,7 +526,7 @@ export default function PortfolioPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const data = await res.json()
+      const data = await parseJsonSafe(res, safeMsg)
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`)
         return
@@ -561,7 +567,13 @@ export default function PortfolioPage() {
       })
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({ error: res.statusText }))
+        // #23：非 JSON（閘道 HTML／截斷）轉中文友善錯誤，不讓 V8 原生訊息漏到 UI。
+        let body: any = null
+        try {
+          body = await parseJsonSafe(res, safeMsg)
+        } catch (e: any) {
+          body = { error: e?.message || ui.errServerBusy }
+        }
         if (res.status === 401) {
           router.replace(`/login?redirect=${encodeURIComponent('/portfolio')}`)
           return
@@ -579,6 +591,7 @@ export default function PortfolioPage() {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let badBlocks = 0
 
       while (true) {
         const { done, value } = await reader.read()
@@ -595,7 +608,13 @@ export default function PortfolioPage() {
             else if (line.startsWith('data: ')) data = line.slice(6)
           }
           if (!data) continue
-          const parsed = JSON.parse(data)
+          // #23：SSE 壞塊（截斷 JSON）跳過、不斷流；壞塊計數僅 console 記錄。
+          const parsed = parseSseJson(data)
+          if (!parsed) {
+            badBlocks += 1
+            console.warn(`[Portfolio/SSE] skipped malformed block #${badBlocks}`)
+            continue
+          }
           if (eventType === 'progress') {
             setProgress(prev => [...prev, parsed])
             if (parsed.step === 'LLM' && typeof parsed.detail === 'string') {

@@ -607,6 +607,8 @@ export const ja: Dict = {
     errRecordSaveError: '「{symbol}」の保存中にエラーが発生しました',
     errRecognizeNone: '銘柄が認識されませんでした。画像が鮮明であることを確認して再試行してください',
     errRecognizeFailed: '認識に失敗しました。再試行してください',
+    errConnectionInterrupted: '接続が中断されました。ネットワークを確認して再試行してください',
+    errServerBusy: 'サーバーが混雑しています。しばらくしてから再試行してください',
     noticeQuota: '本日の残り認識回数：{remaining} / {max}',
     noticeFetchedQuote: '{symbol} のリアルタイム価格を取得しました：{price}',
     noticePickFilled: '{symbol} を入力しました。現在価格を取得中...',

@@ -607,6 +607,8 @@ export const zhTW: Dict = {
     errRecordSaveError: '「{symbol}」存檔發生錯誤',
     errRecognizeNone: '未辨識到任何股票，請確認圖片清楚後重試',
     errRecognizeFailed: '辨識失敗，請再試一次',
+    errConnectionInterrupted: '連線中斷，請檢查網路後重試',
+    errServerBusy: '伺服器忙碌中，請稍後再試',
     noticeQuota: '今日剩餘辨識次數：{remaining} / {max}',
     noticeFetchedQuote: '已取得 {symbol} 即時報價：{price}',
     noticePickFilled: '已填入 {symbol}，正在抓取現價...',

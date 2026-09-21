@@ -3,6 +3,7 @@ import { recognizePortfolioImage } from '@stock/ai-engine'
 import { consumeRecognitionQuota, getRecognitionUsage, refundRecognitionQuota } from '@stock/database'
 import { enrichRecognizedPositions } from '../../../../lib/portfolio'
 import { DAILY_RECOGNITION_LIMIT, getCurrentUserFromCookies, getTaiwanDateStr } from '../../../../lib/auth'
+import { reportServerError } from '../../../../lib/server-alert'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
@@ -111,6 +112,10 @@ export async function POST(req: Request) {
     })
   } catch (e: any) {
     const status = e?.message?.includes('額度') ? 429 : 500
+    if (status === 500) {
+      // #24：辨識鏈 500 → 後端告警（去重 30min，不含 user_id 等個資）。
+      void reportServerError({ route: 'POST /api/portfolio/recognize', status, error: e?.message || e })
+    }
     return NextResponse.json({ error: e.message || '圖片辨識失敗' }, { status })
   }
 }

@@ -607,6 +607,8 @@ export const en: Dict = {
     errRecordSaveError: '"{symbol}" save encountered an error',
     errRecognizeNone: 'No stocks recognized, please make sure the image is clear and try again',
     errRecognizeFailed: 'Recognition failed, please try again',
+    errConnectionInterrupted: 'Connection interrupted, please check your network and retry',
+    errServerBusy: 'Server is busy, please try again later',
     noticeQuota: 'Remaining recognitions today: {remaining} / {max}',
     noticeFetchedQuote: 'Fetched real-time quote for {symbol}: {price}',
     noticePickFilled: 'Filled in {symbol}, fetching current price...',

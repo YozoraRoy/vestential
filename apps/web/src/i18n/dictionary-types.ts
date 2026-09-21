@@ -562,6 +562,8 @@ export interface Dict {
     errRecordSaveError: string
     errRecognizeNone: string
     errRecognizeFailed: string
+    errConnectionInterrupted: string
+    errServerBusy: string
     noticeQuota: string
     noticeFetchedQuote: string
     noticePickFilled: string
