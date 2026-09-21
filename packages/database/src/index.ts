@@ -3,6 +3,8 @@ export {
   dbQueryAll, dbQueryFirst, dbExecute, dbExecRaw,
   saveAnalysisRecord, getAnalysisRecords, getAnalysisRecordById,
   savePortfolioRecord, getPortfolioRecords, getPortfolioRecordsByGuest,
+  saveTradeJournalEntry, listTradeJournalEntries, getTradeJournalEntryById,
+  updateTradeJournalEntry, deleteTradeJournalEntry,
   saveClaimCode, findGuestByClaimCode, reassignGuestRecords,
   getHistoricalGifts, ensureSeedData,
   logPlacementEvent, getPlacementEventStats,
@@ -42,7 +44,7 @@ export {
   saveAnalysisJob, updateAnalysisJob, getAnalysisJobById, listAnalysisJobsByUser,
   saveArenaTickJob, updateArenaTickJob, getArenaTickJobById, findRunningArenaTickJob, cleanupArenaTickJobs,
 } from './db.js'
-export type { AnalysisRecord, AnalysisJobRow, AnalysisJobInput, AnalysisJobUpdate, AnalysisJobAgentState, AnalysisJobStatus, PortfolioRecord, PortfolioRecordInput, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta, MarketFocusLogRow, MarketFocusLogInput,
+export type { AnalysisRecord, AnalysisJobRow, AnalysisJobInput, AnalysisJobUpdate, AnalysisJobAgentState, AnalysisJobStatus, PortfolioRecord, PortfolioRecordInput, TradeJournalEntry, TradeJournalInput, TradeJournalDirection, TradeJournalUpdate, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta, MarketFocusLogRow, MarketFocusLogInput,
   ArenaSeasonRow, ArenaAgentRow, ArenaHoldingRow, ArenaTradeRow, ArenaSnapshotRow, ArenaAgentInput, ArenaLeaderboardRow,
   ArenaIntradayPriceRow, ArenaMarketBriefingRow, ArenaDecisionLogRow, ArenaDiscussionRow,
   SocialPostRow, SocialPostInput, SocialPostPlatform, SocialPostStatus,

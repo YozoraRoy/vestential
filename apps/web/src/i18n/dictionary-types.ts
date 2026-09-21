@@ -36,6 +36,7 @@ export interface Dict {
     cycleEntry: string
     marketFocus: string
     agentArena: string
+    journal: string
   }
   switcher: {
     label: string
@@ -895,6 +896,57 @@ export interface Dict {
       message: string
       dismiss: string
     }
+  }
+  journal: {
+    metaTitle: string
+    metaDesc: string
+    title: string
+    subtitle: string
+    loginRequired: string
+    loginCta: string
+    formAddTitle: string
+    formEditTitle: string
+    fieldDate: string
+    fieldSymbol: string
+    fieldDirection: string
+    directionLong: string
+    directionShort: string
+    fieldEntryPrice: string
+    fieldExitPrice: string
+    fieldShares: string
+    fieldReason: string
+    fieldReasonPlaceholder: string
+    fieldStopLoss: string
+    stopLossYes: string
+    stopLossNo: string
+    btnAdd: string
+    btnSave: string
+    btnSaving: string
+    btnCancel: string
+    btnEdit: string
+    btnDelete: string
+    confirmDelete: string
+    statsTitle: string
+    statCount: string
+    statWinRate: string
+    statAvgPnl: string
+    statMaxLoss: string
+    statNoMaxLoss: string
+    statsFreeNote: string
+    listTitle: string
+    listEmpty: string
+    reviewTitle: string
+    reviewDesc: string
+    reviewQuotaNote: string
+    btnReview: string
+    btnReviewing: string
+    reviewNeedMore: string
+    reviewEmpty: string
+    reviewFailed: string
+    reviewDisclaimer: string
+    loadFailed: string
+    saveFailed: string
+    deleteFailed: string
   }
 }
 

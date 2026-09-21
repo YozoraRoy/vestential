@@ -551,6 +551,23 @@ CREATE TABLE IF NOT EXISTS market_focus_subscribers (
       CREATE INDEX IF NOT EXISTS idx_analysis_jobs_ticker ON analysis_jobs(ticker);
       CREATE INDEX IF NOT EXISTS idx_analysis_jobs_status ON analysis_jobs(status);
 
+      CREATE TABLE IF NOT EXISTS trade_journal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        trade_date TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        entry_price REAL NOT NULL,
+        exit_price REAL NOT NULL,
+        shares REAL NOT NULL,
+        reason TEXT NOT NULL,
+        stop_loss_obeyed INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_trade_journal_user ON trade_journal(user_id, id);
+      CREATE INDEX IF NOT EXISTS idx_trade_journal_date ON trade_journal(user_id, trade_date);
+
     `)
 
     return _db
@@ -1199,6 +1216,28 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
         CREATE INDEX idx_analysis_jobs_user ON analysis_jobs(user_id);
         CREATE INDEX idx_analysis_jobs_ticker ON analysis_jobs(ticker);
         CREATE INDEX idx_analysis_jobs_status ON analysis_jobs(status);
+      END
+    `)
+
+    await _pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'trade_journal')
+      BEGIN
+        CREATE TABLE trade_journal (
+          id               INT IDENTITY(1,1) PRIMARY KEY,
+          user_id          INT NOT NULL,
+          trade_date       NVARCHAR(20) NOT NULL,
+          symbol           NVARCHAR(30) NOT NULL,
+          direction        NVARCHAR(10) NOT NULL,
+          entry_price      FLOAT NOT NULL,
+          exit_price       FLOAT NOT NULL,
+          shares           FLOAT NOT NULL,
+          reason           NVARCHAR(MAX) NOT NULL,
+          stop_loss_obeyed INT NOT NULL DEFAULT 0,
+          created_at       DATETIME2 DEFAULT GETDATE(),
+          updated_at       DATETIME2 DEFAULT GETDATE()
+        );
+        CREATE INDEX idx_trade_journal_user ON trade_journal(user_id, id);
+        CREATE INDEX idx_trade_journal_date ON trade_journal(user_id, trade_date);
       END
     `)
 
@@ -2619,6 +2658,236 @@ export async function getPortfolioRecords(userId: number, limit: number = 20): P
     }
   }
   return portfolioMemoryStore.filter(r => r.user_id === userId).slice(0, limit)
+}
+
+// ─── Trade Journal（交易日誌，Issue #21）───────────────────────────
+export type TradeJournalDirection = 'long' | 'short'
+
+export interface TradeJournalEntry {
+  id?: number
+  user_id: number
+  trade_date: string
+  symbol: string
+  direction: TradeJournalDirection
+  entry_price: number
+  exit_price: number
+  shares: number
+  reason: string
+  stop_loss_obeyed: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface TradeJournalInput {
+  userId: number
+  tradeDate: string
+  symbol: string
+  direction: TradeJournalDirection
+  entryPrice: number
+  exitPrice: number
+  shares: number
+  reason: string
+  stopLossObeyed: boolean
+}
+
+const TRADE_JOURNAL_COLUMNS =
+  'id, user_id, trade_date, symbol, direction, entry_price, exit_price, shares, reason, stop_loss_obeyed, created_at, updated_at'
+
+export async function saveTradeJournalEntry(input: TradeJournalInput): Promise<number> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('userId', sql.Int, input.userId)
+          .input('tradeDate', sql.NVarChar(20), input.tradeDate)
+          .input('symbol', sql.NVarChar(30), input.symbol)
+          .input('direction', sql.NVarChar(10), input.direction)
+          .input('entryPrice', sql.Float, input.entryPrice)
+          .input('exitPrice', sql.Float, input.exitPrice)
+          .input('shares', sql.Float, input.shares)
+          .input('reason', sql.NVarChar(sql.MAX), input.reason)
+          .input('stopLossObeyed', sql.Int, input.stopLossObeyed ? 1 : 0)
+          .query(`
+            INSERT INTO trade_journal (user_id, trade_date, symbol, direction, entry_price, exit_price, shares, reason, stop_loss_obeyed)
+            VALUES (@userId, @tradeDate, @symbol, @direction, @entryPrice, @exitPrice, @shares, @reason, @stopLossObeyed);
+            SELECT SCOPE_IDENTITY() AS id
+          `)
+        return Number(result.recordset?.[0]?.id ?? -1)
+      } catch (e) {
+        console.error('[AzureSQL] saveTradeJournalEntry error:', e)
+      }
+    }
+    return -1
+  }
+  const db = getSqliteDb()
+  if (!db) return -1
+  try {
+    const info = db.prepare(`
+      INSERT INTO trade_journal (user_id, trade_date, symbol, direction, entry_price, exit_price, shares, reason, stop_loss_obeyed)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.userId, input.tradeDate, input.symbol, input.direction,
+      input.entryPrice, input.exitPrice, input.shares, input.reason,
+      input.stopLossObeyed ? 1 : 0,
+    )
+    return Number(info.lastInsertRowid)
+  } catch (e) {
+    console.error('[SQLite] saveTradeJournalEntry error:', e)
+    return -1
+  }
+}
+
+export async function listTradeJournalEntries(
+  userId: number,
+  opts?: { limit?: number; month?: string },
+): Promise<TradeJournalEntry[]> {
+  const limit = Math.min(Math.max(opts?.limit ?? 100, 1), 500)
+  const month = opts?.month?.trim()
+  const monthCond = month && /^\d{4}-\d{2}$/.test(month) ? 'AND trade_date LIKE @prefix' : ''
+  const params: Record<string, any> = { userId, limit }
+  if (monthCond) params.prefix = `${month}%`
+
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const req = pool.request()
+          .input('userId', sql.Int, userId)
+          .input('limit', sql.Int, limit)
+        if (monthCond) req.input('prefix', sql.NVarChar(10), `${month}%`)
+        const result = await req.query(`
+          SELECT TOP (@limit) ${TRADE_JOURNAL_COLUMNS}
+          FROM trade_journal WHERE user_id = @userId ${monthCond.replaceAll('@prefix', '@prefix')}
+          ORDER BY trade_date DESC, id DESC
+        `)
+        return result.recordset as TradeJournalEntry[]
+      } catch (e) {
+        console.error('[AzureSQL] listTradeJournalEntries error:', e)
+      }
+    }
+    return []
+  }
+  const db = getSqliteDb()
+  if (!db) return []
+  try {
+    const sqliteCond = monthCond ? 'AND trade_date LIKE @prefix' : ''
+    return db.prepare(`
+      SELECT ${TRADE_JOURNAL_COLUMNS}
+      FROM trade_journal WHERE user_id = @userId ${sqliteCond}
+      ORDER BY trade_date DESC, id DESC LIMIT @limit
+    `).all(params) as TradeJournalEntry[]
+  } catch (e) {
+    console.error('[SQLite] listTradeJournalEntries error:', e)
+    return []
+  }
+}
+
+/** 依 id 取單筆（含 user_id 歸屬檢查；非本人回 null）。 */
+export async function getTradeJournalEntryById(id: number, userId: number): Promise<TradeJournalEntry | null> {
+  const row = await dbQueryFirst<TradeJournalEntry>(
+    `SELECT ${TRADE_JOURNAL_COLUMNS} FROM trade_journal WHERE id = @id AND user_id = @userId LIMIT 1`,
+    { id, userId },
+  )
+  return row ?? null
+}
+
+export interface TradeJournalUpdate {
+  tradeDate?: string
+  symbol?: string
+  direction?: TradeJournalDirection
+  entryPrice?: number
+  exitPrice?: number
+  shares?: number
+  reason?: string
+  stopLossObeyed?: boolean
+}
+
+export async function updateTradeJournalEntry(
+  id: number,
+  userId: number,
+  patch: TradeJournalUpdate,
+): Promise<boolean> {
+  const sets: string[] = []
+  const params: Record<string, any> = { id, userId }
+  if (patch.tradeDate !== undefined) { sets.push('trade_date = @tradeDate'); params.tradeDate = patch.tradeDate }
+  if (patch.symbol !== undefined) { sets.push('symbol = @symbol'); params.symbol = patch.symbol }
+  if (patch.direction !== undefined) { sets.push('direction = @direction'); params.direction = patch.direction }
+  if (patch.entryPrice !== undefined) { sets.push('entry_price = @entryPrice'); params.entryPrice = patch.entryPrice }
+  if (patch.exitPrice !== undefined) { sets.push('exit_price = @exitPrice'); params.exitPrice = patch.exitPrice }
+  if (patch.shares !== undefined) { sets.push('shares = @shares'); params.shares = patch.shares }
+  if (patch.reason !== undefined) { sets.push('reason = @reason'); params.reason = patch.reason }
+  if (patch.stopLossObeyed !== undefined) { sets.push('stop_loss_obeyed = @stopLossObeyed'); params.stopLossObeyed = patch.stopLossObeyed ? 1 : 0 }
+  if (sets.length === 0) return true
+
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return false
+    try {
+      const req = pool.request().input('id', sql.Int, id).input('userId', sql.Int, userId)
+      const azureSets: string[] = []
+      if (patch.tradeDate !== undefined) { req.input('tradeDate', sql.NVarChar(20), patch.tradeDate); azureSets.push('trade_date = @tradeDate') }
+      if (patch.symbol !== undefined) { req.input('symbol', sql.NVarChar(30), patch.symbol); azureSets.push('symbol = @symbol') }
+      if (patch.direction !== undefined) { req.input('direction', sql.NVarChar(10), patch.direction); azureSets.push('direction = @direction') }
+      if (patch.entryPrice !== undefined) { req.input('entryPrice', sql.Float, patch.entryPrice); azureSets.push('entry_price = @entryPrice') }
+      if (patch.exitPrice !== undefined) { req.input('exitPrice', sql.Float, patch.exitPrice); azureSets.push('exit_price = @exitPrice') }
+      if (patch.shares !== undefined) { req.input('shares', sql.Float, patch.shares); azureSets.push('shares = @shares') }
+      if (patch.reason !== undefined) { req.input('reason', sql.NVarChar(sql.MAX), patch.reason); azureSets.push('reason = @reason') }
+      if (patch.stopLossObeyed !== undefined) { req.input('stopLossObeyed', sql.Int, patch.stopLossObeyed ? 1 : 0); azureSets.push('stop_loss_obeyed = @stopLossObeyed') }
+      const result = await req.query(`
+        UPDATE trade_journal SET ${azureSets.join(', ')}, updated_at = GETDATE()
+        WHERE id = @id AND user_id = @userId
+      `)
+      return (result.rowsAffected[0] ?? 0) > 0
+    } catch (e) {
+      console.error('[AzureSQL] updateTradeJournalEntry error:', e)
+      return false
+    }
+  }
+
+  const db = getSqliteDb()
+  if (!db) return false
+  try {
+    const positional = sets.map(s => s.replace(/@\w+/g, '?')).join(', ')
+    const values = sets.map(s => {
+      const key = s.match(/@(\w+)/)?.[1] ?? ''
+      return params[key]
+    })
+    const info = db.prepare(`
+      UPDATE trade_journal SET ${positional}, updated_at = datetime('now','localtime')
+      WHERE id = ? AND user_id = ?
+    `).run(...values, id, userId)
+    return info.changes > 0
+  } catch (e) {
+    console.error('[SQLite] updateTradeJournalEntry error:', e)
+    return false
+  }
+}
+
+export async function deleteTradeJournalEntry(id: number, userId: number): Promise<boolean> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return false
+    try {
+      const result = await pool.request()
+        .input('id', sql.Int, id)
+        .input('userId', sql.Int, userId)
+        .query('DELETE FROM trade_journal WHERE id = @id AND user_id = @userId')
+      return (result.rowsAffected[0] ?? 0) > 0
+    } catch (e) {
+      console.error('[AzureSQL] deleteTradeJournalEntry error:', e)
+      return false
+    }
+  }
+  const db = getSqliteDb()
+  if (!db) return false
+  try {
+    const info = db.prepare('DELETE FROM trade_journal WHERE id = ? AND user_id = ?').run(id, userId)
+    return info.changes > 0
+  } catch (e) {
+    console.error('[SQLite] deleteTradeJournalEntry error:', e)
+    return false
+  }
 }
 
 export async function getAnalysisRecordById(id: number): Promise<AnalysisRecord | undefined> {
