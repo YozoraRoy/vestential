@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useRouter } from 'next/navigation'
 import { TrendingUp, Zap, RefreshCw, Sparkles, History, ChevronDown, ChevronUp, Upload, Trash2, CheckCircle2, Plus, X, Search } from 'lucide-react'
 import { searchStocks, StockCandidateList } from '@/components/stock-search'
+import PortfolioRiskPanel from '@/components/portfolio-risk-panel'
 import { useI18n } from '@/i18n/LanguageProvider'
 
 function formatLLMError(raw: string, llmRateLimited: string): string {
@@ -137,6 +138,7 @@ export default function PortfolioPage() {
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [showAdd, setShowAdd] = useState(false)
+  const [listTab, setListTab] = useState<'positions' | 'risk'>('positions')
 
   const [authMode, setAuthMode] = useState<'loading' | 'user' | 'guest'>('loading')
   const [claimOpen, setClaimOpen] = useState(false)
@@ -1272,10 +1274,24 @@ export default function PortfolioPage() {
 
       <div className="mt-10">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <History className="w-5 h-5 text-[var(--text-secondary)]" />
-            {ui.historyTitle}
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <History className="w-5 h-5 text-[var(--text-secondary)]" />
+              {ui.historyTitle}
+            </h2>
+            <div className="flex rounded-lg overflow-hidden border border-white/10">
+              {(['positions', 'risk'] as const).map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setListTab(t)}
+                  className={`px-3 py-1 text-xs transition ${listTab === t ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                >
+                  {t === 'positions' ? ui.riskTabPositions : ui.riskTabRisk}
+                </button>
+              ))}
+            </div>
+          </div>
           {!showAdd && (
             <button
               type="button"
@@ -1287,7 +1303,9 @@ export default function PortfolioPage() {
             </button>
           )}
         </div>
-        {history.length === 0 ? (
+        {listTab === 'risk' ? (
+          <PortfolioRiskPanel ui={ui} isLoggedIn={authMode === 'user'} />
+        ) : history.length === 0 ? (
           <div className="bg-[var(--bg-card)] rounded-xl border border-white/5 p-8 text-center">
             <p className="text-sm text-[var(--text-secondary)]">{ui.historyEmpty}</p>
             {!showAdd && (

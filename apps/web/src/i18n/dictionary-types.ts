@@ -679,6 +679,37 @@ export interface Dict {
     guestRedeemed: string
     guestErrCodeRequired: string
     guestAiLoginRequired: string
+    riskTabPositions: string
+    riskTabRisk: string
+    riskLoading: string
+    riskLoadFailed: string
+    riskRetry: string
+    riskEmptyTitle: string
+    riskEmptyHint: string
+    riskSingleNotice: string
+    riskConcentrationTitle: string
+    riskTop1: string
+    riskTop3: string
+    riskSectorTitle: string
+    riskStressTitle: string
+    riskStressFormula: string
+    riskScenarioM10: string
+    riskScenarioM20: string
+    riskScenarioSector: string
+    riskLossAmount: string
+    riskLossPct: string
+    riskExcluded: string
+    riskExcludedMissingValue: string
+    riskExcludedMissingSector: string
+    riskAiSummary: string
+    riskAiSummarizing: string
+    riskAiQuota: string
+    riskAiFailed: string
+    riskAiLoginRequired: string
+    riskDataAsOf: string
+    riskSectorSource: string
+    riskGroupTw: string
+    riskGroupUs: string
   }
   cycleEntry: {
     metaTitle: string
