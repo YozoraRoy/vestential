@@ -1,0 +1,14 @@
+-- 023_arena_capital_500k.sql
+-- Issue #29：競技場起始資金 200000 → 500000（僅新 agent 生效，既有不追溯）。
+-- 說明（為何本檔無 DDL 改表）：
+-- 1) SQLite 無 ALTER COLUMN DEFAULT 語法，改既有表 DEFAULT 需整表重建；
+--    為「不追溯既有 agent 資金」刻意不重建，既有庫既有列完全不受影響。
+-- 2) 新建 agent 生效路徑（與本檔同版上線）：
+--    - db.ts ensure 區 CREATE TABLE arena_agents 已改 DEFAULT 500000（全新庫直接生效）；
+--    - createArenaAgent 的 input.initialCapital ?? 500000；
+--    - 系統示範 agent seed INSERT 寫死值改為 500000。
+--    所有 INSERT 皆顯式帶 initial_capital/cash，不依賴欄位 DEFAULT，故既有表 DEFAULT
+--    無論新舊都不影響新舊 agent 的實際資金（舊 agent 保持 200000，新 agent 為 500000）。
+-- 3) Azure SQL 端同理：新表由 getAzurePool 建表守衛以 DEFAULT 500000 建立；
+--    既有表刻意不改 DEFAULT（不追溯）。本檔供 migrate 追蹤（SQLite/Azure 皆可重跑，
+--    無執行語句故天然冪等，fresh＋既有庫 apply 皆過）。

@@ -8,7 +8,7 @@ export type ArenaAgentStatus = 'active' | 'paused' | 'reset'
 
 export type ArenaMode = 'backtest' | 'live'
 
-export const ARENA_DEFAULT_CAPITAL = 200_000
+export const ARENA_DEFAULT_CAPITAL = 500_000
 
 export const ARENA_FEE_RATE = 0.001425
 
@@ -22,7 +22,7 @@ export const ARENA_MAX_POSITION_RATIO = 0.3
 
 export const ARENA_DEFAULT_MAX_TOKENS = 800
 
-/** 動態股票池（市值 Top100 + ETF）快取時長：Yahoo marketCap 12h、TWSE CSV 12h。 */
+/** 動態股票池（市值 Top200 + ETF）快取時長：Yahoo marketCap 12h、TWSE CSV 12h。 */
 export const ARENA_UNIVERSE_ENV_CACHE_TTL_MS = 12 * 60 * 60 * 1000
 
 export interface ArenaUniverseItem {

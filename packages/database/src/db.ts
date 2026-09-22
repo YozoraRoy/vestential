@@ -264,8 +264,8 @@ function getSqliteDb(): Database.Database | null {
         division TEXT NOT NULL DEFAULT 'season',
         strategy_id TEXT NOT NULL,
         tone TEXT NOT NULL DEFAULT 'neutral',
-        initial_capital REAL NOT NULL DEFAULT 200000,
-        cash REAL NOT NULL DEFAULT 200000,
+        initial_capital REAL NOT NULL DEFAULT 500000,
+        cash REAL NOT NULL DEFAULT 500000,
         status TEXT NOT NULL DEFAULT 'active',
         is_system INTEGER NOT NULL DEFAULT 0,
         joined_at TEXT,
@@ -349,7 +349,7 @@ function getSqliteDb(): Database.Database | null {
 
     // 既有 arena_agents 表補齊較晚期加入的欄位（冪等；全新 DB 欄位已存在時 ALTER 會拋錯，故獨立 try/catch）。
     try {
-      _db.exec('ALTER TABLE arena_agents ADD COLUMN cash REAL NOT NULL DEFAULT 200000;')
+      _db.exec('ALTER TABLE arena_agents ADD COLUMN cash REAL NOT NULL DEFAULT 500000;')
     } catch {}
     try {
       _db.exec('ALTER TABLE arena_agents ADD COLUMN adjust_count INTEGER NOT NULL DEFAULT 0;')
@@ -905,8 +905,8 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           division NVARCHAR(10) NOT NULL DEFAULT 'season',
           strategy_id NVARCHAR(40) NOT NULL,
           tone NVARCHAR(20) NOT NULL DEFAULT 'neutral',
-          initial_capital FLOAT NOT NULL DEFAULT 200000,
-          cash FLOAT NOT NULL DEFAULT 200000,
+          initial_capital FLOAT NOT NULL DEFAULT 500000,
+          cash FLOAT NOT NULL DEFAULT 500000,
           status NVARCHAR(10) NOT NULL DEFAULT 'active',
           is_system INT NOT NULL DEFAULT 0,
           joined_at NVARCHAR(20),
@@ -920,7 +920,7 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
       END
 
       IF COL_LENGTH('arena_agents', 'cash') IS NULL
-        ALTER TABLE arena_agents ADD cash FLOAT NOT NULL DEFAULT 200000;
+        ALTER TABLE arena_agents ADD cash FLOAT NOT NULL DEFAULT 500000;
       IF COL_LENGTH('arena_agents', 'adjust_count') IS NULL
         ALTER TABLE arena_agents ADD adjust_count INT NOT NULL DEFAULT 0;
       IF COL_LENGTH('arena_agents', 'last_round_date') IS NULL
@@ -4341,7 +4341,7 @@ export async function ensureSystemArenaAgents(seasonId: number): Promise<number>
         (season_id, owner_user_id, name, division, strategy_id, tone,
          personality, strategy_params, initial_capital, cash, status, is_system, joined_at)
        VALUES (@seasonId, 0, @name, 'open', @strategyId, @tone,
-         @personality, @params, 200000, 200000, 'active', 1, @joinedAt)`,
+         @personality, @params, 500000, 500000, 'active', 1, @joinedAt)`,
       {
         seasonId,
         name: demo.name,
@@ -4365,7 +4365,7 @@ export async function updateArenaSeasonStatus(id: number, status: ArenaSeasonRow
 }
 
 export async function createArenaAgent(ownerUserId: number, input: ArenaAgentInput): Promise<number> {
-  const capital = input.initialCapital ?? 200000
+  const capital = input.initialCapital ?? 500000
   const nowStr = new Date().toISOString().substring(0, 10)
   const personality = input.personality ?? null
   const strategyParams = input.strategyParams ? JSON.stringify(input.strategyParams) : null

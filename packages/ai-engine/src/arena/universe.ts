@@ -87,7 +87,7 @@ async function marketCaps(symbols: string[]): Promise<Map<string, number>> {
 export async function fetchTopMarketCapUniverse(
   date: string,
   candidateN = 250,
-  topN = 100,
+  topN = 200,
 ): Promise<ArenaUniverseItem[]> {
   const candidates = await fetchTwseTopByTurnover(date, candidateN)
   const caps = await marketCaps(candidates.map((c) => c.symbol))
@@ -96,7 +96,7 @@ export async function fetchTopMarketCapUniverse(
   return withCap.slice(0, topN).map(({ symbol, name }) => ({ symbol, name }))
 }
 
-/** 合併台股 Top100（市值）與 ETF 池，去重（同代號時台股名優先）。 */
+/** 合併台股 Top200（市值）與 ETF 池，去重（同代號時台股名優先）。 */
 export function buildArenaUniverse(stocks: ArenaUniverseItem[], etf: ArenaUniverseItem[]): ArenaUniverseItem[] {
   const map = new Map<string, ArenaUniverseItem>()
   for (const s of stocks) if (!map.has(s.symbol)) map.set(s.symbol, s)

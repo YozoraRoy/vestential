@@ -876,12 +876,15 @@ export default function PortfolioPage() {
       tw: { count: 0, pnl: 0 },
       us: { count: 0, pnl: 0 },
     }
+    // #29：第四卡改「投資總成本」＝ Σ cost_basis（台＋美合計，可手算重現）。
+    let totalCost = 0
     for (const r of history) {
       const m = r.market === 'us' ? 'us' : 'tw'
       byMarket[m].count += 1
       byMarket[m].pnl += r.unrealized_pnl
+      totalCost += r.cost_basis
     }
-    return byMarket
+    return { ...byMarket, totalCost }
   }, [history])
 
   const inputCls =
@@ -1517,8 +1520,8 @@ export default function PortfolioPage() {
             <p className={`text-lg font-bold mt-1 ${stats.tw.pnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>{formatMoney(stats.tw.pnl, 'tw')}</p>
           </div>
           <div className="bg-[var(--bg-card)] rounded-2xl border border-white/5 p-4">
-            <p className="text-xs text-[var(--text-secondary)]">{ui.summaryUsPnl}</p>
-            <p className={`text-lg font-bold mt-1 ${stats.us.pnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>{formatMoney(stats.us.pnl, 'us')}</p>
+            <p className="text-xs text-[var(--text-secondary)]">{ui.summaryTotalCost}</p>
+            <p className="text-lg font-bold mt-1">{formatMoney(stats.totalCost, 'tw')}</p>
           </div>
         </div>
       )}

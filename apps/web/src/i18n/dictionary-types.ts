@@ -668,7 +668,7 @@ export interface Dict {
     summaryHoldings: string
     summaryWithAi: string
     summaryTwPnl: string
-    summaryUsPnl: string
+    summaryTotalCost: string
     historyTitle: string
     historyEmpty: string
     historyAddFirst: string
