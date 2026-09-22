@@ -4,8 +4,9 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useRouter } from 'next/navigation'
 import { TrendingUp, Zap, RefreshCw, Sparkles, History, ChevronDown, ChevronUp, Upload, Trash2, CheckCircle2, Plus, X, Search, Pencil } from 'lucide-react'
 import { searchStocks, StockCandidateList } from '@/components/stock-search'
-import PortfolioRiskPanel from '@/components/portfolio-risk-panel'
+import PortfolioRiskPanel, { type RiskQuotaValue, type RiskSummaryValue } from '@/components/portfolio-risk-panel'
 import { computeNetPnL, DEFAULT_FEE_DISCOUNT } from '@/lib/portfolio-net'
+import { buildHoldingsHash, findRiskSummariesByDate, getTaiwanDateStrClient, pruneOldRiskSummaries, saveRiskSummary } from '@/lib/risk-summary-cache'
 import { useI18n } from '@/i18n/LanguageProvider'
 import { parseJsonSafe, parseSseJson } from '@/lib/safe-parse'
 
@@ -148,6 +149,11 @@ export default function PortfolioPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [listTab, setListTab] = useState<'positions' | 'risk'>('positions')
+  // #30：風險總結 page 層 state（切持倉/風險頁籤不卸載清空）。
+  // 有效定義：暫存日期＝今日（台灣日）且持倉快照 hash＝當前持倉；跨日／持倉變動即失效。
+  const [riskSummary, setRiskSummary] = useState<(RiskSummaryValue & { dateStr: string; hash: string }) | null>(null)
+  const [riskQuota, setRiskQuota] = useState<RiskQuotaValue | null>(null)
+  const [historyReady, setHistoryReady] = useState(false)
   // #28：紀錄區檢視切換（卡片｜表格，沿用持倉/風險 segmented 風格）。
   // 偏好存 localStorage（key portfolio-records-view）；首次依 matchMedia(md) 決定預設。
   // 手機（md 以下）不渲染切換器與表格本體，一律顯示卡片。
@@ -217,6 +223,50 @@ export default function PortfolioPage() {
     return arr
   }, [history, sortKey, sortDir])
   const effectiveRecordsView: 'cards' | 'table' = isDesktop ? recordsView : 'cards'
+
+  // #30：當前持倉快照 hash（代號＋股數＋現價；去重對齊後端，見 lib/risk-summary-cache）。
+  const holdingsHash = useMemo(
+    () => buildHoldingsHash(history.map((r) => ({ market: r.market, symbol: r.symbol, shares: r.shares, current_price: r.current_price }))),
+    [history],
+  )
+  // 當日有效總結：日期＝今日（台灣日）且 hash＝當前持倉；維持全手動，不自動產生。
+  const riskSummaryValid = riskSummary != null && riskSummary.dateStr === getTaiwanDateStrClient() && riskSummary.hash === holdingsHash
+  const riskSummaryStale = riskSummary != null && riskSummary.dateStr === getTaiwanDateStrClient() && riskSummary.hash !== holdingsHash
+  const riskSummaryForPanel: RiskSummaryValue | null = riskSummaryValid && riskSummary
+    ? { text: riskSummary.text, dataAsOf: riskSummary.dataAsOf }
+    : null
+  // #30：摘要列「已含 AI 建議」＝analyze 有建議紀錄數＋當日有效風險總結（0/1）。
+  const aiAdviceCount = history.filter((r) => r.recommendation).length + (riskSummaryValid ? 1 : 0)
+
+  // #30：持倉就緒後從 localStorage 恢復當日總結（同 hash 沿用＋顯示資料時間，
+  // 異 hash 留作「提示重按」依據；跨日條目由 prune 清掉故不會恢復）。
+  useEffect(() => {
+    if (!historyReady) return
+    const today = getTaiwanDateStrClient()
+    pruneOldRiskSummaries(today)
+    const entries = findRiskSummariesByDate(today)
+    if (entries.length === 0) {
+      setRiskSummary(null)
+      return
+    }
+    const picked = entries.find((e) => e.hash === holdingsHash) ?? entries[0]
+    setRiskSummary({ text: picked.summary, dataAsOf: picked.dataAsOf, dateStr: picked.dateStr, hash: picked.hash })
+  }, [historyReady, holdingsHash])
+
+  const handleRiskSummarySaved = useCallback((s: RiskSummaryValue, quota: RiskQuotaValue | null, hash: string) => {
+    const today = getTaiwanDateStrClient()
+    saveRiskSummary(today, hash, { summary: s.text, dataAsOf: s.dataAsOf, savedAt: Date.now() })
+    setRiskSummary({ text: s.text, dataAsOf: s.dataAsOf, dateStr: today, hash })
+    if (quota) {
+      setRiskQuota(quota)
+      window.dispatchEvent(new Event('quota-updated'))
+    }
+  }, [])
+
+  const handleRiskQuota = useCallback((q: RiskQuotaValue) => {
+    setRiskQuota(q)
+    window.dispatchEvent(new Event('quota-updated'))
+  }, [])
 
   const [authMode, setAuthMode] = useState<'loading' | 'user' | 'guest'>('loading')
   const [claimOpen, setClaimOpen] = useState(false)
@@ -298,6 +348,7 @@ export default function PortfolioPage() {
     } catch (e) {
       console.error('Failed to fetch portfolio history:', e)
     }
+    setHistoryReady(true)
   }
 
   const fetchRecognitionQuota = async () => {
@@ -1513,7 +1564,7 @@ export default function PortfolioPage() {
           </div>
           <div className="bg-[var(--bg-card)] rounded-2xl border border-white/5 p-4">
             <p className="text-xs text-[var(--text-secondary)]">{ui.summaryWithAi}</p>
-            <p className="text-xl font-bold mt-1">{history.filter(r => r.recommendation).length}</p>
+            <p className="text-xl font-bold mt-1">{aiAdviceCount}</p>
           </div>
           <div className="bg-[var(--bg-card)] rounded-2xl border border-white/5 p-4">
             <p className="text-xs text-[var(--text-secondary)]">{ui.summaryTwPnl}</p>
@@ -1562,7 +1613,16 @@ export default function PortfolioPage() {
           </div>
         </div>
         {listTab === 'risk' ? (
-          <PortfolioRiskPanel ui={ui} isLoggedIn={authMode === 'user'} />
+          <PortfolioRiskPanel
+            ui={ui}
+            isLoggedIn={authMode === 'user'}
+            summary={riskSummaryForPanel}
+            summaryStale={riskSummaryStale}
+            quota={riskQuota}
+            holdingsHash={holdingsHash}
+            onSummarySaved={handleRiskSummarySaved}
+            onQuota={handleRiskQuota}
+          />
         ) : history.length === 0 ? (
           <div className="bg-[var(--bg-card)] rounded-xl border border-white/5 p-8 text-center">
             <p className="text-sm text-[var(--text-secondary)]">{ui.historyEmpty}</p>

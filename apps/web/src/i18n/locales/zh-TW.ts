@@ -769,6 +769,8 @@ export const zhTW: Dict = {
     riskAiSummary: 'AI 風險總結',
     riskAiSummarizing: '生成中…',
     riskAiQuota: '與 AI 分析共用每日 3 次額度',
+    riskQuotaRemaining: '今日剩餘 {remaining}/{max}',
+    riskSummaryStale: '持倉已變動，請重新產生總結。',
     riskAiFailed: 'AI 摘要暫時失敗，以下僅顯示數字試算結果。',
     riskAiLoginRequired: 'AI 風險總結需登入使用。',
     riskDataAsOf: '資料時間',

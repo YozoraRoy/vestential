@@ -724,6 +724,8 @@ export interface Dict {
     riskAiSummary: string
     riskAiSummarizing: string
     riskAiQuota: string
+    riskQuotaRemaining: string
+    riskSummaryStale: string
     riskAiFailed: string
     riskAiLoginRequired: string
     riskDataAsOf: string

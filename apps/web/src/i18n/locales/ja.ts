@@ -769,6 +769,8 @@ export const ja: Dict = {
     riskAiSummary: 'AI リスク要約',
     riskAiSummarizing: '生成中…',
     riskAiQuota: 'AI 分析と共通の1日3回枠',
+    riskQuotaRemaining: '本日残り {remaining}/{max}',
+    riskSummaryStale: '保有内容が変わったため、要約を再生成してください。',
     riskAiFailed: 'AI 要約に一時的に失敗しました。数値の試算結果のみ表示します。',
     riskAiLoginRequired: 'AI リスク要約はログインが必要です。',
     riskDataAsOf: 'データ時点',

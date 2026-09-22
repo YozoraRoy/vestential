@@ -769,6 +769,8 @@ export const en: Dict = {
     riskAiSummary: 'AI risk summary',
     riskAiSummarizing: 'Generating…',
     riskAiQuota: 'Shares the daily 3-use AI quota',
+    riskQuotaRemaining: '{remaining}/{max} left today',
+    riskSummaryStale: 'Holdings changed — please regenerate the summary.',
     riskAiFailed: 'AI summary temporarily failed. Numeric results only below.',
     riskAiLoginRequired: 'AI risk summary requires sign-in.',
     riskDataAsOf: 'Data as of',

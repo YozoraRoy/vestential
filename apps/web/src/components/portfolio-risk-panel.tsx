@@ -28,6 +28,8 @@ type PortfolioDict = {
   riskAiSummary: string
   riskAiSummarizing: string
   riskAiQuota: string
+  riskQuotaRemaining: string
+  riskSummaryStale: string
   riskAiFailed: string
   riskAiLoginRequired: string
   riskDataAsOf: string
@@ -100,12 +102,31 @@ function scenarioName(id: string, ui: PortfolioDict, target: string | null): str
   return target ? `${ui.riskScenarioSector}（${target}）` : ui.riskScenarioSector
 }
 
-export default function PortfolioRiskPanel({ ui, isLoggedIn }: { ui: PortfolioDict; isLoggedIn: boolean }) {
+export interface RiskSummaryValue {
+  text: string
+  dataAsOf: string
+}
+
+export interface RiskQuotaValue {
+  remaining: number
+  max: number
+}
+
+// Issue #30：summary/quota state 上提到 portfolio page 層（切頁籤不卸載清空），
+// 本 panel 只保留 fetching 中間態；暫存讀寫由 page 層經 lib/risk-summary-cache 處理。
+export default function PortfolioRiskPanel({ ui, isLoggedIn, summary, summaryStale, quota, holdingsHash, onSummarySaved, onQuota }: {
+  ui: PortfolioDict
+  isLoggedIn: boolean
+  summary: RiskSummaryValue | null
+  summaryStale: boolean
+  quota: RiskQuotaValue | null
+  holdingsHash: string
+  onSummarySaved: (s: RiskSummaryValue, quota: RiskQuotaValue | null, hash: string) => void
+  onQuota: (q: RiskQuotaValue) => void
+}) {
   const [data, setData] = useState<RiskData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [summary, setSummary] = useState<string | null>(null)
-  const [summaryAsOf, setSummaryAsOf] = useState<string | null>(null)
   const [summarizing, setSummarizing] = useState(false)
   const [summaryError, setSummaryError] = useState<string | null>(null)
 
@@ -135,12 +156,18 @@ export default function PortfolioRiskPanel({ ui, isLoggedIn }: { ui: PortfolioDi
     if (!isLoggedIn || summarizing) return
     setSummarizing(true)
     setSummaryError(null)
+    // 按下當時的持倉快照 hash（page 層傳入）：回來後連同結果存檔，
+    // 使「總結↔產生當時持倉」綁定，持倉變動即判定失效。
+    const requestHash = holdingsHash
     try {
       const res = await fetch('/api/portfolio/risk/summary', { method: 'POST' })
       const body = await res.json()
+      // Issue #30：成功/429/502（以及帶 quota 的其他回應）都更新額度顯示
+      if (body?.quota && typeof body.quota.remaining === 'number' && typeof body.quota.max === 'number') {
+        onQuota({ remaining: body.quota.remaining, max: body.quota.max })
+      }
       if (res.ok && body.success) {
-        setSummary(body.summary)
-        setSummaryAsOf(body.dataAsOf)
+        onSummarySaved({ text: body.summary, dataAsOf: body.dataAsOf ?? '' }, body?.quota ?? null, requestHash)
       } else {
         // 降級：只顯示數字表
         setSummaryError(body.error || ui.riskAiFailed)
@@ -298,26 +325,35 @@ export default function PortfolioRiskPanel({ ui, isLoggedIn }: { ui: PortfolioDi
             {ui.riskAiSummary}
           </p>
           {isLoggedIn ? (
-            <button
-              type="button"
-              onClick={handleSummary}
-              disabled={summarizing}
-              className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-xs font-medium hover:opacity-90 transition disabled:opacity-50"
-            >
-              {summarizing ? ui.riskAiSummarizing : ui.riskAiSummary}
-            </button>
+            <div className="flex items-center gap-2">
+              {quota && (
+                <span className="text-[11px] text-[var(--text-secondary)]">
+                  {ui.riskQuotaRemaining.replace('{remaining}', String(quota.remaining)).replace('{max}', String(quota.max))}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleSummary}
+                disabled={summarizing}
+                className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-xs font-medium hover:opacity-90 transition disabled:opacity-50"
+              >
+                {summarizing ? ui.riskAiSummarizing : ui.riskAiSummary}
+              </button>
+            </div>
           ) : (
             <span className="text-[11px] text-[var(--text-secondary)]">{ui.riskAiLoginRequired}</span>
           )}
         </div>
         <p className="text-[10px] text-[var(--text-secondary)] mb-2">{ui.riskAiQuota}</p>
         {summaryError && <p className="text-[11px] text-amber-400 mb-2">{summaryError}</p>}
-        {summary && (
+        {summaryStale ? (
+          <p className="text-[11px] text-amber-400">{ui.riskSummaryStale}</p>
+        ) : summary && (
           <div className="rounded-lg bg-[var(--bg-secondary)] border border-white/5 p-3">
-            <p className="text-sm whitespace-pre-wrap">{summary}</p>
+            <p className="text-sm whitespace-pre-wrap">{summary.text}</p>
             <p className="mt-2 text-[10px] text-[var(--text-secondary)]">
               {RISK_DISCLAIMER}
-              {summaryAsOf && `（${ui.riskDataAsOf}：${summaryAsOf.replace('T', ' ').slice(0, 19)}）`}
+              {summary.dataAsOf && `（${ui.riskDataAsOf}：${summary.dataAsOf.replace('T', ' ').slice(0, 19)}）`}
             </p>
           </div>
         )}
