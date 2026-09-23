@@ -22,10 +22,10 @@
 | `AZURE_CREDENTIALS` | Azure 服務主體 JSON（由 `az ad sp create-for-rbac` 產生） | —（供部署工作流程登入） |
 | `OPENAI_API_KEY` | 主要 LLM 服務的金鑰 | `OPENAI_API_KEY` |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini API Key（Google AI Studio 申請，tier1 備援） | `GOOGLE_GENERATIVE_AI_API_KEY` |
-| `FALLBACK_DEEP_LLM_BACKEND_URL` | ~~tier1 OpenAI 相容後端~~（tier1 已改用 Gemini，停用留作回退） | `FALLBACK_DEEP_LLM_BACKEND_URL`（部署時設為空） |
-| `FALLBACK_DEEP_LLM_API_KEY` | ~~tier1 推理 API Key~~（同上，停用） | `FALLBACK_DEEP_LLM_API_KEY`（空） |
-| `FALLBACK_QUICK_LLM_BACKEND_URL`| ~~tier1 快速模型後端~~（同上，停用） | `FALLBACK_QUICK_LLM_BACKEND_URL`（空） |
-| `FALLBACK_QUICK_LLM_API_KEY` | ~~tier1 快速模型 API Key~~（同上，停用） | `FALLBACK_QUICK_LLM_API_KEY`（空） |
+| `FALLBACK_DEEP_LLM_BACKEND_URL` | tier1 推理後端（Groq，`https://api.groq.com/openai/v1`） | `FALLBACK_DEEP_LLM_BACKEND_URL` |
+| `FALLBACK_DEEP_LLM_API_KEY` | tier1 推理 API Key（**新 key**，2026-09-23 起用，與 tier2 不同池） | `FALLBACK_DEEP_LLM_API_KEY` |
+| `FALLBACK_QUICK_LLM_BACKEND_URL`| tier1 快速模型後端（Groq） | `FALLBACK_QUICK_LLM_BACKEND_URL` |
+| `FALLBACK_QUICK_LLM_API_KEY` | tier1 快速模型 API Key（**新 key**，同上） | `FALLBACK_QUICK_LLM_API_KEY` |
 | `FALLBACK2_DEEP_LLM_BACKEND_URL` | 第二層備援（tier2）推理模型之 Base URL（保留 qwen 後端） | `FALLBACK2_DEEP_LLM_BACKEND_URL` |
 | `FALLBACK2_DEEP_LLM_API_KEY` | 第二層備援推理模型之 API Key | `FALLBACK2_DEEP_LLM_API_KEY` |
 | `FALLBACK2_QUICK_LLM_BACKEND_URL` | 第二層備援快速摘要模型之 Base URL | `FALLBACK2_QUICK_LLM_BACKEND_URL` |
@@ -59,7 +59,7 @@
 | `LLM_DISABLE_THINKING` / `LLM_TIMEOUT_MS` / `LLM_MAX_TOKENS` | LLM 推理參數調校（`true` / `180000` / `8192`） |
 | `ANALYZE_MAX_TOKENS` | 分析輸出 token 上限（`2048`） |
 
-> **LLM 互相備援鏈（deploy.yml 硬編）**：主要 `openai`（`big-pickle`，`LLM_BACKEND_URL=https://opencode.ai/zen/v1`）→ tier1 `google`（`gemini-2.5-flash`，key 走 `GOOGLE_GENERATIVE_AI_API_KEY`）→ tier2 `openai`（`qwen/qwen3.8-27b`，`FALLBACK2_*` 後端）。任一生產商故障時自動切下一層接手；primary 連續失敗會進入熔斷冷卻（短 3 分鐘／確定性壞 10 分鐘）直接由備援承接，冷卻結束自動重探、恢復即切回（對應 `packages/ai-engine/src/llm/fallback-client.ts` 的 `FallbackClient`）。
+> **LLM 互相備援鏈（deploy.yml 硬編，2026-09-23 起）**：主 `google`（`gemini-2.5-flash`，`GOOGLE_GENERATIVE_AI_API_KEY`，支援逗號多 key 輪替）→ tier1 `openai` 相容（`qwen/qwen3.8-27b` 走 Groq，`FALLBACK_*` 新 key）→ tier2 同模型走 Groq（`FALLBACK2_*` 舊 key）。建鏈自動檢查同池（`checkFallbackPoolDiversity`；2026-09-23 前 tier1/tier2 誤用同一 secret 導致備援零保護，見 §5 Q4）。熔斷冷卻：一般 60 秒／確定性壞 10 分鐘，冷卻結束自動重探切回（`packages/ai-engine/src/llm/fallback-client.ts` 的 `FallbackClient`）。
 
 > 註：`AUTH_BASE_URL` 在部署工作流程中已固定為 `https://vestential.com`，無需重複設定。
 >
@@ -70,7 +70,7 @@
 
 ## 3. 定時自動化排程
 
-系統以 GitHub Actions **8 個 workflow**（皆以台灣時間表示）維持行情、健康狀態與社群發布：
+系統以 GitHub Actions **9 個 workflow**（皆以台灣時間表示）維持行情、健康狀態與社群發布：
 
 1. **零股行情同步 (`sync-oddlot.yml`)**：
    - 時間：台灣時間每個工作日 **15:10**（TWSE 盤後零股公布後）。
@@ -96,6 +96,9 @@
 8. **部署 (`deploy.yml`)**：
    - 觸發：任何 push 至 `main` 分支。
    - 行為：GitHub Runner 建置→zipdeploy 至 Azure App Service，並同步 App Settings（含所有社群 token）。
+9. **節慶社群發布 (`social-festival.yml`)**：
+   - 時間：每日 UTC 00:00（＝台灣 08:00）。
+   - 行為：節日當天觸發 `/api/cron/festival` 全自動發賀圖＋貼文（去重 `festival:{id}:{date}`）；非節日回 skipped。另見 `docs/features-guide.md` §8.2。
 
 ---
 
@@ -235,11 +238,19 @@ gh issue close <N> --repo YozoraRoy/vestential --reason completed
 - **防火牆注意**：Azure SQL 預設拒絕所有 IP。診斷連線前需在 portal / CLI 新增來源 IP 的防火牆規則，用完即刪；**切勿**開放整個網際網路範圍（`0.0.0.0/0`）。
 - **長期對策**：Basic 2 GB 對本平台目前資料量十分充裕；若未來再成長，可考慮 serverless（閒置自動暫停）或對大表（圖檔／分析紀錄）加保留期清理。
 
+### Q4：收到「LLM 每日總覽回退」告警（Groq OTPM 429）？
+- **症狀**：告警信 `Rate limit reached ... OTPM: Limit 1000, Used ~800, Requested 1000`，每日總覽以降級標題拼接呈現。
+- **原因**：Groq qwen tier OTPM 硬上限 1000 且按「已用＋本次請求」擋；`market_focus.summary_max_tokens` 生產 DB 值若為 1000（code 預設 450，後台可調——先檢查後台設定值），加上 pipeline 前段呼叫已燒 ~800，1000 一進就爆。另查主備是否同 key 同池（2026-09-23 前即如此，已分池）。
+- **排除**：到 GitHub 該次 `sync-market-focus` run 看錯誤明細；查 `llm_usage_logs`（`getLlmUsageReport`）還原每分鐘用量尖峰；確認 deploy 的 tier1/tier2 用不同 secret。
+- **長期**：錯峰＋退避已內建（不動靜態參數）；用量儀表板（Issue-B 規劃）上線後可直接看分鐘級水位；仍頻繁爆再考慮調參或升級 Groq Dev Tier。
+
 ---
 
 ## 6. 社群憑證（IG / Threads / Facebook）維運
 
 `check-social-tokens.yml` 每日台灣時間 03:30 呼叫 `/api/social/token-health` 檢查三平台憑證，任一失效即在健康檢查回信通知中夾帶告警。**Token 一旦過期，社群自動發文（`social-publish.ts`）與乾跑預覽的圖卡上傳都會失敗。**
+
+> 節慶發文與首回覆提問沿用同一套憑證與去重表（`social_posts`），維運方式相同，功能細節見 `docs/features-guide.md` §8.2。
 
 ### 6.1 三種 token 壽命一覽
 

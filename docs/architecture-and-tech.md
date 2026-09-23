@@ -27,8 +27,9 @@ flowchart TB
     subgraph CoreEngine["多代理人與模型層"]
         AgentEngine["8-Agent AI 分析引擎<br/>(@stock/ai-engine)"]
         Guard["0.3 秒無效代號熔斷門禁"]
-        LLM_Primary["Primary LLM (OpenCode / Gemini)"]
-        LLM_Fallback["Fallback LLM (Groq / OpenAI-compatible)"]
+        LLM_Primary["Primary (Google Gemini)"]
+        LLM_Fallback["Fallback tier1 (Groq 新 key)"]
+        LLM_Fallback2["Fallback tier2 (Groq 舊 key)"]
     end
 
     subgraph DataLayer["資料與外部服務"]
@@ -42,8 +43,9 @@ flowchart TB
     Pages --> API
     API --> AgentEngine
     AgentEngine --> Guard
-    Guard --> LLM_Primary
-    LLM_Primary -.->|連線失敗/限流時自動切換| LLM_Fallback
+        Guard --> LLM_Primary
+        LLM_Primary -.->|連線失敗/限流時自動切換| LLM_Fallback
+        LLM_Fallback -.->|仍失敗時切換| LLM_Fallback2
     API --> DB
     Cron_MF -->|Bearer SYNC_TOKEN| API
     Cron_ODD -->|Bearer SYNC_TOKEN| API
@@ -95,18 +97,24 @@ flowchart TB
 
 ---
 
-## 4. 雙層 LLM 備援機制 (Primary / Fallback)
+## 4. 三層 LLM 備援機制 (Primary / Fallback / Fallback2)
 
-為避免單一模型供應商發生 Rate Limit（429）、逾時或額度耗盡，系統內建完整的**雙模型熱備援**。
+為避免單一模型供應商發生 Rate Limit（429）、逾時或額度耗盡，系統內建**三層熱備援**（`FallbackClient`，熔斷冷卻：一般 60 秒／確定性壞 10 分鐘，冷卻結束自動重探切回）。
 
-### 模型分組
+### 生產現況鏈（deploy.yml 硬編，2026-09-23 起）
+- **主**：`google`（`gemini-2.5-flash`，`GOOGLE_GENERATIVE_AI_API_KEY`，支援逗號多 key 輪替）。
+- **備援一**：`openai` 相容（`qwen/qwen3.8-27b` 走 Groq，用 `FALLBACK_*_API_KEY` 新 key）。
+- **備援二**：同模型走 Groq，用 `FALLBACK2_*_API_KEY` 舊 key。
+- 建鏈時自動檢查同池（`checkFallbackPoolDiversity`，同 model＋同 key 會警告）；主備曾因同 key 同池導致 2026-09-23 早盤 OTPM 連爆（見 `docs/deployment-and-ops.md` §5 Q4），後以新 key 分池解決。
+
+### 模型分組與切換標記（保留）
 - **Deep 組（重推理深度決策）**：負責 Research Manager 與 Portfolio Manager。
 - **Quick 組（快速數據與情緒摘要）**：負責 Technical、Sentiment、News、Fundamentals、Bull Researcher 與 Trader。
+- 切換後自動於分析報告末端標記 `⚠️ 本回覆已自動切換至備援模型：{model}`，並將各 Agent 實際使用的模型名稱與 Token 數精準記錄於資料庫（`llm_usage_logs`，後台用量儀表板見 Issue-B 規劃）。
 
-### 容錯切換邏輯
-1. 預設先連線 Primary 模型。
-2. 連線失敗、回應超時或回傳 429 時，系統自動重試並平順切換至 Fallback 端點（如 Groq 或次要模型）。
-3. 切換後自動於分析報告末端標記 `⚠️ 本回覆已自動切換至備援模型：{model}`，並將各 Agent 實際使用的模型名稱與 Token 數精準記錄於資料庫。
+### Groq OTPM 教訓與錯峰機制
+- Groq qwen tier 的 OTPM（每分鐘輸出 token）硬上限 **1000**，按「已用＋本次請求」擋；refresh 整鏈各呼叫掛 max_tokens≈1000，越後面越易爆。`FALLBACK_SAFE_MAX_TOKENS = 1000` 是單次請求上限，不是安全水位。
+- 對策（不動靜態參數、不花錢）：pipeline 並發 LLM 改序列＋間隔（尤其總覽前後）；429 退避加 jitter＋縮小 budget 重試（執行期自適應，見 `llm/budget.ts`）；`market_focus.summary_max_tokens` 生產值曾被設 1000（code 預設 450），改參數前先看 OTPM。
 
 ---
 
@@ -134,13 +142,15 @@ flowchart TB
 ### 7.1 AI 競技場 (`/agent-arena`)
 - 4 隻固定角色 agent 每日依台灣時間五階段角逐票選：premarket 09:00（briefing）→ slot 0~3（09:35/10:35/11:35/13:05 決策）→ 15:30（discussion + 裁決 + 排行榜）。
 - 主要時鐘為 **in-process** 的 `apps/web/src/lib/arena-scheduler.ts`（`ARENA_CRON_ENABLED=true`），GH Actions `arena-tick.yml` 為備援。
-- 股票池：內建預設 24 檔（`DEFAULT_ARENA_UNIVERSE`）＋動態前高市值股池＋ETF；後台可覆寫滑價等參數（預設 `0.003`）。
+- 股票池：動態市值**前 200**＋ETF 池（`DEFAULT_ARENA_ETF_UNIVERSE`，`ARENA_ETF_UNIVERSE` 可代換）；失敗兜底 `DEFAULT_ARENA_UNIVERSE`。
+- 新 agent 起始資金 **NT$500,000**（既有不追溯）；後台可覆寫滑價等參數（預設 `0.003`）。
 - 資料表：`arena_agents`、`arena_rounds`、`arena_agent_actions`、`arena_round_summaries`、`arena_intraday_prices`、`arena_decision_logs`、`arena_market_briefings`、`arena_discussions`。
 
 ### 7.2 社群小編（IG / Threads / FB）
 - 每日盤後自動生成三平台文案＋圖卡，經去重與 `hasNewEdition` 門檻後自動發文。
 - 圖卡三種風格（`ai` / `classic` / `meme`），**預設 `ai`（AI 吉祥物全圖卡）**；後台可乾跑預覽。
 - 發布邏輯在 `apps/web/src/lib/social-trigger.ts`＋`social-publish.ts`；憑證與換發維運見 `docs/deployment-and-ops.md` §5。
+- 節慶小編（獨立日期表＋節日 08:00 全自動＋站內當日橫幅）與首回覆問 Meta AI（自回覆＋IG 第二則留言，台灣未開放故預設 editor 降級版）見 `docs/features-guide.md` §8.2。
 
 ### 7.3 週期進場 (`/cycle-entry`)
 - 以季線乖離演算法為基礎的週期進場模型掃描，`sync-cycle-entry.yml` 每個交易日 16:00 更新；計算引擎在 `packages/cycle-entry`。
@@ -148,3 +158,8 @@ flowchart TB
 ### 7.4 後台管理 (`/admin`)
 - 獨立管理後台（`admin/layout.tsx` 守衛＋側欄），8 個子頁：總覽、市場焦點、週期進場、社群小編、競技場、使用量、設定、訂閱者。
 - 守衛邏輯為 `lib/auth.ts` 的 `isAdminUser`（`ADMIN_LINE_USER_IDS` / `ADMIN_EMAILS` 判定）。
+
+### 7.5 交易策略閉環＋風險＋日誌（2026-09 下旬）
+- 策略閉環：點子一鍵回測、新聞影響結構化、回測 AI 解讀（數字引擎注入禁自創）、Trader 結構化；quota 不新增。
+- 組合風險：集中度＋三情境＋AI 總結（共用 quota）；交易日誌 `/journal`：CRUD＋月統計＋AI 覆盤。
+- 持股紀錄卡片｜表格雙檢視（桌機預設表格）；試算頁含稅費淨損益並列。細節見 `docs/features-guide.md` §1、§3~§4、§9。
