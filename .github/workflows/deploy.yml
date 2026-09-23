@@ -56,9 +56,9 @@ jobs:
               FALLBACK_DEEP_THINK_MODEL=qwen/qwen3.8-27b \
               FALLBACK_QUICK_THINK_MODEL=qwen/qwen3.8-27b \
               FALLBACK_DEEP_LLM_BACKEND_URL="https://api.groq.com/openai/v1" \
-              FALLBACK_DEEP_LLM_API_KEY="${{ secrets.FALLBACK2_DEEP_LLM_API_KEY }}" \
+              FALLBACK_DEEP_LLM_API_KEY="${{ secrets.FALLBACK_DEEP_LLM_API_KEY }}" \
               FALLBACK_QUICK_LLM_BACKEND_URL="https://api.groq.com/openai/v1" \
-              FALLBACK_QUICK_LLM_API_KEY="${{ secrets.FALLBACK2_QUICK_LLM_API_KEY }}" \
+              FALLBACK_QUICK_LLM_API_KEY="${{ secrets.FALLBACK_QUICK_LLM_API_KEY }}" \
               FALLBACK2_LLM_PROVIDER=openai \
               FALLBACK2_DEEP_THINK_MODEL=qwen/qwen3.8-27b \
               FALLBACK2_QUICK_THINK_MODEL=qwen/qwen3.8-27b \
