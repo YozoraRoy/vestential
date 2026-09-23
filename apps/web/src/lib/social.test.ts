@@ -51,6 +51,9 @@ vi.mock('@stock/ai-engine', () => ({
   dataBlock,
   injectionGuardNote,
   sanitizeDataField,
+  // Issue #32：social.ts 新增鏈錯峰 sleep/getChainPaceMs；測試內以 0 間隔立即返回
+  sleep: async () => {},
+  getChainPaceMs: () => 0,
 }))
 vi.mock('@stock/core', () => ({ loadConfig: mocks.loadConfig }))
 vi.mock('@stock/database', () => ({ getAgentSetting: mocks.getAgentSetting }))

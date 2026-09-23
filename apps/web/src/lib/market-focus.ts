@@ -1,5 +1,5 @@
 import { load } from 'cheerio'
-import { createQuickLLM, FALLBACK_SAFE_MAX_TOKENS, chunkByOutputBudget, mergeChunkEntries } from '@stock/ai-engine'
+import { createQuickLLM, FALLBACK_SAFE_MAX_TOKENS, chunkByOutputBudget, mergeChunkEntries, sleep, getChainPaceMs, getSummaryPaceMs } from '@stock/ai-engine'
 import { loadConfig } from '@stock/core'
 import { getAgentSetting } from '@stock/database'
 import type { MarketFocusItem } from '@stock/database'
@@ -594,7 +594,10 @@ export async function generateArticleSummaries(
       40,
     )
     let chunkStartIndex = 0
-    for (const chunk of chunks) {
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci]!
+      // Issue #32：摘要批次間錯峰（序列＋間隔），避免多批連打落在同一 OTPM 分鐘窗
+      if (ci > 0) await sleep(getChainPaceMs())
       const promptList = chunk
         .map((it, idx) => {
           const textSnippet = it.content ? it.content.slice(0, 350).replace(/\s+/g, ' ').trim() : '（無正文）'
@@ -734,7 +737,10 @@ export async function backfillMissingReasons(): Promise<number> {
     )
     const reasonMap = new Map<number, string>()
     let chunkStartIndex = 0
-    for (const chunk of chunks) {
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci]!
+      // Issue #32：回填批次間同樣錯峰（與主鏈共用同一 OTPM 池）
+      if (ci > 0) await sleep(getChainPaceMs())
       const list = chunk
         .map(
           (it, idx) =>
@@ -860,6 +866,8 @@ async function runMarketFocusPipeline(dryRun: boolean): Promise<MarketFocusPipel
   }
 
   // 為每則新聞生成說人話 AI 重點摘要（含影響欄位；摘要見全文後可修正篩選階段的初判）
+  // Issue #32：摘要前與 filter 呼叫錯峰（序列＋間隔；爬全文 HTTP 已自然墊時間，仍補一次間隔）
+  if (enriched.length > 0) await sleep(getChainPaceMs())
   const articleResults = await generateArticleSummaries(enriched)
   for (let i = 0; i < enriched.length; i++) {
     const r = articleResults[i]
@@ -871,7 +879,11 @@ async function runMarketFocusPipeline(dryRun: boolean): Promise<MarketFocusPipel
     }
   }
 
+  // Issue #32：總覽前後錯峰（9/23 事故點：summary max_tokens=1000 撞 OTPM 分鐘窗；
+  // 前間隔把總覽推離摘要尾批，後間隔把接續的社群鏈讓進下一個分鐘窗）
+  await sleep(getSummaryPaceMs())
   const summary = await generateDailySummary(enriched)
+  await sleep(getSummaryPaceMs())
   if (!dryRun) {
     await saveMarketFocus(enriched)
     await saveMarketFocusMeta({ summary, generatedAt: new Date().toISOString() })

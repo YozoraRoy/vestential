@@ -22,3 +22,15 @@ export { recognizePortfolioImage } from './recognize-image.js'
 export type { RecognizedPosition, RecognizePortfolioImageResult } from './recognize-image.js'
 export * from './arena/index.js'
 export { FALLBACK_SAFE_MAX_TOKENS, chunkByOutputBudget, mergeChunkEntries } from './llm/budget.js'
+export {
+  DEFAULT_CHAIN_PACE_MS,
+  DEFAULT_SUMMARY_PACE_MS,
+  RETRY_BUDGET_FLOOR_TOKENS,
+  getChainPaceMs,
+  getSummaryPaceMs,
+  sleep,
+  jitterDelay,
+  shrinkBudgetForRetry,
+} from './llm/budget.js'
+export { FallbackClient, isSamePool, checkFallbackPoolDiversity } from './llm/fallback-client.js'
+export type { FallbackPoolSpec } from './llm/fallback-client.js'

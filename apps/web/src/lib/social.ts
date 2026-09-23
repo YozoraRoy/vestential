@@ -1,4 +1,4 @@
-import { createQuickLLM, FALLBACK_SAFE_MAX_TOKENS } from '@stock/ai-engine'
+import { createQuickLLM, FALLBACK_SAFE_MAX_TOKENS, sleep, getChainPaceMs } from '@stock/ai-engine'
 import { dataBlock, injectionGuardNote, sanitizeDataField } from '@stock/ai-engine'
 import { loadConfig } from '@stock/core'
 import { getAgentSetting } from '@stock/database'
@@ -85,7 +85,10 @@ export async function generateSocialCaptions(
       { key: 'threads', system: buildPlatformSystemPrompt('threads', threadsMax, threadsPromptOverride), max: threadsMax },
       { key: 'facebook', system: buildPlatformSystemPrompt('facebook', fbMax, fbPromptOverride), max: fbMax },
     ]
-    for (const { key, system, max } of plans) {
+    for (let pi = 0; pi < plans.length; pi++) {
+      const { key, system, max } = plans[pi]!
+      // Issue #32：三平台文案呼叫序列＋間隔（原已序列，加錯峰避免同分鐘窗連打）
+      if (pi > 0) await sleep(getChainPaceMs())
       try {
         const raw = await llm.generate(system, `${userPrompt}\n\n請撰寫本期 ${PLATFORM_LABELS[key]} 文案。`)
         const text = parseCaption(raw, key)

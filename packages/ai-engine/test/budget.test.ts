@@ -4,6 +4,13 @@ import {
   FALLBACK_SAFE_MAX_TOKENS,
   chunkByOutputBudget,
   mergeChunkEntries,
+  DEFAULT_CHAIN_PACE_MS,
+  DEFAULT_SUMMARY_PACE_MS,
+  RETRY_BUDGET_FLOOR_TOKENS,
+  getChainPaceMs,
+  getSummaryPaceMs,
+  jitterDelay,
+  shrinkBudgetForRetry,
 } from '../src/llm/budget.js'
 
 // ─── FALLBACK_SAFE_MAX_TOKENS ────────────────────────────────────
@@ -121,4 +128,56 @@ test('mergeChunkEntries - 多次合併正確累加', () => {
   assert.equal(dst.size, 4)
   // index 4 (from second chunk, local 1) is missing — not in dst
   assert.equal(dst.has(4), false)
+})
+
+// ─── Issue #32：jitterDelay（退避 ±25%，避免對齊同分鐘窗）────────────
+
+test('jitterDelay - 輸出恆落在 base ±25% 內', () => {
+  for (let i = 0; i < 200; i++) {
+    const w = jitterDelay(10_000)
+    assert.ok(w >= 7500 && w <= 12_500, `jitter out of range: ${w}`)
+  }
+})
+
+test('jitterDelay - 可注入 random（確定性）', () => {
+  assert.equal(jitterDelay(1000, () => 0), 750)
+  assert.equal(jitterDelay(1000, () => 0.5), 1000)
+  assert.equal(jitterDelay(1000, () => 1), 1250)
+})
+
+test('jitterDelay - 非正數 base 回傳 0', () => {
+  assert.equal(jitterDelay(0), 0)
+  assert.equal(jitterDelay(-5), 0)
+})
+
+// ─── Issue #32：shrinkBudgetForRetry（執行期自適應縮 budget）──────────
+
+test('shrinkBudgetForRetry - 每次 ×0.6', () => {
+  assert.equal(shrinkBudgetForRetry(1000), 600)
+  assert.equal(shrinkBudgetForRetry(600), 360)
+  assert.equal(shrinkBudgetForRetry(360), 216)
+})
+
+test('shrinkBudgetForRetry - floor 鎖底（預設 200），低於 floor 不再縮', () => {
+  assert.equal(RETRY_BUDGET_FLOOR_TOKENS, 200)
+  assert.equal(shrinkBudgetForRetry(300), 200)
+  assert.equal(shrinkBudgetForRetry(200), 200)
+  assert.equal(shrinkBudgetForRetry(150), 150)
+})
+
+// ─── Issue #32：錯峰間隔（env 覆寫／預設）─────────────────────────────
+
+test('getChainPaceMs/getSummaryPaceMs - 預設值', () => {
+  assert.equal(DEFAULT_CHAIN_PACE_MS, 8000)
+  assert.equal(DEFAULT_SUMMARY_PACE_MS, 20000)
+  assert.equal(getChainPaceMs({}), 8000)
+  assert.equal(getSummaryPaceMs({}), 20000)
+})
+
+test('getChainPaceMs/getSummaryPaceMs - env 覆寫與非法值回退', () => {
+  assert.equal(getChainPaceMs({ LLM_CHAIN_PACE_MS: '1000' }), 1000)
+  assert.equal(getChainPaceMs({ LLM_CHAIN_PACE_MS: 'abc' }), 8000)
+  assert.equal(getChainPaceMs({ LLM_CHAIN_PACE_MS: '-5' }), 8000)
+  assert.equal(getSummaryPaceMs({ LLM_SUMMARY_PACE_MS: '60000' }), 60000)
+  assert.equal(getSummaryPaceMs({ LLM_SUMMARY_PACE_MS: '' }), 20000)
 })

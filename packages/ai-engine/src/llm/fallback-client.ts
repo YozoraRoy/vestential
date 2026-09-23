@@ -16,6 +16,68 @@ interface PrimaryState {
 }
 
 /**
+ * Issue #32：備援池指紋（不含任何 secret，只能比對、不外洩 key）。
+ * 同池定義＝provider＋model＋baseUrl 三者一致「且」key 相同（或雙方皆空＝
+ * 共用同一把預設 key）。同模型不同 key 屬不同帳號配額，不算同池。
+ */
+export interface FallbackPoolSpec {
+  provider: string
+  model: string
+  baseUrl?: string
+  /** 已解析的實際 key（只做相等比對，絕不印出）。 */
+  apiKey?: string
+}
+
+function normalizeBaseUrl(provider: string, baseUrl?: string): string {
+  const p = provider.trim().toLowerCase()
+  if (baseUrl?.trim()) return baseUrl.trim()
+  if (p === 'google') return 'https://generativelanguage.googleapis.com/v1beta'
+  if (p === 'openai') return 'https://api.openai.com/v1'
+  return ''
+}
+
+/** 兩層是否共用同一個 OTPM 池（key 只比相等性，不回傳不印出）。 */
+export function isSamePool(a: FallbackPoolSpec, b: FallbackPoolSpec): boolean {
+  const sameEndpoint =
+    a.provider.trim().toLowerCase() === b.provider.trim().toLowerCase() &&
+    a.model.trim() === b.model.trim() &&
+    normalizeBaseUrl(a.provider, a.baseUrl) === normalizeBaseUrl(b.provider, b.baseUrl)
+  if (!sameEndpoint) return false
+  const ka = a.apiKey?.trim() ?? ''
+  const kb = b.apiKey?.trim() ?? ''
+  return ka === kb
+}
+
+/**
+ * 檢查 fallback 鏈是否真正分流：回傳待處理的警告字串（無洩漏 key 內容）。
+ * - fallback 與 primary 同池 → 主備共用 OTPM，429 時一起爆
+ * - tier2 與 tier1 同池 → 備援零保護（生產現況：tier1/tier2 同 model 同 key）
+ * 無問題回傳 []。呼叫端（quick.ts）負責 console.warn。
+ */
+export function checkFallbackPoolDiversity(
+  primary: FallbackPoolSpec,
+  fallbacks: FallbackPoolSpec[],
+): string[] {
+  const warnings: string[] = []
+  fallbacks.forEach((fb, i) => {
+    const tier = `tier${i + 1}(${fb.model || 'unknown'})`
+    if (isSamePool(primary, fb)) {
+      warnings.push(
+        `[Fallback] 警告：${tier} 與 primary(${primary.model || 'unknown'}) 疑似同池（同供應商/模型/帳號 key），429 時無法分流；請換不同供應商或不同帳號 key`,
+      )
+    }
+    for (let j = 0; j < i; j++) {
+      if (isSamePool(fallbacks[j]!, fb)) {
+        warnings.push(
+          `[Fallback] 警告：${tier} 與 tier${j + 1}(${fallbacks[j]!.model || 'unknown'}) 疑似同池同 key，備援零保護；需使用者提供不同供應商／不同帳號 key（待確認，不擅自假設）`,
+        )
+      }
+    }
+  })
+  return warnings
+}
+
+/**
  * 熔斷狀態以 primary model 為鍵「跨實例共享」：流水線每次調用 createQuickLLM 都會
  * 產生新的 FallbackClient 實例，若各自維護狀態，每個 LLM step 都會重複燒一輪
  * primary 重試延遲（約 40s）。共享後一旦任一 step 判定 primary 確定失敗，

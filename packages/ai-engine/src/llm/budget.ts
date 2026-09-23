@@ -10,6 +10,59 @@
 /** Groq qwen tier2 OTPM hard ceiling — never request more than this. */
 export const FALLBACK_SAFE_MAX_TOKENS = 1000
 
+// ─── Issue #32：錯峰＋自適應退避（執行期行為，不動靜態 max_tokens）───
+// 以下全部是「執行期」參數：預設寫死在 code，僅能以 env 覆寫；
+// 靜態 max_tokens（FALLBACK_SAFE_MAX_TOKENS、各呼叫點傳入值）一律不動。
+
+/** refresh/social 鏈相鄰兩次 LLM 呼叫之間的錯峰間隔預設值（ms）。 */
+export const DEFAULT_CHAIN_PACE_MS = 8000
+/** 當日總覽（daily summary）前後的錯峰間隔預設值（ms；9/23 事故點，給 OTPM 分鐘窗留出重置空間）。 */
+export const DEFAULT_SUMMARY_PACE_MS = 20000
+/** 429 自適應縮小 budget 的 token 下限（執行期重試用，不動靜態 max_tokens）。 */
+export const RETRY_BUDGET_FLOOR_TOKENS = 200
+
+function parsePaceMs(raw: string | undefined, fallback: number): number {
+  const n = Number(raw)
+  if (raw == null || raw.trim() === '' || !Number.isFinite(n) || n < 0) return fallback
+  return Math.round(n)
+}
+
+/** 相鄰 LLM 呼叫錯峰間隔（env LLM_CHAIN_PACE_MS 覆寫，預設 8000ms）。 */
+export function getChainPaceMs(env: NodeJS.ProcessEnv = process.env): number {
+  return parsePaceMs(env.LLM_CHAIN_PACE_MS, DEFAULT_CHAIN_PACE_MS)
+}
+
+/** 總覽前後錯峰間隔（env LLM_SUMMARY_PACE_MS 覆寫，預設 20000ms）。 */
+export function getSummaryPaceMs(env: NodeJS.ProcessEnv = process.env): number {
+  return parsePaceMs(env.LLM_SUMMARY_PACE_MS, DEFAULT_SUMMARY_PACE_MS)
+}
+
+/** 可中斷測試的 sleep（呼叫端直接 await）。 */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+/**
+ * 對退避等待加 jitter（±25%），避免整鏈多個呼叫在同一分鐘窗邊界「對齊」重試、
+ * 集體再打爆 OTPM。純函數（random 可注入，方便單測）。
+ */
+export function jitterDelay(baseMs: number, random: () => number = Math.random): number {
+  if (!Number.isFinite(baseMs) || baseMs <= 0) return 0
+  return Math.max(0, Math.round(baseMs * (0.75 + random() * 0.5)))
+}
+
+/**
+ * 429 後執行期自適應縮小本次重試的 max_tokens（靜態設定不動，只影響當次重試的
+ * request body）。每次 ×0.6， floor 200（低於 floor 不再縮）。
+ */
+export function shrinkBudgetForRetry(
+  currentMaxTokens: number,
+  floor: number = RETRY_BUDGET_FLOOR_TOKENS,
+): number {
+  if (!Number.isFinite(currentMaxTokens) || currentMaxTokens <= floor) return currentMaxTokens
+  return Math.max(floor, Math.floor(currentMaxTokens * 0.6))
+}
+
 /**
  * Greedy fixed-budget chunker.
  *

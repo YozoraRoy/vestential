@@ -1,4 +1,5 @@
 import { revalidateTag } from 'next/cache'
+import { sleep, getChainPaceMs } from '@stock/ai-engine'
 import type { MarketFocusItem } from '@stock/database'
 import { getMarketFocusMeta, logMarketFocusEvent, getLatestMarketFocusLog, cleanupMarketFocusLogs, cleanupSocialCardImages } from '@stock/database'
 import { refreshMarketFocusDetailed, previewMarketFocus, backfillMissingSummaries, backfillMissingReasons } from '@/lib/market-focus'
@@ -135,8 +136,11 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
       job.items = items.map((it: MarketFocusItem) => ({ title: it.title, source: it.source, reason: it.reason }))
 
       // 回填先前 LLM 失敗留下的空摘要／空遴選原因（與是否產新版次無關，每次收尾都治療）
+      // Issue #32：兩段回填之間錯峰（與主鏈共用同一 OTPM 池）
       if (job.kind === 'refresh' || job.kind === 'publish') {
-        const filled = (await backfillMissingSummaries()) + (await backfillMissingReasons())
+        const filledSummaries = await backfillMissingSummaries()
+        if (filledSummaries > 0) await sleep(getChainPaceMs())
+        const filled = filledSummaries + (await backfillMissingReasons())
         if (filled > 0) {
           console.log(`[MarketFocusJob] backfilled ${filled} missing summaries/reasons`)
           revalidateTag('market-focus')

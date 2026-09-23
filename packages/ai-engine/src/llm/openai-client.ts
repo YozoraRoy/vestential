@@ -1,5 +1,6 @@
 import type { LLMClient, LLMConfig, LLMCallInfo, LLMUsage } from './client.js'
 import { AIError } from '@stock/core'
+import { jitterDelay, shrinkBudgetForRetry } from './budget.js'
 
 type ContentPart =
   | { type: 'text'; text: string }
@@ -59,26 +60,29 @@ export class OpenAICompatibleClient implements LLMClient {
   private async callAPI(messages: { role: string; content: string | ContentPart[] }[]): Promise<string> {
     const maxRetries = Number(process.env.LLM_MAX_RETRIES) || 5
     const timeoutMs = Number(process.env.LLM_TIMEOUT_MS) || 180_000
-    const maxTokens = this.config.maxTokens ?? (Number(process.env.LLM_MAX_TOKENS) || 8192)
+    // 靜態預算（config 傳入／env 預設）：全程不改；429 時只縮小「當次重試」的
+    // effectiveMaxTokens（Issue #32 執行期自適應）。
+    const baseMaxTokens = this.config.maxTokens ?? (Number(process.env.LLM_MAX_TOKENS) || 8192)
+    let effectiveMaxTokens = baseMaxTokens
     const disableThinking = (process.env.LLM_DISABLE_THINKING ?? 'true').toLowerCase() !== 'false'
 
     let lastError: any = null
 
-    const requestBody: Record<string, any> = {
-      model: this.config.model,
-      messages,
-      temperature: this.config.temperature,
-      max_tokens: maxTokens,
-    }
-
-    // 推理型模型（如 big-pickle/deepseek-v4-flash）會把 token 預算全燒在
-    // reasoning_content，導致 content 為空或逾時。OpenCode Zen 支援停用
-    // thinking，讓模型直接輸出答案，避免「No content」與 60s abort。
-    if (disableThinking && this.config.baseUrl?.includes('opencode.ai')) {
-      requestBody.thinking = { type: 'disabled' }
-    }
-
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const requestBody: Record<string, any> = {
+        model: this.config.model,
+        messages,
+        temperature: this.config.temperature,
+        max_tokens: effectiveMaxTokens,
+      }
+
+      // 推理型模型（如 big-pickle/deepseek-v4-flash）會把 token 預算全燒在
+      // reasoning_content，導致 content 為空或逾時。OpenCode Zen 支援停用
+      // thinking，讓模型直接輸出答案，避免「No content」與 60s abort。
+      if (disableThinking && this.config.baseUrl?.includes('opencode.ai')) {
+        requestBody.thinking = { type: 'disabled' }
+      }
+
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -107,6 +111,17 @@ export class OpenAICompatibleClient implements LLMClient {
           // 帳戶層級配額封鎖或客戶端驗證錯誤：重試無意義，直接拋出讓 Fallback 接手。
           if (quotaBlocked || fatalClientError) {
             err.retryable = false
+          }
+          // Issue #32：429（非配額封鎖型）先在執行期縮小 budget 再重試，
+          // 降下一次命中的 OTPM 佔用；靜態 max_tokens 不動。
+          if (res.status === 429 && !quotaBlocked) {
+            const shrunk = shrinkBudgetForRetry(effectiveMaxTokens)
+            if (shrunk < effectiveMaxTokens) {
+              console.warn(
+                `[OpenAIClient] 429 rate-limit：本次重試 max_tokens ${effectiveMaxTokens} → ${shrunk}（執行期自適應，靜態設定不變）`,
+              )
+              effectiveMaxTokens = shrunk
+            }
           }
           throw err
         }
@@ -146,10 +161,13 @@ export class OpenAICompatibleClient implements LLMClient {
           const tpm = e?.message?.match(/try again in ([\d.]+)s/i)
           const tpmWaitMs = tpm ? Number(tpm[1]) * 1000 : 0
           // 等待 API 建議的時間 + 緩衝，避免 TPM 尚未完全重置
-          const waitMs = tpmWaitMs > 0
+          const baseWaitMs = tpmWaitMs > 0
             ? Math.min(tpmWaitMs + 5000, 90_000)
             : Math.min(3000 * attempt, 30_000)
-          console.warn(`[OpenAIClient] retrying in ${Math.round(waitMs / 1000)}s`)
+          // Issue #32：退避加 jitter（±25%），避免多個呼叫對齊同一分鐘窗重試、
+          // 集體再打爆 OTPM。
+          const waitMs = jitterDelay(baseWaitMs)
+          console.warn(`[OpenAIClient] retrying in ${Math.round(waitMs / 1000)}s (base ${Math.round(baseWaitMs / 1000)}s + jitter)`)
           this.onRetry?.(waitMs)
           await new Promise((r) => setTimeout(r, waitMs))
           continue

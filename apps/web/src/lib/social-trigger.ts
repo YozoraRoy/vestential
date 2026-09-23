@@ -1,4 +1,5 @@
 import { getMarketFocusMeta, getMarketFocus, getAgentSetting, saveSocialCardImage, getSocialCardImage } from '@stock/database'
+import { sleep, getChainPaceMs } from '@stock/ai-engine'
 import type { SocialPostPlatform } from '@stock/database'
 import { generateSocialCaptions, generateMemeConcept, IG_DRIVE_COMMENT, type SocialCaptions } from '@/lib/social'
 import { renderSocialCard, type SocialCardStyle } from '@/lib/social-canvas'
@@ -88,12 +89,14 @@ export async function triggerSocialPublish(
   const firstReplyMode: FirstReplyMode = await getFirstReplyMode().catch(() => 'editor' as FirstReplyMode)
 
   // 乾跑保持單純：不讀去重、不寫任何發布狀態。固定產生 classic＋meme＋ai 三版圖卡供選。
+  // Issue #32：LLM 呼叫序列＋間隔（captions→meme→首回覆預覽）；底圖走 FLUX 圖像池
+  // 非 Groq OTPM 池，可與 LLM 序列重疊並行。
   if (dryRun) {
-    const [captions, meme, bgImage] = await Promise.all([
-      generateSocialCaptions(meta, items),
-      generateMemeConcept(meta, items),
-      generateSocialBackgroundImage({ headline: items[0]?.title, summary: meta.summary, items }).catch(() => null),
-    ])
+    const bgPromise = generateSocialBackgroundImage({ headline: items[0]?.title, summary: meta.summary, items }).catch(() => null)
+    const captions = await generateSocialCaptions(meta, items)
+    await sleep(getChainPaceMs())
+    const meme = await generateMemeConcept(meta, items)
+    const bgImage = await bgPromise
     // ai 全圖卡：依梗圖主軸另生成專屬不打字藝術構圖（無梗圖或生圖失敗時以一般底圖兜底）
     const aiArt = meme?.title ? await generateSocialArtworkImage(meme).catch(() => null) : null
     const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'ai') as SocialCardStyle
@@ -150,11 +153,14 @@ export async function triggerSocialPublish(
 
   // #31 首回覆題目：同 edition 全平台共用同一題（類別依 edition 輪換，與乾跑預覽一致）。
   // 成本即規格所列「多 1 次 LLM」：meme 概念提前生成一次，同時供提問＋圖卡共用。
+  // Issue #32：captions→meme→首回覆序列＋間隔（原已序列，加錯峰）。
   let firstReply: FirstReplyQuestion | null = null
   let replyMeme: { title: string; punchline: string } | null = null
   if (firstReplyMode !== 'off') {
     try {
+      if (!manual) await sleep(getChainPaceMs())
       replyMeme = await generateMemeConcept(meta, items)
+      await sleep(getChainPaceMs())
       firstReply = await generateFirstReplyQuestion(meta, items, replyMeme, {
         editionKey: editionKey!,
         mode: firstReplyMode, // 'on'→@meta.ai 版；'editor'→降級去 tag 小編提問版
