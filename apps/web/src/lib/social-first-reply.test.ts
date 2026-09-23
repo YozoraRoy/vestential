@@ -187,18 +187,20 @@ describe('generateFirstReplyQuestion｜LLM 與兜底', () => {
 
 // ─── 開關與去重 ───────────────────────────────────────────────────
 describe('getFirstReplyMode｜後台開關', () => {
-  it("未設定回 'on'（預設開啟）", async () => {
+  it("未設定回 'editor'（台灣未開放，預設降級）", async () => {
     mocks.getAgentSetting.mockResolvedValue(null)
-    expect(await getFirstReplyMode()).toBe('on')
+    expect(await getFirstReplyMode()).toBe('editor')
   })
 
-  it('editor／off 照實回傳，非法值視為 on', async () => {
+  it('on／editor／off 照實回傳，非法值視為 editor', async () => {
+    mocks.getAgentSetting.mockResolvedValue('on')
+    expect(await getFirstReplyMode()).toBe('on')
     mocks.getAgentSetting.mockResolvedValue('editor')
     expect(await getFirstReplyMode()).toBe('editor')
     mocks.getAgentSetting.mockResolvedValue('off')
     expect(await getFirstReplyMode()).toBe('off')
     mocks.getAgentSetting.mockResolvedValue('???')
-    expect(await getFirstReplyMode()).toBe('on')
+    expect(await getFirstReplyMode()).toBe('editor')
   })
 })
 

@@ -63,7 +63,7 @@ export function SocialClient() {
   const [generatingBg, setGeneratingBg] = useState(false)
 
   // #31 首回覆開關（讀寫 social.reply_tag_metaai；off＝不發首回覆）
-  const [firstReplyMode, setFirstReplyMode] = useState('on')
+  const [firstReplyMode, setFirstReplyMode] = useState('editor')
   const [firstReplyModeBusy, setFirstReplyModeBusy] = useState(false)
 
   // Threads 回覆小編
@@ -111,7 +111,7 @@ export function SocialClient() {
     getJson('/api/admin/settings').then((r) => {
       if (r.ok && r.body?.success) {
         const found = (r.body.settings ?? []).find((s: { key: string; value: string }) => s.key === 'social.reply_tag_metaai')
-        if (found) setFirstReplyMode(found.value || 'on')
+        if (found) setFirstReplyMode(found.value || 'editor')
       }
     }).catch(() => {})
   }, [])

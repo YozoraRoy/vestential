@@ -85,7 +85,7 @@ export async function triggerSocialPublish(
   const items = await getMarketFocus(6, 2)
 
   // #31 首回覆開關（讀 social.reply_tag_metaai；off＝不發首回覆；editor＝降級去 tag 版）。
-  const firstReplyMode: FirstReplyMode = await getFirstReplyMode().catch(() => 'on' as FirstReplyMode)
+  const firstReplyMode: FirstReplyMode = await getFirstReplyMode().catch(() => 'editor' as FirstReplyMode)
 
   // 乾跑保持單純：不讀去重、不寫任何發布狀態。固定產生 classic＋meme＋ai 三版圖卡供選。
   if (dryRun) {

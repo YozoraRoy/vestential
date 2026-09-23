@@ -74,11 +74,12 @@ function pickFallbackQuestion(category: FirstReplyCategory, editionKey: string):
   return bank[sum % bank.length]!
 }
 
-/** 讀後台開關；未設定或非法值一律視為 'on'（預設開啟 @meta.ai 版）。 */
+/** 讀後台開關；未設定或非法值一律視為 'editor'（台灣未開放 @meta.ai，預設降級小編提問版）。 */
 export async function getFirstReplyMode(): Promise<FirstReplyMode> {
   const raw = (await getAgentSetting(FIRST_REPLY_SETTING_KEY).catch(() => null))?.trim()
   if (raw === 'editor' || raw === 'off') return raw
-  return 'on'
+  if (raw === 'on') return raw
+  return 'editor'
 }
 
 /** 依字元數截斷（表情符號安全）。 */
