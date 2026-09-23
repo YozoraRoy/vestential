@@ -5242,6 +5242,22 @@ export interface SocialPostRow {
   comment_status: string | null
   comment_external_id: string | null
   comment_error: string | null
+  /**
+   * Issue #31 首回覆問 Meta AI（social_posts 加欄定案，不另建表）：
+   * - 去重鍵：同 (platform, edition_key) 列 first_reply_status='posted' 即不重發。
+   * - first_reply_category：本次輪換類別（value｜news｜risk｜mood）。
+   * - first_reply_text：實際發出的首回覆全文（含 @meta.ai 或去 tag 版）。
+   * - first_reply_checked_at＋first_reply_verdict：驗證協議執行記錄
+   *  （pending｜keep_tag 常駐｜downgraded 降級去 tag）。
+   * 舊庫未跑 024 migration 時這些欄位為 undefined，讀取端一律以 ?? null 承接。
+   */
+  first_reply_status?: string | null
+  first_reply_external_id?: string | null
+  first_reply_error?: string | null
+  first_reply_category?: string | null
+  first_reply_text?: string | null
+  first_reply_checked_at?: string | null
+  first_reply_verdict?: string | null
   created_at: string
 }
 
@@ -5272,6 +5288,14 @@ export async function countSocialPublishedPosts(platform: string): Promise<numbe
     { platform },
   )
   return row?.n ?? 0
+}
+
+/** 讀取該平台該 edition 的發文紀錄（含 #31 首回覆欄位）；無紀錄回傳 undefined。 */
+export async function getSocialPost(platform: string, editionKey: string): Promise<SocialPostRow | undefined> {
+  return dbQueryFirst<SocialPostRow>(
+    'SELECT * FROM social_posts WHERE platform = @platform AND edition_key = @editionKey LIMIT 1',
+    { platform, editionKey },
+  )
 }
 
 /** 建立一筆發文紀錄。若同 (platform, edition_key) 已存在則回傳既有紀錄，不重複插入。 */
@@ -5312,13 +5336,13 @@ export async function createSocialPost(input: SocialPostInput): Promise<SocialPo
   return row
 }
 
-/** 更新發文紀錄狀態與欄位（失敗原因 / container / external id / IG 留言狀態 …）。 */
+/** 更新發文紀錄狀態與欄位（失敗原因 / container / external id / IG 留言狀態 / #31 首回覆 …）。 */
 export async function updateSocialPost(
   id: number,
   patch: Partial<
     Pick<
       SocialPostRow,
-      'status' | 'container_id' | 'external_id' | 'error' | 'published_at' | 'image_url' | 'comment_status' | 'comment_external_id' | 'comment_error'
+      'status' | 'container_id' | 'external_id' | 'error' | 'published_at' | 'image_url' | 'comment_status' | 'comment_external_id' | 'comment_error' | 'first_reply_status' | 'first_reply_external_id' | 'first_reply_error' | 'first_reply_category' | 'first_reply_text' | 'first_reply_checked_at' | 'first_reply_verdict'
     >
   >,
 ): Promise<void> {
@@ -5359,6 +5383,34 @@ export async function updateSocialPost(
   if (patch.comment_error !== undefined) {
     sets.push('comment_error = @comment_error')
     params.comment_error = patch.comment_error
+  }
+  if (patch.first_reply_status !== undefined) {
+    sets.push('first_reply_status = @first_reply_status')
+    params.first_reply_status = patch.first_reply_status
+  }
+  if (patch.first_reply_external_id !== undefined) {
+    sets.push('first_reply_external_id = @first_reply_external_id')
+    params.first_reply_external_id = patch.first_reply_external_id
+  }
+  if (patch.first_reply_error !== undefined) {
+    sets.push('first_reply_error = @first_reply_error')
+    params.first_reply_error = patch.first_reply_error
+  }
+  if (patch.first_reply_category !== undefined) {
+    sets.push('first_reply_category = @first_reply_category')
+    params.first_reply_category = patch.first_reply_category
+  }
+  if (patch.first_reply_text !== undefined) {
+    sets.push('first_reply_text = @first_reply_text')
+    params.first_reply_text = patch.first_reply_text
+  }
+  if (patch.first_reply_checked_at !== undefined) {
+    sets.push('first_reply_checked_at = @first_reply_checked_at')
+    params.first_reply_checked_at = patch.first_reply_checked_at
+  }
+  if (patch.first_reply_verdict !== undefined) {
+    sets.push('first_reply_verdict = @first_reply_verdict')
+    params.first_reply_verdict = patch.first_reply_verdict
   }
   if (sets.length === 0) return
   await dbExecute(`UPDATE social_posts SET ${sets.join(', ')} WHERE id = @id`, params)

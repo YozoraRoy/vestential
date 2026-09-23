@@ -86,6 +86,12 @@ export const DEFAULT_AGENT_SETTINGS: Record<string, AgentSettingMeta> = {
     defaultValue: '',
     help: '覆寫「梗圖概念」生成提示詞；空白＝用內建預設。',
   },
+  'social.reply_tag_metaai': {
+    category: 'social',
+    label: '首回覆問 Meta AI',
+    defaultValue: 'on',
+    help: 'on＝主文後自動發「@meta.ai＋問題」首回覆（Threads 自回覆＋IG 第二則留言）；editor＝降級版（去 tag 小編提問，不標註）；off＝關閉，不發首回覆。驗證協議：首發 2 小時查 @meta.ai 有無回，有則維持 on、無則切 editor。',
+  },
   // 試算頁
   'portfolio.fee_discount': {
     category: 'portfolio',

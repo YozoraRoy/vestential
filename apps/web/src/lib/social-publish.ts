@@ -179,14 +179,12 @@ async function publishInstagram(
   })
 
   // 導流放第一則留言（IG caption 網址不可點）。best-effort：失敗不影響貼文本身。
+  // 第一則導流留言邏輯（#31：維持不動；首回覆第二則留言走 postInstagramComment 另發）。
   let commentStatus: string | undefined
   let commentId: string | undefined
   if (externalId) {
-    const comment = await graphPost(`${IG_API}/${externalId}/comments`, {
-      message: IG_DRIVE_COMMENT,
-      access_token: accessToken,
-    })
-      .then((j) => ({ id: j?.id ? String(j.id) : undefined, error: undefined as string | undefined }))
+    const comment = await postInstagramComment(externalId, IG_DRIVE_COMMENT, accessToken)
+      .then((id) => ({ id, error: undefined as string | undefined }))
       .catch((e: any) => ({ id: undefined as string | undefined, error: e?.message || String(e) }))
     commentId = comment.id
     if (commentId) {
@@ -206,6 +204,20 @@ async function publishInstagram(
   }
 
   return { platform: 'instagram', status: 'published', containerId, externalId, commentStatus }
+}
+
+/**
+ * 在指定 IG media 下發一則留言，回傳留言 id。
+ * 第一則導流留言與 #31 首回覆第二則留言共用此 helper（兩者內容／順序獨立，先發者為第一則）。
+ */
+export async function postInstagramComment(mediaId: string, message: string, accessToken: string): Promise<string> {
+  const json = await graphPost(`${IG_API}/${mediaId}/comments`, {
+    message,
+    access_token: accessToken,
+  })
+  const id = json?.id ? String(json.id) : ''
+  if (!id) throw new Error('IG 留言建立失敗（無回傳 id）')
+  return id
 }
 
 // ─── Threads：container → publish ─────────────────────────────────

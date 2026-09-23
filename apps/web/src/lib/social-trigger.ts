@@ -3,7 +3,17 @@ import type { SocialPostPlatform } from '@stock/database'
 import { generateSocialCaptions, generateMemeConcept, IG_DRIVE_COMMENT, type SocialCaptions } from '@/lib/social'
 import { renderSocialCard, type SocialCardStyle } from '@/lib/social-canvas'
 import { generateSocialBackgroundImage, generateSocialArtworkImage } from '@/lib/social-ai-image'
-import { publishSocialPost, alreadyPosted } from '@/lib/social-publish'
+import { publishSocialPost, alreadyPosted, postInstagramComment } from '@/lib/social-publish'
+import { publishThreadsReply } from '@/lib/threads-reply'
+import {
+  generateFirstReplyQuestion,
+  getFirstReplyMode,
+  hasFirstReplyPosted,
+  recordFirstReplyFailed,
+  recordFirstReplyPosted,
+  type FirstReplyMode,
+  type FirstReplyQuestion,
+} from '@/lib/social-first-reply'
 import { sendMarketFocusAlert } from '@/lib/email'
 
 // ─── 社群發布協調層 ───────────────────────────────────────────────
@@ -17,7 +27,7 @@ export interface SocialPublishOutcome {
   editionKey?: string | null
   dryRun?: boolean
   message?: string
-  results?: { platform: SocialPostPlatform; status: string; error?: string | null; commentStatus?: string | null }[]
+  results?: { platform: SocialPostPlatform; status: string; error?: string | null; commentStatus?: string | null; firstReplyStatus?: string | null }[]
   /** 僅 dryRun 時回傳：目前 social.card_style 設定值（作為預設選卡）。 */
   cardStyle?: SocialCardStyle
   /** 僅 dryRun 時回傳：IG 一律使用 AI 吉祥物全圖卡（ai）。 */
@@ -28,6 +38,19 @@ export interface SocialPublishOutcome {
   meme?: { title: string; punchline: string } | null
   /** 僅 dryRun 時回傳：IG 發布後會自動貼上的第一則留言。 */
   igDriveComment?: string
+  /**
+   * Issue #31：僅 dryRun 時回傳本次首回覆問題預覽（含 @meta.ai、四類輪換結果、≤100 字）。
+   * enabled=false（開關 off）時仍預覽「若開啟會發的文案」，實發時則跳過不發。
+   */
+  firstReply?: {
+    text: string
+    category: string
+    categoryLabel: string
+    source: 'llm' | 'fallback'
+    tagged: boolean
+    mode: FirstReplyMode
+    enabled: boolean
+  } | null
   error?: string
 }
 
@@ -61,6 +84,9 @@ export async function triggerSocialPublish(
   const editionKey = meta.generated_at
   const items = await getMarketFocus(6, 2)
 
+  // #31 首回覆開關（讀 social.reply_tag_metaai；off＝不發首回覆；editor＝降級去 tag 版）。
+  const firstReplyMode: FirstReplyMode = await getFirstReplyMode().catch(() => 'on' as FirstReplyMode)
+
   // 乾跑保持單純：不讀去重、不寫任何發布狀態。固定產生 classic＋meme＋ai 三版圖卡供選。
   if (dryRun) {
     const [captions, meme, bgImage] = await Promise.all([
@@ -72,6 +98,11 @@ export async function triggerSocialPublish(
     const aiArt = meme?.title ? await generateSocialArtworkImage(meme).catch(() => null) : null
     const cardStyle = ((await getAgentSetting('social.card_style').catch(() => null)) ?? 'ai') as SocialCardStyle
     const igCardStyle: 'ai' | 'meme' = 'ai'
+    // #31 乾跑預覽本次首回覆問題（off 時仍預覽 on 版文案＋標示 enabled=false，實發時跳過）。
+    const firstReplyPreview = await generateFirstReplyQuestion(meta, items, meme, {
+      editionKey: editionKey ?? '',
+      mode: firstReplyMode === 'editor' ? 'editor' : 'on',
+    }).catch(() => null)
     const toDataUrl = (buf: Buffer) => `data:image/jpeg;base64,${buf.toString('base64')}`
     const [classicBuf, memeBuf, aiBuf] = await Promise.all([
       renderSocialCard({ meta, items }, { style: 'classic', backgroundImage: bgImage }),
@@ -88,6 +119,17 @@ export async function triggerSocialPublish(
       captions,
       meme,
       igDriveComment: IG_DRIVE_COMMENT,
+      firstReply: firstReplyPreview
+        ? {
+            text: firstReplyPreview.text,
+            category: firstReplyPreview.category,
+            categoryLabel: firstReplyPreview.categoryLabel,
+            source: firstReplyPreview.source,
+            tagged: firstReplyPreview.tagged,
+            mode: firstReplyMode,
+            enabled: firstReplyMode !== 'off',
+          }
+        : null,
       results: platforms.map((p) => ({ platform: p, status: 'dry_run', error: null })),
     }
   }
@@ -105,6 +147,23 @@ export async function triggerSocialPublish(
 
   // 手動發布（乾跑後選定圖卡＋改文案）：直接用指定的圖與文字；自動發布則產出文案＋og 圖。
   const contentByPlatform = manual ? options.captions! : await generateSocialCaptions(meta, items)
+
+  // #31 首回覆題目：同 edition 全平台共用同一題（類別依 edition 輪換，與乾跑預覽一致）。
+  // 成本即規格所列「多 1 次 LLM」：meme 概念提前生成一次，同時供提問＋圖卡共用。
+  let firstReply: FirstReplyQuestion | null = null
+  let replyMeme: { title: string; punchline: string } | null = null
+  if (firstReplyMode !== 'off') {
+    try {
+      replyMeme = await generateMemeConcept(meta, items)
+      firstReply = await generateFirstReplyQuestion(meta, items, replyMeme, {
+        editionKey: editionKey!,
+        mode: firstReplyMode, // 'on'→@meta.ai 版；'editor'→降級去 tag 小編提問版
+      })
+    } catch (e) {
+      // 題目準備失敗只記 log（generate 內部已有題庫兜底，此處為額外保險），主文照發。
+      console.error('[Social] 首回覆題目準備失敗（主文不受影響）:', e)
+    }
+  }
 
   // 確保自動發布所需的圖卡快照皆已預先繪製並快取至 DB，避免 Meta API 抓取時動態調用 LLM 導致逾時 (9004)
   // FB / IG / Threads 一律用 AI 吉祥物全圖卡（ai）
@@ -132,8 +191,9 @@ export async function triggerSocialPublish(
       }).catch(() => null)
 
       for (const style of missingStyles) {
-        let meme = null
-        if (style === 'meme' || style === 'ai') {
+        // 首回覆已預生成的 meme 概念優先共用，避免重複呼叫 LLM。
+        let meme = replyMeme
+        if (!meme && (style === 'meme' || style === 'ai')) {
           meme = await generateMemeConcept(meta, items)
         }
         // ai 全圖卡以 FLUX 專屬吉祥物藝術圖為主，失敗時退回一般底圖
@@ -160,7 +220,12 @@ export async function triggerSocialPublish(
       buildCardImageUrl(editionKey!, defaultStyle)
 
     const res = await publishSocialPost(platform, editionKey!, content, imageUrl, false, force)
-    results.push({ platform, status: res.status, error: res.error, commentStatus: res.commentStatus })
+    // #31 主文發完後串首回覆（best-effort：失敗記狀態＋告警，不動主文 status）。
+    let firstReplyStatus: string | null = null
+    if (firstReply && res.status === 'published' && res.externalId) {
+      firstReplyStatus = await postFirstReplyBestEffort(platform, editionKey!, res.externalId, firstReply)
+    }
+    results.push({ platform, status: res.status, error: res.error, commentStatus: res.commentStatus, firstReplyStatus })
   }
 
   const failed = results.filter((r) => r.status === 'failed')
@@ -172,6 +237,44 @@ export async function triggerSocialPublish(
   }
 
   return { triggered: true, editionKey, dryRun: false, results }
+}
+
+/**
+ * Issue #31 首回覆實發（best-effort，不拖垮主文）：
+ * - Threads：自回覆（reply_to_id＝自家主文 media_id，沿用 threads-reply.ts publishThreadsReply）。
+ * - IG：第二則留言（第一則導流留言由 social-publish.ts 維持不動，此處另發一則）。
+ * - 去重：同 edition 已 posted 即回 skipped_duplicate 不重發。
+ *   force 重發會清整列（含首回覆欄位），故重發時會重貼，特此註記。
+ * - 失敗：記 first_reply_status='failed'＋沿用 sendMarketFocusAlert 告警管線（不新增信件），主文 status 不變。
+ */
+async function postFirstReplyBestEffort(
+  platform: SocialPostPlatform,
+  editionKey: string,
+  mainExternalId: string,
+  q: FirstReplyQuestion,
+): Promise<string | null> {
+  if (platform !== 'threads' && platform !== 'instagram') return null
+  if (await hasFirstReplyPosted(platform, editionKey).catch(() => false)) {
+    return 'skipped_duplicate'
+  }
+  try {
+    if (platform === 'threads') {
+      const { replyMediaId } = await publishThreadsReply(q.text, mainExternalId)
+      await recordFirstReplyPosted(platform, editionKey, { externalId: replyMediaId, text: q.text, category: q.category })
+      return 'posted'
+    }
+    const token = process.env.IG_ACCESS_TOKEN
+    if (!token) throw new Error('IG_ACCESS_TOKEN 未設定')
+    const commentId = await postInstagramComment(mainExternalId, q.text, token)
+    await recordFirstReplyPosted(platform, editionKey, { externalId: commentId, text: q.text, category: q.category })
+    return 'posted'
+  } catch (e: any) {
+    const msg = (e?.message || String(e)).slice(0, 1000)
+    console.error(`[Social/${platform}] 首回覆失敗（主文不受影響）:`, msg)
+    await recordFirstReplyFailed(platform, editionKey, { error: msg, text: q.text, category: q.category })
+    await sendMarketFocusAlert('社群首回覆失敗', `${platform}: ${msg}\nedition: ${editionKey}`).catch(() => {})
+    return 'failed'
+  }
 }
 
 export function buildImageUrl(editionKey: string, style: SocialCardStyle = 'classic'): string {

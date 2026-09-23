@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { btn, btnGhost, Card, Help, input, post, ResultBanner, SectionPageWrapper, type Result } from './_components'
+import { btn, btnGhost, Card, getJson, Help, input, post, ResultBanner, SectionPageWrapper, type Result } from './_components'
 
 type SocialCardStyle = 'classic' | 'meme' | 'ai'
 
@@ -14,6 +14,16 @@ interface DryRunResult {
   meme?: { title: string; punchline: string } | null
   /** 發布時會自動貼上 IG 的第一則留言（導流）。 */
   igDriveComment?: string
+  /** #31 首回覆問題預覽（乾跑時產生；enabled=false 表示開關 off，實發時跳過）。 */
+  firstReply?: {
+    text: string
+    category: string
+    categoryLabel: string
+    source: 'llm' | 'fallback'
+    tagged: boolean
+    mode: string
+    enabled: boolean
+  } | null
   results?: Array<{ platform: string; status: string; error?: string | null; commentStatus?: string | null }>
   message?: string
   skipped?: boolean
@@ -51,6 +61,10 @@ export function SocialClient() {
   const [bgPreset, setBgPreset] = useState('auto')
   const [bgCustomPrompt, setBgCustomPrompt] = useState('')
   const [generatingBg, setGeneratingBg] = useState(false)
+
+  // #31 首回覆開關（讀寫 social.reply_tag_metaai；off＝不發首回覆）
+  const [firstReplyMode, setFirstReplyMode] = useState('on')
+  const [firstReplyModeBusy, setFirstReplyModeBusy] = useState(false)
 
   // Threads 回覆小編
   const [replyUrl, setReplyUrl] = useState('')
@@ -91,6 +105,24 @@ export function SocialClient() {
     const t = setInterval(() => setElapsed((s) => s + 1), 1000)
     return () => clearInterval(t)
   }, [busy])
+
+  // #31 首回覆開關初始值（後台 Agent 設定 social.reply_tag_metaai）
+  useEffect(() => {
+    getJson('/api/admin/settings').then((r) => {
+      if (r.ok && r.body?.success) {
+        const found = (r.body.settings ?? []).find((s: { key: string; value: string }) => s.key === 'social.reply_tag_metaai')
+        if (found) setFirstReplyMode(found.value || 'on')
+      }
+    }).catch(() => {})
+  }, [])
+
+  const saveFirstReplyMode = async (mode: string) => {
+    setFirstReplyMode(mode)
+    setFirstReplyModeBusy(true)
+    const r = await post('/api/admin/settings', { key: 'social.reply_tag_metaai', value: mode })
+    setFirstReplyModeBusy(false)
+    setResult(r.ok ? { ok: true, message: `首回覆開關已切為 ${mode}` } : { ok: false, message: `開關儲存失敗：${r.body?.error ?? ''}` })
+  }
 
   const run = async (dryRun: boolean, force: boolean) => {
     setBusy(true)
@@ -345,6 +377,21 @@ export function SocialClient() {
             </span>
           </label>
           <span className="text-xs text-[var(--text-secondary)]">（可單選或複選，直接發布與手動發布皆會套用）</span>
+        </div>
+        <div className="mb-4 flex flex-wrap items-center gap-3 pb-3 border-b border-[var(--border)]">
+          <span className="text-sm font-semibold text-[var(--text-secondary)]">首回覆問 Meta AI：</span>
+          <select
+            className={input + ' w-auto text-sm'}
+            value={firstReplyMode}
+            onChange={(e) => saveFirstReplyMode(e.target.value)}
+            disabled={busy || firstReplyModeBusy}
+            aria-label="首回覆問 Meta AI 開關"
+          >
+            <option value="on">@meta.ai 版（預設）</option>
+            <option value="editor">降級：小編提問版（去 tag）</option>
+            <option value="off">關閉（不發首回覆）</option>
+          </select>
+          <Help text="on＝主文後自動發「@meta.ai＋問題」首回覆（Threads 自回覆＋IG 第二則留言）；editor＝降級去 tag 小編提問版；off＝不發首回覆。驗證協議：首發 2 小時查 @meta.ai 有無回，有則維持 on、無則切 editor。" />
         </div>
         <div className="flex flex-wrap gap-3">
           <button className={btn} onClick={() => run(true, false)} disabled={busy}>
@@ -634,6 +681,17 @@ export function SocialClient() {
               <p className="mb-4 text-sm text-[var(--text-secondary)]">
                 💡 本次 AI 生成梗圖概念：主標題 <b>{preview.meme.title}</b> ／ {preview.meme.punchline}
               </p>
+            )}
+            {preview.firstReply && (
+              <div className="mb-4 rounded-xl border border-[var(--border)] bg-black/20 p-3">
+                <p className="text-sm font-semibold text-[var(--accent)]">
+                  🤖 首回覆預覽（{preview.firstReply.categoryLabel}類・{preview.firstReply.source === 'llm' ? 'AI 生成' : '固定題庫兜底'}・{Array.from(preview.firstReply.text).length}/100 字）
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-[var(--text-primary)]">{preview.firstReply.text}</p>
+                {!preview.firstReply.enabled && (
+                  <p className="mt-1 text-xs text-[var(--accent-red)]">開關目前為關閉，實發時不會發出此首回覆。</p>
+                )}
+              </div>
             )}
             <div className="flex items-center gap-3">
               <button
