@@ -36,6 +36,10 @@ export interface Fundamentals {
   peRatio?: number
   eps?: number
   dividendYield?: number
+  /** #34：Yahoo quoteSummary summaryDetail 既有欄位（小數，如 0.035＝3.5%）；缺值即 undefined。 */
+  trailingAnnualDividendYield?: number
+  /** #34：Yahoo quoteSummary summaryDetail 既有欄位（每股配息金額，币值）；用於 dividendRate/現價 推算。 */
+  dividendRate?: number
   revenue?: number
   netIncome?: number
   sector?: string

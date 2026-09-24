@@ -6,6 +6,7 @@ import { TrendingUp, Zap, RefreshCw, Sparkles, History, ChevronDown, ChevronUp, 
 import { searchStocks, StockCandidateList } from '@/components/stock-search'
 import PortfolioRiskPanel, { type RiskQuotaValue, type RiskSummaryValue } from '@/components/portfolio-risk-panel'
 import { computeNetPnL, DEFAULT_FEE_DISCOUNT } from '@/lib/portfolio-net'
+import type { DividendYieldReason } from '@/lib/portfolio'
 import { buildHoldingsHash, findRiskSummariesByDate, getTaiwanDateStrClient, pruneOldRiskSummaries, saveRiskSummary } from '@/lib/risk-summary-cache'
 import { useI18n } from '@/i18n/LanguageProvider'
 import { parseJsonSafe, parseSseJson } from '@/lib/safe-parse'
@@ -107,6 +108,45 @@ function formatPct(n: number): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
 }
 
+// #34：表格欄位自定義（15 欄；操作欄常顯不參與）。
+// 偏好鍵 portfolio-table-columns；評等預設關、其餘預設開；localStorage 讀寫皆 try/catch。
+const TABLE_COLUMNS_STORAGE_KEY = 'portfolio-table-columns'
+type TableColumnId =
+  | 'rating' | 'name' | 'symbol' | 'shares' | 'cost' | 'price' | 'totalCost'
+  | 'marketValue' | 'unrealized' | 'return' | 'dividend' | 'yield' | 'refYield'
+  | 'net' | 'created'
+const TABLE_COLUMN_IDS: TableColumnId[] = [
+  'rating', 'name', 'symbol', 'shares', 'cost', 'price', 'totalCost',
+  'marketValue', 'unrealized', 'return', 'dividend', 'yield', 'refYield',
+  'net', 'created',
+]
+const DEFAULT_TABLE_COLUMNS: Record<TableColumnId, boolean> = {
+  rating: false,
+  name: true, symbol: true, shares: true, cost: true, price: true, totalCost: true,
+  marketValue: true, unrealized: true, return: true, dividend: true, yield: true,
+  refYield: true, net: true, created: true,
+}
+function loadTableColumns(): Record<TableColumnId, boolean> {
+  try {
+    if (typeof window === 'undefined') return { ...DEFAULT_TABLE_COLUMNS }
+    const raw = window.localStorage.getItem(TABLE_COLUMNS_STORAGE_KEY)
+    if (!raw) return { ...DEFAULT_TABLE_COLUMNS }
+    const parsed = JSON.parse(raw) as Partial<Record<TableColumnId, boolean>>
+    return { ...DEFAULT_TABLE_COLUMNS, ...Object.fromEntries(TABLE_COLUMN_IDS.filter((k) => typeof parsed[k] === 'boolean').map((k) => [k, parsed[k]])) }
+  } catch {
+    return { ...DEFAULT_TABLE_COLUMNS }
+  }
+}
+// #34：排序鍵→欄位對照（隱藏欄排序自動失效用；評等/操作不參與排序）。
+type RecordsSortKey =
+  | 'name' | 'shares' | 'cost' | 'price' | 'totalCost' | 'marketValue'
+  | 'unrealized' | 'returnRate' | 'dividend' | 'yield' | 'refYield' | 'net' | 'created'
+const SORT_KEY_TO_COLUMN: Record<RecordsSortKey, TableColumnId> = {
+  name: 'name', shares: 'shares', cost: 'cost', price: 'price', totalCost: 'totalCost',
+  marketValue: 'marketValue', unrealized: 'unrealized', returnRate: 'return',
+  dividend: 'dividend', yield: 'yield', refYield: 'refYield', net: 'net', created: 'created',
+}
+
 function num(s: string): number | null {
   if (!s.trim()) return null
   const n = Number(s)
@@ -192,10 +232,48 @@ export default function PortfolioPage() {
       window.localStorage.setItem('portfolio-records-view', v)
     } catch {}
   }
-  // #28：表格欄頭排序（名稱/未實現/報酬率/建立時間，純前端 useMemo 排序，不打 API）。
-  const [sortKey, setSortKey] = useState<'name' | 'unrealized' | 'returnRate' | 'created' | null>(null)
+  // #34：欄位可見性（下拉勾選即時生效＋localStorage 記住；評等預設關）。
+  const [visibleColumns, setVisibleColumns] = useState<Record<TableColumnId, boolean>>(loadTableColumns)
+  const [columnsOpen, setColumnsOpen] = useState(false)
+  const columnsRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TABLE_COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumns))
+    } catch {}
+  }, [visibleColumns])
+  // 下拉面板：點外面關閉。
+  useEffect(() => {
+    if (!columnsOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (columnsRef.current && !columnsRef.current.contains(e.target as Node)) setColumnsOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [columnsOpen])
+  const toggleColumn = (c: TableColumnId) => {
+    setVisibleColumns((prev) => ({ ...prev, [c]: !prev[c] }))
+  }
+  // 欄位標籤（沿用既有表頭三語鍵，不新增單欄鍵）。
+  const columnLabels: Record<TableColumnId, string> = useMemo(() => ({
+    rating: ui.colRating, name: ui.colName, symbol: ui.colSymbol, shares: ui.detailShares,
+    cost: ui.detailCost, price: ui.detailPrice, totalCost: ui.detailTotalCost,
+    marketValue: ui.detailMarketValue, unrealized: ui.detailUnrealizedPnl,
+    return: ui.resultTotalReturn, dividend: ui.detailDividend, yield: ui.detailYield,
+    refYield: ui.colRefYield, net: ui.netTitle, created: ui.detailCreatedAt,
+  }), [ui])
+  const visibleColumnCount = useMemo(
+    () => TABLE_COLUMN_IDS.filter((c) => visibleColumns[c]).length,
+    [visibleColumns],
+  )
+  // #28＋#34：表格欄頭排序（名稱/數字欄全可排/建立時間，純前端 useMemo 排序，不打 API）。
+  // 評等/操作欄不參與排序；隱藏中欄位的排序自動失效（回到無排序＋註明，不報錯）。
+  const [sortKey, setSortKey] = useState<RecordsSortKey | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const toggleSort = (k: 'name' | 'unrealized' | 'returnRate' | 'created') => {
+  const [sortReset, setSortReset] = useState(false)
+  const toggleSort = (k: RecordsSortKey) => {
+    // 隱藏中的欄位不可排序：點擊無效（不報錯）。
+    if (!visibleColumns[SORT_KEY_TO_COLUMN[k]]) return
+    setSortReset(false)
     if (sortKey !== k) {
       setSortKey(k)
       setSortDir(k === 'name' ? 'asc' : 'desc')
@@ -203,26 +281,81 @@ export default function PortfolioPage() {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     }
   }
+  useEffect(() => {
+    if (sortKey && !visibleColumns[SORT_KEY_TO_COLUMN[sortKey]]) {
+      setSortKey(null)
+      setSortReset(true)
+    }
+  }, [visibleColumns, sortKey])
+  // #33/#34：同步殖利率參考值（recordId→小數）＋缺值原因（recordId→三態）。
+  const [syncYields, setSyncYields] = useState<Record<number, number | null>>({})
+  const [syncYieldReasons, setSyncYieldReasons] = useState<Record<number, DividendYieldReason>>({})
   const sortedHistory = useMemo(() => {
     if (!sortKey) return history
     const arr = [...history]
     const dir = sortDir === 'asc' ? 1 : -1
+    // #34：缺值（非有限數字）永遠沉底，與升降冪方向無關。
+    const sortNums = (get: (r: HistoryItem) => number | null | undefined) => {
+      arr.sort((a, b) => {
+        const va = get(a)
+        const vb = get(b)
+        const aMiss = va == null || !Number.isFinite(va)
+        const bMiss = vb == null || !Number.isFinite(vb)
+        if (aMiss && bMiss) return 0
+        if (aMiss) return 1
+        if (bMiss) return -1
+        return (va - vb) * dir
+      })
+    }
     switch (sortKey) {
       case 'name':
         arr.sort((a, b) => (a.symbol_name || a.symbol).localeCompare(b.symbol_name || b.symbol, 'zh-Hant') * dir)
         break
+      case 'shares':
+        sortNums((r) => r.shares)
+        break
+      case 'cost':
+        sortNums((r) => r.cost)
+        break
+      case 'price':
+        sortNums((r) => r.current_price)
+        break
+      case 'totalCost':
+        sortNums((r) => r.cost_basis)
+        break
+      case 'marketValue':
+        sortNums((r) => r.market_value)
+        break
       case 'unrealized':
-        arr.sort((a, b) => (a.unrealized_pnl - b.unrealized_pnl) * dir)
+        sortNums((r) => r.unrealized_pnl)
         break
       case 'returnRate':
-        arr.sort((a, b) => (a.total_return_pct - b.total_return_pct) * dir)
+        sortNums((r) => r.total_return_pct)
+        break
+      case 'dividend':
+        sortNums((r) => r.dividend)
+        break
+      case 'yield':
+        sortNums((r) => r.yield_on_cost)
+        break
+      case 'refYield':
+        sortNums((r) => {
+          const y = syncYields[r.id]
+          return typeof y === 'number' && Number.isFinite(y) ? y : null
+        })
+        break
+      case 'net':
+        sortNums((r) => computeNetPnL({
+          market: r.market, symbol: r.symbol, shares: r.shares,
+          cost: r.cost, currentPrice: r.current_price, discount: feeDiscount,
+        }).netPnl)
         break
       case 'created':
         arr.sort((a, b) => (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir)
         break
     }
     return arr
-  }, [history, sortKey, sortDir])
+  }, [history, sortKey, sortDir, syncYields, feeDiscount])
   const effectiveRecordsView: 'cards' | 'table' = isDesktop ? recordsView : 'cards'
 
   // #30：當前持倉快照 hash（代號＋股數＋現價；去重對齊後端，見 lib/risk-summary-cache）。
@@ -312,7 +445,6 @@ export default function PortfolioPage() {
   // finally 釋放避免失敗後按鈕永久 disabled）。yields 僅參考顯示（recordId→小數），失敗清單逐檔列出。
   const [syncing, setSyncing] = useState(false)
   const syncRef = useRef(false)
-  const [syncYields, setSyncYields] = useState<Record<number, number | null>>({})
   const [syncFailed, setSyncFailed] = useState<Array<{ id: number; symbol: string; reason: string }>>([])
 
   const buildPayload = () => {
@@ -934,6 +1066,16 @@ export default function PortfolioPage() {
         return
       }
       if (data.yields && typeof data.yields === 'object') setSyncYields(data.yields)
+      // #34：缺值原因同步（非三態字串一律丟棄，避免髒資料進 UI）。
+      if (data.yieldReasons && typeof data.yieldReasons === 'object') {
+        const clean: Record<number, DividendYieldReason> = {}
+        for (const [k, v] of Object.entries(data.yieldReasons)) {
+          if (v === 'no-data' || v === 'timeout' || v === 'rate-limited') clean[Number(k)] = v
+        }
+        setSyncYieldReasons(clean)
+      } else {
+        setSyncYieldReasons({})
+      }
       setSyncFailed(Array.isArray(data.failed) ? data.failed : [])
       setNotice(ui.syncDone.replace('{updated}', String(data.updated ?? 0)).replace('{scanned}', String(data.scanned ?? 0)))
       await fetchHistory()
@@ -948,9 +1090,16 @@ export default function PortfolioPage() {
   const syncReasonText = (reason: string) =>
     reason === 'resolve' ? ui.syncReasonResolve : reason === 'save' ? ui.syncReasonSave : ui.syncReasonQuote
 
+  // #34：殖利率參考顯示——有值顯示 ％；缺值顯示三態原因（三語），不再空白 —。
+  // 尚未同步（無原因）時預設顯示「暫無資料」，同步後以 API 回傳原因為準。
+  const yieldReasonText = (reason: DividendYieldReason | undefined): string => {
+    if (reason === 'timeout') return ui.yieldTimeout
+    if (reason === 'rate-limited') return ui.yieldRateLimited
+    return ui.yieldNoData
+  }
   const refYieldText = (id: number) => {
     const y = syncYields[id]
-    return typeof y === 'number' && Number.isFinite(y) ? `${(y * 100).toFixed(2)}%` : '—'
+    return typeof y === 'number' && Number.isFinite(y) ? `${(y * 100).toFixed(2)}%` : yieldReasonText(syncYieldReasons[id])
   }
 
   // #33：全持倉最近一次同步時間（price_synced_at 最大值；無則不顯示）。
@@ -1672,6 +1821,43 @@ export default function PortfolioPage() {
                 </button>
               ))}
             </div>
+            {/* #34：欄位下拉勾選面板（桌機表格檢視用；勾選即時生效，偏好記 localStorage）。 */}
+            {history.length > 0 && listTab === 'positions' && (
+              <div ref={columnsRef} className="hidden md:block relative">
+                <button
+                  type="button"
+                  onClick={() => setColumnsOpen((v) => !v)}
+                  aria-expanded={columnsOpen}
+                  aria-haspopup="true"
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition"
+                >
+                  {ui.tableColumns}
+                  {columnsOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+                {columnsOpen && (
+                  <div
+                    role="menu"
+                    aria-label={ui.tableColumns}
+                    className="absolute right-0 z-30 mt-1 w-44 rounded-xl border border-white/10 bg-[var(--bg-card)] p-2 shadow-xl"
+                  >
+                    {TABLE_COLUMN_IDS.map((c) => (
+                      <label
+                        key={c}
+                        className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-[var(--text-primary)] hover:bg-white/5 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={visibleColumns[c]}
+                          onChange={() => toggleColumn(c)}
+                          className="accent-[var(--accent)]"
+                        />
+                        <span className="truncate">{columnLabels[c]}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
         {/* #33：同步時間註明（price_synced_at 最大值＋非即時說明）＋失敗清單 */}
@@ -1679,6 +1865,10 @@ export default function PortfolioPage() {
           <p className="text-[11px] text-[var(--text-secondary)] mb-3">
             {ui.syncUpdatedAt.replace('{time}', latestSyncAt)} · {ui.syncNonRealtime}
           </p>
+        )}
+        {/* #34：排序中的欄位被隱藏→回到無排序的註明（手動排序後清除）。 */}
+        {sortReset && listTab === 'positions' && effectiveRecordsView === 'table' && (
+          <p className="text-[11px] text-[var(--text-secondary)] mb-3">{ui.sortResetNote}</p>
         )}
         {syncFailed.length > 0 && listTab === 'positions' && (
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 mb-3">
@@ -1722,29 +1912,73 @@ export default function PortfolioPage() {
             <table className="w-full min-w-[1500px] text-sm">
               <thead>
                 <tr className="text-left text-xs text-[var(--text-secondary)] border-b border-white/10">
-                  <th className="px-3 py-2 whitespace-nowrap font-medium">{ui.colRating}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium">
-                    <RecordsSortHeader label={ui.colName} active={sortKey === 'name'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('name')} />
-                  </th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium">{ui.colSymbol}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailShares}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailCost}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailPrice}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailTotalCost}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailMarketValue}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
-                    <RecordsSortHeader label={ui.detailUnrealizedPnl} active={sortKey === 'unrealized'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('unrealized')} />
-                  </th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
-                    <RecordsSortHeader label={ui.resultTotalReturn} active={sortKey === 'returnRate'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('returnRate')} />
-                  </th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailDividend}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailYield}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.colRefYield}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.netTitle}</th>
-                  <th className="px-3 py-2 whitespace-nowrap font-medium">
-                    <RecordsSortHeader label={ui.detailCreatedAt} active={sortKey === 'created'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('created')} />
-                  </th>
+                  {visibleColumns.rating && <th className="px-3 py-2 whitespace-nowrap font-medium">{ui.colRating}</th>}
+                  {visibleColumns.name && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium">
+                      <RecordsSortHeader label={ui.colName} active={sortKey === 'name'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('name')} />
+                    </th>
+                  )}
+                  {visibleColumns.symbol && <th className="px-3 py-2 whitespace-nowrap font-medium">{ui.colSymbol}</th>}
+                  {visibleColumns.shares && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.detailShares} active={sortKey === 'shares'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('shares')} />
+                    </th>
+                  )}
+                  {visibleColumns.cost && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.detailCost} active={sortKey === 'cost'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('cost')} />
+                    </th>
+                  )}
+                  {visibleColumns.price && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.detailPrice} active={sortKey === 'price'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('price')} />
+                    </th>
+                  )}
+                  {visibleColumns.totalCost && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.detailTotalCost} active={sortKey === 'totalCost'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('totalCost')} />
+                    </th>
+                  )}
+                  {visibleColumns.marketValue && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.detailMarketValue} active={sortKey === 'marketValue'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('marketValue')} />
+                    </th>
+                  )}
+                  {visibleColumns.unrealized && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.detailUnrealizedPnl} active={sortKey === 'unrealized'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('unrealized')} />
+                    </th>
+                  )}
+                  {visibleColumns.return && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.resultTotalReturn} active={sortKey === 'returnRate'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('returnRate')} />
+                    </th>
+                  )}
+                  {visibleColumns.dividend && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.detailDividend} active={sortKey === 'dividend'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('dividend')} />
+                    </th>
+                  )}
+                  {visibleColumns.yield && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.detailYield} active={sortKey === 'yield'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('yield')} />
+                    </th>
+                  )}
+                  {visibleColumns.refYield && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.colRefYield} active={sortKey === 'refYield'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('refYield')} />
+                    </th>
+                  )}
+                  {visibleColumns.net && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
+                      <RecordsSortHeader label={ui.netTitle} active={sortKey === 'net'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('net')} />
+                    </th>
+                  )}
+                  {visibleColumns.created && (
+                    <th className="px-3 py-2 whitespace-nowrap font-medium">
+                      <RecordsSortHeader label={ui.detailCreatedAt} active={sortKey === 'created'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('created')} />
+                    </th>
+                  )}
                   <th className="px-3 py-2 whitespace-nowrap font-medium">{ui.colAction}</th>
                 </tr>
               </thead>
@@ -1756,32 +1990,40 @@ export default function PortfolioPage() {
                   return (
                     <Fragment key={item.id}>
                       <tr onClick={() => expandHistory(item)} className="border-b border-white/5 hover:bg-white/5 transition cursor-pointer">
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          <span className={`px-2 py-0.5 rounded-md text-xs font-bold ${ratingColor(item.recommendation)}`}
-                            style={item.recommendation ? { backgroundColor: `${RATING_STYLE[item.recommendation]?.bg || 'rgba(255,255,255,0.08)'}22` } : undefined}>
-                            {item.recommendation || '—'}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap font-medium">{item.symbol_name || item.symbol}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-xs text-[var(--text-secondary)]">{item.symbol}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{item.shares}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.cost, item.market)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.current_price, item.market)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.cost_basis, item.market)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.market_value, item.market)}</td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${item.unrealized_pnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
-                          {formatMoney(item.unrealized_pnl, item.market)} ({formatPct(item.unrealized_pnl_pct)})
-                        </td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${item.total_return >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
-                          {formatMoney(item.total_return, item.market)} {formatPct(item.total_return_pct)}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.dividend, item.market)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{item.yield_on_cost.toFixed(2)}%</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{refYieldText(item.id)}</td>
-                        <td className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${net.netPnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
-                          {formatMoney(net.netPnl, item.market)} ({formatPct(net.netPnlPct)})
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-xs">{(item.created_at || '').replace('T', ' ')}</td>
+                        {visibleColumns.rating && (
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className={`px-2 py-0.5 rounded-md text-xs font-bold ${ratingColor(item.recommendation)}`}
+                              style={item.recommendation ? { backgroundColor: `${RATING_STYLE[item.recommendation]?.bg || 'rgba(255,255,255,0.08)'}22` } : undefined}>
+                              {item.recommendation || '—'}
+                            </span>
+                          </td>
+                        )}
+                        {visibleColumns.name && <td className="px-3 py-2 whitespace-nowrap font-medium">{item.symbol_name || item.symbol}</td>}
+                        {visibleColumns.symbol && <td className="px-3 py-2 whitespace-nowrap text-xs text-[var(--text-secondary)]">{item.symbol}</td>}
+                        {visibleColumns.shares && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{item.shares}</td>}
+                        {visibleColumns.cost && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.cost, item.market)}</td>}
+                        {visibleColumns.price && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.current_price, item.market)}</td>}
+                        {visibleColumns.totalCost && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.cost_basis, item.market)}</td>}
+                        {visibleColumns.marketValue && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.market_value, item.market)}</td>}
+                        {visibleColumns.unrealized && (
+                          <td className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${item.unrealized_pnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
+                            {formatMoney(item.unrealized_pnl, item.market)} ({formatPct(item.unrealized_pnl_pct)})
+                          </td>
+                        )}
+                        {visibleColumns.return && (
+                          <td className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${item.total_return >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
+                            {formatMoney(item.total_return, item.market)} {formatPct(item.total_return_pct)}
+                          </td>
+                        )}
+                        {visibleColumns.dividend && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.dividend, item.market)}</td>}
+                        {visibleColumns.yield && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{item.yield_on_cost.toFixed(2)}%</td>}
+                        {visibleColumns.refYield && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{refYieldText(item.id)}</td>}
+                        {visibleColumns.net && (
+                          <td className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${net.netPnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
+                            {formatMoney(net.netPnl, item.market)} ({formatPct(net.netPnlPct)})
+                          </td>
+                        )}
+                        {visibleColumns.created && <td className="px-3 py-2 whitespace-nowrap text-xs">{(item.created_at || '').replace('T', ' ')}</td>}
                         <td className="px-3 py-2 whitespace-nowrap">
                           {authMode === 'user' && (
                             <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -1810,7 +2052,7 @@ export default function PortfolioPage() {
                       </tr>
                       {open && (
                         <tr className="border-b border-white/5">
-                          <td colSpan={16} className="px-4 pb-4 pt-2 bg-white/[0.02]">
+                          <td colSpan={visibleColumnCount + 1} className="px-4 pb-4 pt-2 bg-white/[0.02]">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                               <NetPnlView
                                 market={item.market}

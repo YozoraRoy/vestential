@@ -737,6 +737,11 @@ export interface Dict {
     sortAsc: string
     sortDesc: string
     colRating: string
+    tableColumns: string
+    sortResetNote: string
+    yieldNoData: string
+    yieldTimeout: string
+    yieldRateLimited: string
     syncPricesBtn: string
     syncSyncing: string
     syncUpdatedAt: string

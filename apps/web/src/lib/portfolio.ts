@@ -175,21 +175,74 @@ export function isQuoteRateLimited(e: unknown): boolean {
 }
 
 /**
- * 殖利率參考：取 Yahoo dividendYield（小數，如 0.035＝3.5%）。
- * 有值回傳、無值／失敗回 null（UI 顯示 —）；絕不寫入 dividend 手填欄位。
+ * #34：殖利率缺值三態原因（UI 以三語顯示，不再空白 —）。
+ * - 'no-data'：Yahoo 各欄位皆無值（台股常態）
+ * - 'timeout'：quoteSummary 單檔超時（PORTFOLIO_SYNC_FUND_TIMEOUT_MS）
+ * - 'rate-limited'：Yahoo 限流（沿用 isQuoteRateLimited 模式）
  */
-export async function fetchDividendYield(rawSymbol: string, market: Market): Promise<number | null> {
+export type DividendYieldReason = 'no-data' | 'timeout' | 'rate-limited'
+
+export interface DividendYieldResult {
+  /** Yahoo 殖利率（小數，如 0.035＝3.5%）；無值為 null。 */
+  value: number | null
+  /** value 為 null 時的缺值原因；有值時為 null。 */
+  reason: DividendYieldReason | null
+}
+
+function isYieldTimeout(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e ?? '')
+  return /timeout after \d+ms/i.test(msg)
+}
+
+function classifyYieldError(e: unknown): DividendYieldReason {
+  if (isQuoteRateLimited(e)) return 'rate-limited'
+  if (isYieldTimeout(e)) return 'timeout'
+  return 'no-data'
+}
+
+function asYieldValue(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null
+}
+
+/**
+ * #34：殖利率參考多欄位 fallback：
+ * dividendYield → trailingAnnualDividendYield → dividendRate / 現價推算。
+ * 有值回 { value, reason: null }；仍無值回 { value: null, reason } 三態原因。
+ * 絕不寫入 dividend 手填欄位（只讀 Yahoo，不碰 holdings.dividend）。
+ */
+export async function fetchDividendYield(rawSymbol: string, market: Market): Promise<DividendYieldResult> {
+  let symbol: string
   try {
-    const symbol = await resolveYahooSymbol(rawSymbol, market)
-    const f = await withTimeout(
+    symbol = await resolveYahooSymbol(rawSymbol, market)
+  } catch (e) {
+    return { value: null, reason: classifyYieldError(e) }
+  }
+  let f: Awaited<ReturnType<typeof yahooFinanceProvider.getFundamentals>> | null = null
+  try {
+    f = await withTimeout(
       yahooFinanceProvider.getFundamentals(symbol, market === 'tw' ? 'TW' : 'US'),
       PORTFOLIO_SYNC_FUND_TIMEOUT_MS,
     )
-    const y = f?.dividendYield
-    return typeof y === 'number' && Number.isFinite(y) && y >= 0 ? y : null
-  } catch {
-    return null
+  } catch (e) {
+    return { value: null, reason: classifyYieldError(e) }
   }
+  const direct = asYieldValue(f?.dividendYield) ?? asYieldValue(f?.trailingAnnualDividendYield)
+  if (direct != null) return { value: direct, reason: null }
+  // 第三順位：dividendRate（每股金額）/ 現價 推算；現價取不到即視為無資料。
+  const rate = asYieldValue(f?.dividendRate)
+  if (rate != null && rate > 0) {
+    try {
+      const quote = await withTimeout(
+        yahooFinanceProvider.getQuote(symbol, market === 'tw' ? 'TW' : 'US'),
+        PORTFOLIO_SYNC_FUND_TIMEOUT_MS,
+      )
+      const price = asYieldValue(quote?.price)
+      if (price != null && price > 0) return { value: rate / price, reason: null }
+    } catch (e) {
+      return { value: null, reason: classifyYieldError(e) }
+    }
+  }
+  return { value: null, reason: 'no-data' }
 }
 
 export interface SyncableHolding {
@@ -205,8 +258,10 @@ export interface SyncedHolding {
   id: number
   symbol: string
   price: number
-  /** Yahoo dividendYield（小數）；未取／無值為 null。僅參考顯示，不寫 dividend。 */
+  /** Yahoo 殖利率（小數）；未取／無值為 null。僅參考顯示，不寫 dividend。 */
   dividendYield: number | null
+  /** #34：殖利率缺值原因（有值時為 null；UI 以三語顯示）。 */
+  dividendYieldReason: DividendYieldReason | null
 }
 
 export type SyncFailureReason = 'quote' | 'resolve'
@@ -285,18 +340,19 @@ export async function syncPortfolioPrices(
     else failed.push({ id: r.h.id, symbol: r.h.symbol, reason: 'quote' })
   }
 
-  // 5) 殖利率參考（僅需要時；失敗→null，UI 顯示 —）。
-  const yieldMap = new Map<number, number | null>()
+  // 5) 殖利率參考（僅需要時；失敗→{ value: null, reason }，UI 顯示三語原因）。
+  // dividend 欄全程不碰（只讀傳入，不回寫）。
+  const yieldMap = new Map<number, DividendYieldResult>()
   if (opts?.includeYield && priced.length > 0) {
     for (let i = 0; i < priced.length; i += PORTFOLIO_SYNC_FUND_CONCURRENCY) {
       const chunk = priced.slice(i, i + PORTFOLIO_SYNC_FUND_CONCURRENCY)
       const results = await Promise.all(
-        chunk.map(async (p) => {
+        chunk.map(async (p): Promise<DividendYieldResult> => {
           try {
             return await fetchDividendYield(p.h.symbol, p.h.market)
           } catch (e) {
             markRateLimited(e)
-            return null
+            return { value: null, reason: classifyYieldError(e) }
           }
         }),
       )
@@ -306,11 +362,13 @@ export async function syncPortfolioPrices(
   }
 
   for (const p of priced) {
+    const y = yieldMap.get(p.h.id)
     updated.push({
       id: p.h.id,
       symbol: p.h.symbol,
       price: p.price,
-      dividendYield: yieldMap.get(p.h.id) ?? null,
+      dividendYield: y?.value ?? null,
+      dividendYieldReason: y?.value != null ? null : (y?.reason ?? null),
     })
   }
   return { updated, failed, rateLimited, syncedAt }

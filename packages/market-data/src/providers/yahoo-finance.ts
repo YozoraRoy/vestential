@@ -204,6 +204,10 @@ export const yahooFinanceProvider: MarketDataProvider = {
       peRatio: num(summary.trailingPE) ?? num(summary.forwardPE),
       eps: num(summary.trailingEps),
       dividendYield: num(summary.dividendYield),
+      // #34：fallback 用既有 summaryDetail 欄位（trailingAnnualDividendYield 小數／dividendRate 每股金額）；
+      // Yahoo 未回傳即 undefined，由 fetchDividendYield 走缺值三態。
+      trailingAnnualDividendYield: num(summary.trailingAnnualDividendYield),
+      dividendRate: num(summary.dividendRate),
       sector: price.sector,
       industry: price.industry,
     }

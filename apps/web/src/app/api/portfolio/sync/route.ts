@@ -17,6 +17,7 @@ import {
   syncPortfolioPrices,
   PORTFOLIO_SYNC_MAX_PER_REQUEST,
   PORTFOLIO_SYNC_MAX_PER_RUN,
+  type DividendYieldReason,
   type SyncableHolding,
 } from '../../../../lib/portfolio'
 
@@ -59,7 +60,7 @@ function byId(records: PortfolioRecord[]): Map<number, PortfolioRecord> {
  * 理由：排程與手動共用同一份 best-effort＋寫回邏輯，避免雙份實作漂移；
  * 權限以 authorizeSync（沿用 cycle-entry refresh 慣例）區隔。
  *
- * 回傳：{ success, scope, scanned, updated, failed[{symbol,reason}], yields{recordId:yield|null}, syncedAt, rateLimited }
+  * 回傳：{ success, scope, scanned, updated, failed[{symbol,reason}], yields{recordId:yield|null}, yieldReasons{recordId:reason}, syncedAt, rateLimited }
  * - 排程重跑冪等：直接蓋 current_price＋price_synced_at，以最後一次同步時間為準，不產生重複列；
  * - dividend（手填股息）全程不碰；殖利率僅回傳參考值（yields），不寫庫；
  * - Yahoo 限流：記 console log＋reportServerError（#24 通道 30 分鐘同 key 去重＝告警節流），其餘持倉照常完成。
@@ -130,6 +131,7 @@ export async function POST(req: Request) {
         updated: written,
         failed,
         yields: {},
+        yieldReasons: {},
         syncedAt: result.syncedAt,
         rateLimited: result.rateLimited,
       })
@@ -159,11 +161,14 @@ export async function POST(req: Request) {
     const result = await syncPortfolioPrices(holdings, { includeYield: true })
     const failed: FailedItem[] = result.failed.map((f) => ({ ...f }))
     const yields: Record<number, number | null> = {}
+    // #34：殖利率缺值原因（recordId→'no-data'|'timeout'|'rate-limited'；有值不列）。
+    const yieldReasons: Record<number, DividendYieldReason> = {}
     let written = 0
     for (const u of result.updated) {
       const base = recordById.get(u.id)
       if (!base) continue
       yields[u.id] = u.dividendYield
+      if (u.dividendYield == null && u.dividendYieldReason) yieldReasons[u.id] = u.dividendYieldReason
       const pnl = computePnL({ market: base.market, shares: base.shares, cost: base.cost, currentPrice: u.price, dividend: base.dividend ?? 0 })
       const ok = await updatePortfolioSyncedPrice(u.id, {
         currentPrice: u.price,
@@ -188,6 +193,7 @@ export async function POST(req: Request) {
       updated: written,
       failed,
       yields,
+      yieldReasons,
       syncedAt: result.syncedAt,
       rateLimited: result.rateLimited,
     })
