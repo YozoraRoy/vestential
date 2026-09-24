@@ -66,6 +66,7 @@ interface HistoryItem {
   cost: number
   current_price: number
   dividend: number
+  price_synced_at: string | null
   cost_basis: number
   market_value: number
   unrealized_pnl: number
@@ -307,6 +308,12 @@ export default function PortfolioPage() {
   const [editStrategy, setEditStrategy] = useState('buffett')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
+  // #33：現價同步 in-flight 守衛（沿用 #25 模式：ref 同步擋重入＋state 驅動 disabled＋旋轉；
+  // finally 釋放避免失敗後按鈕永久 disabled）。yields 僅參考顯示（recordId→小數），失敗清單逐檔列出。
+  const [syncing, setSyncing] = useState(false)
+  const syncRef = useRef(false)
+  const [syncYields, setSyncYields] = useState<Record<number, number | null>>({})
+  const [syncFailed, setSyncFailed] = useState<Array<{ id: number; symbol: string; reason: string }>>([])
 
   const buildPayload = () => {
     const nShares = num(shares)
@@ -912,6 +919,48 @@ export default function PortfolioPage() {
       abortRef.current = null
     }
   }
+
+  const handleSyncPrices = async () => {
+    // #33：同步中重複點擊直接 return（沿用 #25 守衛模式）。
+    if (syncRef.current) return
+    syncRef.current = true
+    setSyncing(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/portfolio/sync', { method: 'POST' })
+      const data = await parseJsonSafe(res, safeMsg)
+      if (!res.ok || !data.success) {
+        setError(data.error || ui.syncError)
+        return
+      }
+      if (data.yields && typeof data.yields === 'object') setSyncYields(data.yields)
+      setSyncFailed(Array.isArray(data.failed) ? data.failed : [])
+      setNotice(ui.syncDone.replace('{updated}', String(data.updated ?? 0)).replace('{scanned}', String(data.scanned ?? 0)))
+      await fetchHistory()
+    } catch (e: any) {
+      setError(e.message || ui.syncError)
+    } finally {
+      syncRef.current = false
+      setSyncing(false)
+    }
+  }
+
+  const syncReasonText = (reason: string) =>
+    reason === 'resolve' ? ui.syncReasonResolve : reason === 'save' ? ui.syncReasonSave : ui.syncReasonQuote
+
+  const refYieldText = (id: number) => {
+    const y = syncYields[id]
+    return typeof y === 'number' && Number.isFinite(y) ? `${(y * 100).toFixed(2)}%` : '—'
+  }
+
+  // #33：全持倉最近一次同步時間（price_synced_at 最大值；無則不顯示）。
+  const latestSyncAt = useMemo(() => {
+    let latest: string | null = null
+    for (const r of history) {
+      if (r.price_synced_at && (latest == null || r.price_synced_at > latest)) latest = r.price_synced_at
+    }
+    return latest
+  }, [history])
 
   const ratingColor = (rating?: string | null) => (rating ? RATING_STYLE[rating]?.text || 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]')
 
@@ -1597,21 +1646,52 @@ export default function PortfolioPage() {
               ))}
             </div>
           </div>
-          {/* #28：紀錄檢視切換器（沿用持倉/風險 segmented 風格；手機 hidden，只留卡片） */}
-          <div className="hidden md:flex rounded-lg overflow-hidden border border-white/10" role="group" aria-label="records view">
-            {(['cards', 'table'] as const).map(v => (
+          {/* #33：同步現價鈕（in-flight disabled＋旋轉，沿用 #25 守衛）＋ #28 紀錄檢視切換器 */}
+          <div className="flex items-center gap-2">
+            {history.length > 0 && listTab === 'positions' && (
               <button
-                key={v}
                 type="button"
-                onClick={() => handleRecordsViewChange(v)}
-                aria-pressed={recordsView === v}
-                className={`px-3 py-1 text-xs transition ${recordsView === v ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                onClick={handleSyncPrices}
+                disabled={syncing}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/10 text-xs hover:bg-white/15 transition disabled:opacity-50 disabled:cursor-wait"
               >
-                {v === 'cards' ? ui.viewCards : ui.viewTable}
+                <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                {syncing ? ui.syncSyncing : ui.syncPricesBtn}
               </button>
-            ))}
+            )}
+            <div className="hidden md:flex rounded-lg overflow-hidden border border-white/10" role="group" aria-label="records view">
+              {(['cards', 'table'] as const).map(v => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => handleRecordsViewChange(v)}
+                  aria-pressed={recordsView === v}
+                  className={`px-3 py-1 text-xs transition ${recordsView === v ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                >
+                  {v === 'cards' ? ui.viewCards : ui.viewTable}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+        {/* #33：同步時間註明（price_synced_at 最大值＋非即時說明）＋失敗清單 */}
+        {latestSyncAt && listTab === 'positions' && (
+          <p className="text-[11px] text-[var(--text-secondary)] mb-3">
+            {ui.syncUpdatedAt.replace('{time}', latestSyncAt)} · {ui.syncNonRealtime}
+          </p>
+        )}
+        {syncFailed.length > 0 && listTab === 'positions' && (
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 mb-3">
+            <p className="text-xs font-medium text-amber-400">{ui.syncFailedTitle.replace('{n}', String(syncFailed.length))}</p>
+            <ul className="mt-1 space-y-0.5">
+              {syncFailed.map((f) => (
+                <li key={f.id} className="text-xs text-[var(--text-secondary)]">
+                  {ui.syncFailedItem.replace('{symbol}', f.symbol).replace('{reason}', syncReasonText(f.reason))}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {listTab === 'risk' ? (
           <PortfolioRiskPanel
             ui={ui}
@@ -1660,6 +1740,7 @@ export default function PortfolioPage() {
                   </th>
                   <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailDividend}</th>
                   <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.detailYield}</th>
+                  <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.colRefYield}</th>
                   <th className="px-3 py-2 whitespace-nowrap font-medium text-right">{ui.netTitle}</th>
                   <th className="px-3 py-2 whitespace-nowrap font-medium">
                     <RecordsSortHeader label={ui.detailCreatedAt} active={sortKey === 'created'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('created')} />
@@ -1696,6 +1777,7 @@ export default function PortfolioPage() {
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.dividend, item.market)}</td>
                         <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{item.yield_on_cost.toFixed(2)}%</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{refYieldText(item.id)}</td>
                         <td className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${net.netPnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
                           {formatMoney(net.netPnl, item.market)} ({formatPct(net.netPnlPct)})
                         </td>
@@ -1728,7 +1810,7 @@ export default function PortfolioPage() {
                       </tr>
                       {open && (
                         <tr className="border-b border-white/5">
-                          <td colSpan={15} className="px-4 pb-4 pt-2 bg-white/[0.02]">
+                          <td colSpan={16} className="px-4 pb-4 pt-2 bg-white/[0.02]">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                               <NetPnlView
                                 market={item.market}
@@ -1800,6 +1882,7 @@ export default function PortfolioPage() {
                           ui={ui}
                         />
                         <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailYield}</p><p>{item.yield_on_cost.toFixed(2)}%</p></div>
+                        <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailRefYield}</p><p>{refYieldText(item.id)}</p></div>
                         <div className="col-span-2 md:col-span-4">
                           <p className="text-xs text-[var(--text-secondary)]">{ui.detailCreatedAt}</p>
                           <p className="text-xs">{(item.created_at || '').replace('T', ' ')}</p>

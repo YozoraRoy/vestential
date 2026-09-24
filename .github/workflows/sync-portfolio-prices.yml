@@ -1,0 +1,37 @@
+name: Sync portfolio prices (post-close holdings refresh)
+
+on:
+  schedule:
+    # 每個台灣交易日（UTC 08:00 = TW 16:00，盤後）同步全持倉現價；
+    # 假日由 API 內 isTwseTradingDay(taipeiTodayStr()) 再擋一次（回 skipped，不算失敗）。
+    - cron: '0 8 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Trigger portfolio price sync (all users + guest_uid)
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          CODE=$(curl -s -o /tmp/pf_sync.json -w "%{http_code}" \
+            --max-time 240 \
+            -X POST \
+            -H "Authorization: Bearer $SYNC_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://vestential.com/api/portfolio/sync")
+          echo "HTTP $CODE"
+          cat /tmp/pf_sync.json
+          echo ""
+          if [ "$CODE" != "200" ]; then
+            echo "::error::portfolio sync trigger failed (HTTP $CODE)"
+            exit 1
+          fi
+          OK=$(python3 -c "import sys,json;d=json.load(open('/tmp/pf_sync.json'));print(str(d.get('success', False)))")
+          if [ "$OK" != "True" ]; then
+            echo "::error::portfolio sync returned success=false"
+            exit 1
+          fi
+          echo "::notice::portfolio sync done: $(python3 -c "import sys,json;d=json.load(open('/tmp/pf_sync.json'));print('scanned=%s updated=%s failed=%s skipped=%s' % (d.get('scanned'), d.get('updated'), len(d.get('failed',[])), d.get('skipped', False)))")"

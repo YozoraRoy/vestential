@@ -198,6 +198,7 @@ function getSqliteDb(): Database.Database | null {
         recommendation TEXT,
         summary TEXT,
         report_json TEXT,
+        price_synced_at TEXT,
         created_at TEXT DEFAULT (datetime('now', 'localtime'))
       );
       CREATE INDEX IF NOT EXISTS idx_portfolio_user ON portfolio_records(user_id, id);
@@ -326,6 +327,10 @@ function getSqliteDb(): Database.Database | null {
     // 既有 portfolio_records 表補上 guest_uid（冪等；全新 DB 的 column 已存在時 ALTER 會拋錯，故獨立 try/catch）。
     try {
       _db.exec('ALTER TABLE portfolio_records ADD COLUMN guest_uid TEXT;')
+    } catch {}
+    // Issue #33：現價同步時間戳（冪等；migration 025 亦 covering，既有庫走任一條都可）。
+    try {
+      _db.exec('ALTER TABLE portfolio_records ADD COLUMN price_synced_at TEXT;')
     } catch {}
     try {
       _db.exec('CREATE INDEX IF NOT EXISTS idx_portfolio_guest ON portfolio_records(guest_uid, id)')
@@ -773,6 +778,7 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
           recommendation       NVARCHAR(20),
           summary              NVARCHAR(MAX),
           report_json          NVARCHAR(MAX),
+          price_synced_at      DATETIME,
           created_at           DATETIME DEFAULT GETDATE()
         );
         CREATE INDEX idx_portfolio_user ON portfolio_records(user_id, id);
@@ -783,6 +789,8 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
     await _pool.request().query(`
       IF COL_LENGTH('portfolio_records', 'guest_uid') IS NULL
         ALTER TABLE portfolio_records ADD guest_uid NVARCHAR(64);
+      IF COL_LENGTH('portfolio_records', 'price_synced_at') IS NULL
+        ALTER TABLE portfolio_records ADD price_synced_at DATETIME;
       IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_portfolio_guest')
         CREATE INDEX idx_portfolio_guest ON portfolio_records(guest_uid, id);
       IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'claim_codes')
@@ -2370,6 +2378,7 @@ export interface PortfolioRecord {
   recommendation?: string | null
   summary?: string | null
   report_json?: string | null
+  price_synced_at?: string | null
   created_at?: string
 }
 
@@ -2398,7 +2407,7 @@ export interface PortfolioRecordInput {
 
 const PORTFOLIO_COLUMNS =
   'id, user_id, guest_uid, market, symbol, symbol_name, shares, cost, current_price, dividend, cost_basis, market_value, ' +
-  'unrealized_pnl, unrealized_pnl_pct, total_return, total_return_pct, yield_on_cost, strategy, recommendation, summary, report_json, created_at'
+  'unrealized_pnl, unrealized_pnl_pct, total_return, total_return_pct, yield_on_cost, strategy, recommendation, summary, report_json, price_synced_at, created_at'
 
 export async function savePortfolioRecord(record: PortfolioRecordInput): Promise<number> {
   const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19)
@@ -2494,6 +2503,7 @@ export async function savePortfolioRecord(record: PortfolioRecordInput): Promise
     recommendation: recommendationStr,
     summary: summaryStr,
     report_json: reportStr,
+    price_synced_at: null,
     created_at: nowStr,
   }
   portfolioMemoryStore.unshift(row)
@@ -2813,6 +2823,138 @@ export async function updatePortfolioRecord(
   row.yield_on_cost = patch.yieldOnCost
   row.strategy = strategyStr
   return true
+}
+
+// ─── Portfolio 現價同步（Issue #33）───────────────────────────────────
+// 只更新現價＋衍生欄位＋price_synced_at；dividend（使用者手填股息）絕不異動。
+
+export interface PortfolioSyncedPricePatch {
+  currentPrice: number
+  marketValue: number
+  unrealizedPnl: number
+  unrealizedPnlPct: number
+  totalReturn: number
+  totalReturnPct: number
+  /** 'YYYY-MM-DD HH:mm:ss'；呼叫端（sync route）統一產生，排程重跑冪等＝最後一次寫入為準。 */
+  syncedAt: string
+}
+
+/**
+ * 以現價覆寫一筆持倉（server-trusted：呼叫端已把 id 限定在持有人範圍內，故此處不做 owner 檢查）。
+ * dividend／cost_basis／yield_on_cost 不碰。
+ */
+export async function updatePortfolioSyncedPrice(
+  id: number,
+  patch: PortfolioSyncedPricePatch,
+): Promise<boolean> {
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (!pool) return false
+    try {
+      const result = await pool.request()
+        .input('id', sql.Int, id)
+        .input('currentPrice', sql.Float, patch.currentPrice)
+        .input('marketValue', sql.Float, patch.marketValue)
+        .input('pnl', sql.Float, patch.unrealizedPnl)
+        .input('pnlPct', sql.Float, patch.unrealizedPnlPct)
+        .input('totalReturn', sql.Float, patch.totalReturn)
+        .input('totalReturnPct', sql.Float, patch.totalReturnPct)
+        .input('syncedAt', sql.NVarChar(19), patch.syncedAt)
+        .query(`
+          UPDATE portfolio_records SET
+            current_price = @currentPrice, market_value = @marketValue,
+            unrealized_pnl = @pnl, unrealized_pnl_pct = @pnlPct,
+            total_return = @totalReturn, total_return_pct = @totalReturnPct,
+            price_synced_at = @syncedAt
+          WHERE id = @id
+        `)
+      return (result.rowsAffected[0] ?? 0) > 0
+    } catch (e) {
+      console.error('[AzureSQL] updatePortfolioSyncedPrice error:', e)
+      return false
+    }
+  }
+  const db = getSqliteDb()
+  if (db) {
+    try {
+      const info = db.prepare(`
+        UPDATE portfolio_records SET
+          current_price = ?, market_value = ?,
+          unrealized_pnl = ?, unrealized_pnl_pct = ?,
+          total_return = ?, total_return_pct = ?,
+          price_synced_at = ?
+        WHERE id = ?
+      `).run(
+        patch.currentPrice, patch.marketValue,
+        patch.unrealizedPnl, patch.unrealizedPnlPct,
+        patch.totalReturn, patch.totalReturnPct,
+        patch.syncedAt,
+        id,
+      )
+      if (info.changes > 0) return true
+    } catch (e) {
+      console.error('[SQLite] updatePortfolioSyncedPrice error:', e)
+      return false
+    }
+  }
+  const row = portfolioMemoryStore.find(r => r.id === id)
+  if (!row) return false
+  row.current_price = patch.currentPrice
+  row.market_value = patch.marketValue
+  row.unrealized_pnl = patch.unrealizedPnl
+  row.unrealized_pnl_pct = patch.unrealizedPnlPct
+  row.total_return = patch.totalReturn
+  row.total_return_pct = patch.totalReturnPct
+  row.price_synced_at = patch.syncedAt
+  return true
+}
+
+export interface PortfolioSyncTarget {
+  id: number
+  user_id: number
+  guest_uid?: string | null
+  market: 'tw' | 'us'
+  symbol: string
+  shares: number
+  cost: number
+  dividend: number
+}
+
+/** 排程全掃用：id 升冪分頁（limit／offset），呼叫端以 MAX_SYNC_RECORDS_PER_RUN 封頂。 */
+export async function listPortfolioRecordsForSync(limit: number = 200, offset: number = 0): Promise<PortfolioSyncTarget[]> {
+  const cols = 'id, user_id, guest_uid, market, symbol, shares, cost, dividend'
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('limit', sql.Int, limit)
+          .input('offset', sql.Int, offset)
+          .query(`
+            SELECT ${cols} FROM portfolio_records
+            ORDER BY id ASC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+          `)
+        return result.recordset as PortfolioSyncTarget[]
+      } catch (e) {
+        console.error('[AzureSQL] listPortfolioRecordsForSync error:', e)
+      }
+    }
+  } else {
+    const db = getSqliteDb()
+    if (db) {
+      try {
+        return db.prepare(`
+          SELECT ${cols} FROM portfolio_records ORDER BY id ASC LIMIT ? OFFSET ?
+        `).all(limit, offset) as PortfolioSyncTarget[]
+      } catch (e) {
+        console.error('[SQLite] listPortfolioRecordsForSync error:', e)
+      }
+    }
+  }
+  return portfolioMemoryStore.slice(offset, offset + limit).map(r => ({
+    id: r.id!, user_id: r.user_id, guest_uid: r.guest_uid, market: r.market,
+    symbol: r.symbol, shares: r.shares, cost: r.cost, dividend: r.dividend,
+  }))
 }
 
 // ─── Trade Journal（交易日誌，Issue #21）───────────────────────────

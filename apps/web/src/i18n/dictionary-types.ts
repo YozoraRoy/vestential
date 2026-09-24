@@ -737,6 +737,19 @@ export interface Dict {
     sortAsc: string
     sortDesc: string
     colRating: string
+    syncPricesBtn: string
+    syncSyncing: string
+    syncUpdatedAt: string
+    syncNonRealtime: string
+    colRefYield: string
+    detailRefYield: string
+    syncDone: string
+    syncFailedTitle: string
+    syncFailedItem: string
+    syncReasonQuote: string
+    syncReasonResolve: string
+    syncReasonSave: string
+    syncError: string
   }
   cycleEntry: {
     metaTitle: string

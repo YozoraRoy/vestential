@@ -139,6 +139,183 @@ export async function fetchLiveQuote(rawSymbol: string, market: Market): Promise
   }
 }
 
+// ─── #33：持倉現價批量同步＋殖利率參考 ────────────────────────────
+// 限流數值（實作註明）：
+// - Yahoo v7 批量報價每批 ≤100 檔（fetchBatchQuotes 上限），批間已有 300ms 間隔；
+// - 批量未命中才走單檔 fallback，逐檔間隔 SINGLE_GAP_MS＝200ms；
+// - 殖利率（quoteSummary）單檔成本高：並行 FUND_CONCURRENCY＝5、批間隔 250ms、單檔超時 8s；
+// - 單持有人單次上限 200 筆、排程全掃單次上限 2000 筆（訪客全表量級未知，封頂＋id 分頁）。
+export const PORTFOLIO_SYNC_BATCH_SIZE = 100
+export const PORTFOLIO_SYNC_SINGLE_GAP_MS = 200
+export const PORTFOLIO_SYNC_FUND_CONCURRENCY = 5
+export const PORTFOLIO_SYNC_FUND_GAP_MS = 250
+export const PORTFOLIO_SYNC_FUND_TIMEOUT_MS = 8000
+export const PORTFOLIO_SYNC_MAX_PER_REQUEST = 200
+export const PORTFOLIO_SYNC_MAX_PER_RUN = 2000
+
+function syncSleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)
+    p.then(
+      (v) => { if (timer) clearTimeout(timer); resolve(v) },
+      (e) => { if (timer) clearTimeout(timer); reject(e) },
+    )
+  })
+}
+
+/** Yahoo 限流訊號（429／rate limit／too many）；命中時呼叫端記 log＋告警（告警靠 #24 去重 30 分鐘節流）。 */
+export function isQuoteRateLimited(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e ?? '')
+  return /429|rate.?limit|too many/i.test(msg)
+}
+
+/**
+ * 殖利率參考：取 Yahoo dividendYield（小數，如 0.035＝3.5%）。
+ * 有值回傳、無值／失敗回 null（UI 顯示 —）；絕不寫入 dividend 手填欄位。
+ */
+export async function fetchDividendYield(rawSymbol: string, market: Market): Promise<number | null> {
+  try {
+    const symbol = await resolveYahooSymbol(rawSymbol, market)
+    const f = await withTimeout(
+      yahooFinanceProvider.getFundamentals(symbol, market === 'tw' ? 'TW' : 'US'),
+      PORTFOLIO_SYNC_FUND_TIMEOUT_MS,
+    )
+    const y = f?.dividendYield
+    return typeof y === 'number' && Number.isFinite(y) && y >= 0 ? y : null
+  } catch {
+    return null
+  }
+}
+
+export interface SyncableHolding {
+  id: number
+  market: Market
+  symbol: string
+  shares: number
+  cost: number
+  dividend: number
+}
+
+export interface SyncedHolding {
+  id: number
+  symbol: string
+  price: number
+  /** Yahoo dividendYield（小數）；未取／無值為 null。僅參考顯示，不寫 dividend。 */
+  dividendYield: number | null
+}
+
+export type SyncFailureReason = 'quote' | 'resolve'
+
+export interface SyncFailure {
+  id: number
+  symbol: string
+  reason: SyncFailureReason
+}
+
+export interface PortfolioSyncResult {
+  updated: SyncedHolding[]
+  failed: SyncFailure[]
+  rateLimited: boolean
+  /** 本次同步時間（'YYYY-MM-DD HH:mm:ss'）；DB 寫入＋API 回傳共用同一值，重跑冪等＝最後一次為準。 */
+  syncedAt: string
+}
+
+/**
+ * 批量同步現價（逐檔 best-effort：單檔失敗不中斷整批）。
+ * - 先批量報價（≤100/批），未命中再單檔 fallback（200ms 間隔）；
+ * - includeYield 時才抓殖利率（並行 5，失敗→null），排程全掃傳 false 省配額；
+ * - dividend 欄全程不碰（只讀傳入，不回寫）。
+ */
+export async function syncPortfolioPrices(
+  holdings: SyncableHolding[],
+  opts?: { includeYield?: boolean },
+): Promise<PortfolioSyncResult> {
+  const syncedAt = new Date().toISOString().replace('T', ' ').substring(0, 19)
+  const updated: SyncedHolding[] = []
+  const failed: SyncFailure[] = []
+  let rateLimited = false
+  const markRateLimited = (e: unknown) => { if (isQuoteRateLimited(e)) rateLimited = true }
+
+  // 1) 解析 Yahoo 代號（失敗直接記失敗，不中斷後續）。
+  const resolved: Array<{ h: SyncableHolding; yahoo: string }> = []
+  for (const h of holdings) {
+    try {
+      resolved.push({ h, yahoo: await resolveYahooSymbol(h.symbol, h.market) })
+    } catch (e) {
+      markRateLimited(e)
+      failed.push({ id: h.id, symbol: h.symbol, reason: 'resolve' })
+    }
+  }
+
+  // 2) 批量報價。整批拋錯也不中斷：全部掉到步驟 3 單檔 fallback。
+  const priceMap = new Map<string, number>()
+  try {
+    for (let i = 0; i < resolved.length; i += PORTFOLIO_SYNC_BATCH_SIZE) {
+      const chunk = resolved.slice(i, i + PORTFOLIO_SYNC_BATCH_SIZE)
+      const batch = await fetchBatchQuotes(chunk.map((r) => r.yahoo))
+      for (const q of batch) {
+        if (typeof q.price === 'number' && q.price > 0 && q.symbol) {
+          priceMap.set(q.symbol.toUpperCase(), q.price)
+        }
+      }
+    }
+  } catch (e) {
+    markRateLimited(e)
+    console.error('[Portfolio] syncPortfolioPrices batch quotes failed, falling back to single quotes:', e)
+  }
+
+  // 3) 批量未命中 → 單檔 fallback（fetchLiveQuote 內部已 catch 回 null）。
+  for (const r of resolved) {
+    if (priceMap.has(r.yahoo.toUpperCase())) continue
+    await syncSleep(PORTFOLIO_SYNC_SINGLE_GAP_MS)
+    const q = await fetchLiveQuote(r.h.symbol, r.h.market)
+    if (q && q.price > 0) priceMap.set(r.yahoo.toUpperCase(), q.price)
+  }
+
+  // 4) 有價 → updated；無價 → failed（代碼＋原因碼，UI 以三語顯示）。
+  const priced: Array<{ h: SyncableHolding; price: number }> = []
+  for (const r of resolved) {
+    const price = priceMap.get(r.yahoo.toUpperCase())
+    if (typeof price === 'number' && price > 0) priced.push({ h: r.h, price })
+    else failed.push({ id: r.h.id, symbol: r.h.symbol, reason: 'quote' })
+  }
+
+  // 5) 殖利率參考（僅需要時；失敗→null，UI 顯示 —）。
+  const yieldMap = new Map<number, number | null>()
+  if (opts?.includeYield && priced.length > 0) {
+    for (let i = 0; i < priced.length; i += PORTFOLIO_SYNC_FUND_CONCURRENCY) {
+      const chunk = priced.slice(i, i + PORTFOLIO_SYNC_FUND_CONCURRENCY)
+      const results = await Promise.all(
+        chunk.map(async (p) => {
+          try {
+            return await fetchDividendYield(p.h.symbol, p.h.market)
+          } catch (e) {
+            markRateLimited(e)
+            return null
+          }
+        }),
+      )
+      chunk.forEach((p, idx) => yieldMap.set(p.h.id, results[idx]))
+      if (i + PORTFOLIO_SYNC_FUND_CONCURRENCY < priced.length) await syncSleep(PORTFOLIO_SYNC_FUND_GAP_MS)
+    }
+  }
+
+  for (const p of priced) {
+    updated.push({
+      id: p.h.id,
+      symbol: p.h.symbol,
+      price: p.price,
+      dividendYield: yieldMap.get(p.h.id) ?? null,
+    })
+  }
+  return { updated, failed, rateLimited, syncedAt }
+}
+
 /**
  * 清掉 OCR 誤讀造成的名稱前導雜訊（如 "2星宇航空" → "星宇航空"）。
  * 只在中文字存在時才清理（避免誤傷合法的英文數字名，如 "2U, Inc."）。
