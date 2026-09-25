@@ -4,7 +4,7 @@ import './globals.css'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { FestivalBanner } from '@/components/festival-banner'
-import { getCurrentFestival } from '@/lib/festival-calendar'
+import { getCurrentFestival, pickFestivalMessage } from '@/lib/festival-calendar'
 import { dictionaries } from '@/i18n/dictionaries'
 import { getCurrentUserFromCookies, isAdminUser } from '@/lib/auth'
 import { LanguageProvider } from '@/i18n/LanguageProvider'
@@ -64,7 +64,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <Header initialUser={initialUser} />
           {festival?.id === 'mid-autumn' && (
             <FestivalBanner
-              message={festivalText.message}
+              message={pickFestivalMessage(festivalText.messages, festival.dateStr)}
               dismissLabel={festivalText.dismiss}
               dateStr={festival.dateStr}
             />

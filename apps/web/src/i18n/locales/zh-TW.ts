@@ -991,7 +991,12 @@ export const zhTW: Dict = {
   },
   festival: {
     midAutumn: {
-      message: '中秋快樂！今晚抬頭看看月亮，Vesty 陪你過節。',
+      messages: [
+        '中秋快樂！今晚抬頭看看月亮，Vestential 陪你過節。',
+        '月餅吃了嗎？Vestential 祝你團圓，好好吃一頓。',
+        '連假賞月烤肉，Vestential 陪你放鬆一下。',
+        '月圓人團圓，Vestential 祝你假期愉快。',
+      ],
       dismiss: '關閉節慶橫幅',
     },
   },

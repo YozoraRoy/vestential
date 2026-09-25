@@ -946,7 +946,7 @@ export interface Dict {
   }
   festival: {
     midAutumn: {
-      message: string
+      messages: string[]
       dismiss: string
     }
   }

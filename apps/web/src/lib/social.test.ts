@@ -83,7 +83,7 @@ const items: MarketFocusItem[] = [
   },
 ]
 
-const DRIVE_CTA = `\n\n完整分析 → ${MARKET_FOCUS_URL}`
+const DRIVE_CTA = `\n\n更多資訊 → ${MARKET_FOCUS_URL}`
 const MAX = 500
 
 /** 建立假 LLM client 並讓 createQuickLLM 回傳它；回傳 generate 供逐平台配置回應。 */

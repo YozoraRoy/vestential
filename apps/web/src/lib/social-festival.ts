@@ -97,7 +97,7 @@ ${injectionGuardNote()}
 2. 用繁體中文（台灣用語），全形標點，直接講重點，不說教、不當人生導師。
 3. ${platformRule[platform]}
 4. ${marketClosed ? '台股當天休市，必須含一句休市問候（部位先放著、好好過節的意思）。' : '不要提及休市。'}
-5. 提到 Vesty（平台吉祥物）陪大家過節一次即可。
+5. 提到 Vestential 陪大家過節一次即可。
 6. 總長度不超過 ${FESTIVAL_MAX_CHARS} 字；文中不要放網址。
 7. 禁用贅詞（值得注意的是、不可否認、總而言之、總結來說）；禁用「不是 A 而是 B」句型。
 8. 只輸出文案本身，不要輸出 JSON 或其他文字。`
@@ -109,7 +109,7 @@ export function buildFestivalFallbackCaptions(id: FestivalId, dateStr?: string):
   const day = dateStr ?? ''
   const closedLine = day && isFestivalMarketClosed(day) ? '台股今天休市，部位先放著，好好吃一頓。' : ''
   const year = day.slice(0, 4)
-  const core = `🌕 中秋快樂${year ? `（${year}）` : ''}！Vesty 陪你賞月吃月餅。${closedLine}`
+  const core = `🌕 中秋快樂${year ? `（${year}）` : ''}！Vestential 陪你賞月吃月餅。${closedLine}`
   return {
     instagram: trimToChars(`${core}\n\n月圓，部位也要圓。\n\n#中秋節 #台股 #Vestential #月餅節快樂`, FESTIVAL_MAX_CHARS),
     threads: trimToChars(`${core}今晚抬頭看看月亮吧。`, FESTIVAL_MAX_CHARS),

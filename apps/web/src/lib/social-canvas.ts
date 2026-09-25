@@ -283,7 +283,7 @@ function renderFestival(
   maxWidth: number,
 ) {
   const title = festival?.title?.trim() || '中秋快樂'
-  const subtitle = festival?.subtitle?.trim() || '月圓人團圓，Vesty 陪你走長期投資的路'
+  const subtitle = festival?.subtitle?.trim() || '月圓人團圓，Vestential 陪你走長期投資的路'
 
   // ── 金色滿月 ──────────────────────────────────────────────────
   ctx.save()
@@ -304,7 +304,7 @@ function renderFestival(
   ctx.rotate(-Math.PI / 26)
   ctx.font = `700 34px "${FONT_NAME}"`
   ctx.fillStyle = '#facc15'
-  ctx.fillText('VESTY × 中秋', 0, 0)
+  ctx.fillText('Vestential × 中秋', 0, 0)
   ctx.restore()
 
   // ── 大字賀詞（自適應縮放，最多 2 行）──────────────────────────
@@ -380,12 +380,12 @@ function drawCtaBottom(ctx: any) {
   ctx.textBaseline = 'middle'
   let ctaFontSize = 44
   ctx.font = `700 ${ctaFontSize}px "${FONT_NAME}"`
-  while (ctx.measureText(`完整分析 → vestential.com/market-focus`).width > ctaW - 32 && ctaFontSize > 28) {
+  while (ctx.measureText(`更多資訊 → vestential.com/market-focus`).width > ctaW - 32 && ctaFontSize > 28) {
     ctaFontSize -= 2
     ctx.font = `700 ${ctaFontSize}px "${FONT_NAME}"`
   }
   ctx.fillStyle = '#ffffff'
-  ctx.fillText('完整分析 → vestential.com/market-focus', CARD_W / 2, ctaY + ctaH / 2)
+  ctx.fillText('更多資訊 → vestential.com/market-focus', CARD_W / 2, ctaY + ctaH / 2)
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
 

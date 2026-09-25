@@ -17,10 +17,10 @@ const FB_MAX_CHARS = 500
 // 導流 URL：FB/Threads 內文結尾附上（可點＋OG 預覽卡）；IG 文中網址不可點，
 // 改由發布層自動貼到「第一則留言」（IG_DRIVE_COMMENT），body 用滿字數上限。
 export const MARKET_FOCUS_URL = 'https://vestential.com/market-focus'
-const DRIVE_CTA = `\n\n完整分析 → ${MARKET_FOCUS_URL}`
+const DRIVE_CTA = `\n\n更多資訊 → ${MARKET_FOCUS_URL}`
 const DRIVE_CTA_LEN = Array.from(DRIVE_CTA).length
 /** IG 發布後自動貼上的第一則留言（導流）。 */
-export const IG_DRIVE_COMMENT = `完整分析 → ${MARKET_FOCUS_URL}`
+export const IG_DRIVE_COMMENT = `更多資訊 → ${MARKET_FOCUS_URL}`
 
 export interface SocialCaptions {
   instagram: string

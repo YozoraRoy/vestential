@@ -539,7 +539,7 @@ export function SocialClient() {
                     onChange={(e) => setDraftIg(e.target.value)}
                   />
                   <p className="text-xs text-[var(--text-secondary)] mt-1">
-                    🔗 導流「{preview.igDriveComment ?? '完整分析 → vestential.com/market-focus'}」會在發布後自動放上第一則留言（IG caption 網址不可點）。
+                    🔗 導流「{preview.igDriveComment ?? '更多資訊 → vestential.com/market-focus'}」會在發布後自動放上第一則留言（IG caption 網址不可點）。
                   </p>
                 </div>
               </Card>

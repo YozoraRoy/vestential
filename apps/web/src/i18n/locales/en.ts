@@ -991,7 +991,12 @@ export const en: Dict = {
   },
   festival: {
     midAutumn: {
-      message: 'Happy Mid-Autumn Festival! Look up at the full moon tonight — Vesty celebrates with you.',
+      messages: [
+        'Happy Mid-Autumn Festival! Look up at the moon tonight — Vestential celebrates with you.',
+        'Had your mooncakes yet? Vestential wishes you a warm reunion.',
+        'Moon-gazing and barbecue season — take a breather with Vestential.',
+        'Round moon, warm reunion — Vestential wishes you a great holiday.',
+      ],
       dismiss: 'Dismiss festival banner',
     },
   },

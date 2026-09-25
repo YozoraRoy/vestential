@@ -991,7 +991,12 @@ export const ja: Dict = {
   },
   festival: {
     midAutumn: {
-      message: '中秋節おめでとう！今夜は満月を見上げて、Vestyと一緒にお祝いしましょう。',
+      messages: [
+        '中秋節おめでとう！今夜は月を見上げて、Vestentialと一緒にお祝いしましょう。',
+        '月餅はもう食べた？Vestentialが温かな団らんを願っています。',
+        '月見とバーベキューの季節、Vestentialとひと息つきましょう。',
+        'まんまるの月、温かな団らん。Vestentialが素敵な休日を願っています。',
+      ],
       dismiss: 'お知らせを閉じる',
     },
   },
