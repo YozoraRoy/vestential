@@ -755,6 +755,15 @@ export interface Dict {
     syncReasonResolve: string
     syncReasonSave: string
     syncError: string
+    divYtdEst: string
+    divYtdFormula: string
+    divReasonNonTrading: string
+    divReasonPending: string
+    divReasonEmpty: string
+    helpYield: string
+    helpRefYield: string
+    helpDividend: string
+    helpNet: string
   }
   cycleEntry: {
     metaTitle: string

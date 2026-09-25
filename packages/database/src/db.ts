@@ -30,6 +30,8 @@ const memoryStore: AnalysisRecord[] = []
 let memoryIdCounter = 1
 const portfolioMemoryStore: PortfolioRecord[] = []
 let portfolioMemoryIdCounter = 1
+// Issue #35：TWSE 除息快取記憶體兜底（SQLite/Azure 皆不可用時；僅程序生命週期內有效）。
+const twseDividendMemoryStore: TwseDividendRow[] = []
 
 // ─── SQLite connection ───────────────────────────────────────────
 function getSqliteDb(): Database.Database | null {
@@ -572,6 +574,18 @@ CREATE TABLE IF NOT EXISTS market_focus_subscribers (
       );
       CREATE INDEX IF NOT EXISTS idx_trade_journal_user ON trade_journal(user_id, id);
       CREATE INDEX IF NOT EXISTS idx_trade_journal_date ON trade_journal(user_id, trade_date);
+
+      -- Issue #35：TWSE 除息快取（TWT48U；UNIQUE 防重抓冪等）。
+      CREATE TABLE IF NOT EXISTS twse_dividends (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT NOT NULL,
+        ex_date TEXT NOT NULL,
+        cash_dividend REAL NOT NULL,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE (symbol, ex_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_twse_dividends_ex_date ON twse_dividends(ex_date);
+      CREATE INDEX IF NOT EXISTS idx_twse_dividends_symbol ON twse_dividends(symbol);
 
     `)
 
@@ -1246,6 +1260,23 @@ async function getAzurePool(): Promise<sql.ConnectionPool | null> {
         );
         CREATE INDEX idx_trade_journal_user ON trade_journal(user_id, id);
         CREATE INDEX idx_trade_journal_date ON trade_journal(user_id, trade_date);
+      END
+    `)
+
+    // Issue #35：TWSE 除息快取（TWT48U；UNIQUE 防重抓冪等）。
+    await _pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'twse_dividends')
+      BEGIN
+        CREATE TABLE twse_dividends (
+          id            INT IDENTITY(1,1) PRIMARY KEY,
+          symbol        NVARCHAR(30) NOT NULL,
+          ex_date       NVARCHAR(20) NOT NULL,
+          cash_dividend FLOAT NOT NULL,
+          created_at    DATETIME2 DEFAULT GETDATE(),
+          CONSTRAINT uq_twse_dividends UNIQUE (symbol, ex_date)
+        );
+        CREATE INDEX idx_twse_dividends_ex_date ON twse_dividends(ex_date);
+        CREATE INDEX idx_twse_dividends_symbol ON twse_dividends(symbol);
       END
     `)
 
@@ -2955,6 +2986,156 @@ export async function listPortfolioRecordsForSync(limit: number = 200, offset: n
     id: r.id!, user_id: r.user_id, guest_uid: r.guest_uid, market: r.market,
     symbol: r.symbol, shares: r.shares, cost: r.cost, dividend: r.dividend,
   }))
+}
+
+// ─── TWSE 除息快取（Issue #35，TWT48U）─────────────────────────────
+export interface TwseDividendRow {
+  id?: number
+  symbol: string
+  /** 除息日 'YYYY-MM-DD'（即 TWT48U date 參數所指日期，YTD 以此歸屬年份）。 */
+  ex_date: string
+  /** 每股現金股利（元）。 */
+  cash_dividend: number
+  created_at?: string
+}
+
+export interface TwseDividendInput {
+  symbol: string
+  ex_date: string
+  cash_dividend: number
+}
+
+const TWSE_DIVIDEND_COLUMNS = 'id, symbol, ex_date, cash_dividend, created_at'
+
+function normalizeTwseDividendInput(r: TwseDividendInput): TwseDividendInput | null {
+  const symbol = (r.symbol ?? '').trim().toUpperCase()
+  const exDate = (r.ex_date ?? '').trim()
+  const cash = Number(r.cash_dividend)
+  if (!symbol || !/^\d{4}-\d{2}-\d{2}$/.test(exDate)) return null
+  if (!Number.isFinite(cash) || cash < 0) return null
+  return { symbol, ex_date: exDate, cash_dividend: cash }
+}
+
+/**
+ * 寫入除息快取（UNIQUE(symbol, ex_date) 冪等：重抓直接覆寫，不產生重複列）。
+ * 回傳實際寫入筆數（非法列直接略過，不 throw、不擋主流程）。
+ */
+export async function upsertTwseDividends(rows: TwseDividendInput[]): Promise<number> {
+  const clean = rows.map(normalizeTwseDividendInput).filter((r): r is TwseDividendInput => r != null)
+  if (clean.length === 0) return 0
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      let written = 0
+      for (const r of clean) {
+        try {
+          await pool.request()
+            .input('symbol', sql.NVarChar(30), r.symbol)
+            .input('exDate', sql.NVarChar(20), r.ex_date)
+            .input('cash', sql.Float, r.cash_dividend)
+            .query(`
+              IF EXISTS (SELECT 1 FROM twse_dividends WHERE symbol = @symbol AND ex_date = @exDate)
+                UPDATE twse_dividends SET cash_dividend = @cash WHERE symbol = @symbol AND ex_date = @exDate
+              ELSE
+                INSERT INTO twse_dividends (symbol, ex_date, cash_dividend) VALUES (@symbol, @exDate, @cash)
+            `)
+          written++
+        } catch (e) {
+          console.error('[AzureSQL] upsertTwseDividends error:', e)
+        }
+      }
+      return written
+    }
+  } else {
+    const db = getSqliteDb()
+    if (db) {
+      try {
+        const stmt = db.prepare(`
+          INSERT INTO twse_dividends (symbol, ex_date, cash_dividend)
+          VALUES (?, ?, ?)
+          ON CONFLICT(symbol, ex_date) DO UPDATE SET cash_dividend = excluded.cash_dividend
+        `)
+        const tx = db.transaction((list: TwseDividendInput[]) => {
+          for (const r of list) stmt.run(r.symbol, r.ex_date, r.cash_dividend)
+        })
+        tx(clean)
+        return clean.length
+      } catch (e) {
+        console.error('[SQLite] upsertTwseDividends error:', e)
+        return 0
+      }
+    }
+  }
+  // 記憶體兜底（同鍵覆寫）。
+  for (const r of clean) {
+    const idx = twseDividendMemoryStore.findIndex(m => m.symbol === r.symbol && m.ex_date === r.ex_date)
+    if (idx >= 0) twseDividendMemoryStore[idx] = { ...twseDividendMemoryStore[idx], cash_dividend: r.cash_dividend }
+    else twseDividendMemoryStore.push({ id: twseDividendMemoryStore.length + 1, ...r })
+  }
+  return clean.length
+}
+
+/** 取某年全部除息快取（ex_date LIKE 'YYYY-%'），供 YTD 估算。 */
+export async function getTwseDividendsByYear(year: string): Promise<TwseDividendRow[]> {
+  if (!/^\d{4}$/.test(year)) return []
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('prefix', sql.NVarChar(8), `${year}-%`)
+          .query(`SELECT ${TWSE_DIVIDEND_COLUMNS} FROM twse_dividends WHERE ex_date LIKE @prefix ORDER BY ex_date ASC`)
+        return result.recordset as TwseDividendRow[]
+      } catch (e) {
+        console.error('[AzureSQL] getTwseDividendsByYear error:', e)
+      }
+    }
+  } else {
+    const db = getSqliteDb()
+    if (db) {
+      try {
+        return db.prepare(
+          `SELECT ${TWSE_DIVIDEND_COLUMNS} FROM twse_dividends WHERE ex_date LIKE ? ORDER BY ex_date ASC`,
+        ).all(`${year}-%`) as TwseDividendRow[]
+      } catch (e) {
+        console.error('[SQLite] getTwseDividendsByYear error:', e)
+      }
+    }
+  }
+  return twseDividendMemoryStore
+    .filter(m => m.ex_date.startsWith(`${year}-`))
+    .sort((a, b) => (a.ex_date < b.ex_date ? -1 : 1))
+}
+
+/** 某除息日是否已有快取（排程／同步鈕「缺檔才抓」的判斷依據）。 */
+export async function hasTwseDividendsForDate(exDate: string): Promise<boolean> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(exDate)) return false
+  if (isAzureSql) {
+    const pool = await getAzurePool()
+    if (pool) {
+      try {
+        const result = await pool.request()
+          .input('exDate', sql.NVarChar(20), exDate)
+          .query('SELECT COUNT(*) AS cnt FROM twse_dividends WHERE ex_date = @exDate')
+        return Number(result.recordset?.[0]?.cnt ?? 0) > 0
+      } catch (e) {
+        console.error('[AzureSQL] hasTwseDividendsForDate error:', e)
+        return false
+      }
+    }
+  } else {
+    const db = getSqliteDb()
+    if (db) {
+      try {
+        const row = db.prepare('SELECT COUNT(*) AS cnt FROM twse_dividends WHERE ex_date = ?').get(exDate) as { cnt: number }
+        return Number(row?.cnt ?? 0) > 0
+      } catch (e) {
+        console.error('[SQLite] hasTwseDividendsForDate error:', e)
+        return false
+      }
+    }
+  }
+  return twseDividendMemoryStore.some(m => m.ex_date === exDate)
 }
 
 // ─── Trade Journal（交易日誌，Issue #21）───────────────────────────

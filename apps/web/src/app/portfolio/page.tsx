@@ -1,12 +1,14 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { TrendingUp, Zap, RefreshCw, Sparkles, History, ChevronDown, ChevronUp, Upload, Trash2, CheckCircle2, Plus, X, Search, Pencil } from 'lucide-react'
 import { searchStocks, StockCandidateList } from '@/components/stock-search'
 import PortfolioRiskPanel, { type RiskQuotaValue, type RiskSummaryValue } from '@/components/portfolio-risk-panel'
 import { computeNetPnL, DEFAULT_FEE_DISCOUNT } from '@/lib/portfolio-net'
 import type { DividendYieldReason } from '@/lib/portfolio'
+import { estimateDividendYtd, type DividendYtdEntry } from '@/lib/portfolio-dividends'
 import { buildHoldingsHash, findRiskSummariesByDate, getTaiwanDateStrClient, pruneOldRiskSummaries, saveRiskSummary } from '@/lib/risk-summary-cache'
 import { useI18n } from '@/i18n/LanguageProvider'
 import { parseJsonSafe, parseSseJson } from '@/lib/safe-parse'
@@ -290,6 +292,9 @@ export default function PortfolioPage() {
   // #33/#34：同步殖利率參考值（recordId→小數）＋缺值原因（recordId→三態）。
   const [syncYields, setSyncYields] = useState<Record<number, number | null>>({})
   const [syncYieldReasons, setSyncYieldReasons] = useState<Record<number, DividendYieldReason>>({})
+  // #35：TWSE 除息快取（當年）＋無檔原因碼（API reason 原字串，顯示時轉三語）。
+  const [divRows, setDivRows] = useState<DividendYtdEntry[]>([])
+  const [divReason, setDivReason] = useState<string | null>(null)
   const sortedHistory = useMemo(() => {
     if (!sortKey) return history
     const arr = [...history]
@@ -401,6 +406,31 @@ export default function PortfolioPage() {
     setRiskQuota(q)
     window.dispatchEvent(new Event('quota-updated'))
   }, [])
+
+  // #35：除息快取讀取（唯讀；抓取由同步鈕／排程順帶做，此處不觸發）。
+  // 持倉變動時重抓當年台股快取（symbols 去重；美股不估算故不帶）。
+  useEffect(() => {
+    const twSymbols = [...new Set(history.filter((r) => r.market !== 'us').map((r) => r.symbol.toUpperCase()))]
+    if (twSymbols.length === 0) {
+      setDivRows([])
+      setDivReason(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/portfolio/dividends?symbols=${encodeURIComponent(twSymbols.join(','))}`)
+        const data = await parseJsonSafe(res, safeMsg)
+        if (!cancelled && data?.success) {
+          setDivRows(Array.isArray(data.dividends) ? data.dividends : [])
+          setDivReason(typeof data.reason === 'string' ? data.reason : null)
+        }
+      } catch {}
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [history])
 
   const [authMode, setAuthMode] = useState<'loading' | 'user' | 'guest'>('loading')
   const [claimOpen, setClaimOpen] = useState(false)
@@ -1111,6 +1141,28 @@ export default function PortfolioPage() {
     return latest
   }, [history])
 
+  // #35：YTD 估算（recordId→{total,count}；僅台股且有計入事件才列，手填 dividend 不動）。
+  const divToday = getTaiwanDateStrClient()
+  const ytdById = useMemo(() => {
+    const m = new Map<number, { total: number; count: number }>()
+    for (const r of history) {
+      if (r.market === 'us') continue
+      const est = estimateDividendYtd(r.symbol, r.shares, r.created_at, divRows, divToday)
+      if (est.count > 0) m.set(r.id, { total: est.total, count: est.count })
+    }
+    return m
+  }, [history, divRows, divToday])
+  // #35：無檔原因（三語；null＝正常不顯示）。
+  const divReasonText: string | null =
+    divReason === 'non-trading-day' ? ui.divReasonNonTrading
+    : divReason === 'cache-pending' ? ui.divReasonPending
+    : divReason === 'empty-file' ? ui.divReasonEmpty
+    : null
+  const ytdEstText = (id: number, market: Market) => {
+    const y = ytdById.get(id)
+    return y ? ui.divYtdEst.replace('{amount}', formatMoney(y.total, market)) : null
+  }
+
   const ratingColor = (rating?: string | null) => (rating ? RATING_STYLE[rating]?.text || 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]')
 
   const expandHistory = (item: HistoryItem) => {
@@ -1703,6 +1755,7 @@ export default function PortfolioPage() {
                   currentPrice={savedResult.currentPrice}
                   discount={feeDiscount}
                   ui={ui}
+                  helpText={ui.helpNet}
                 />
               </div>
             </div>
@@ -1882,6 +1935,15 @@ export default function PortfolioPage() {
             </ul>
           </div>
         )}
+        {/* #35：YTD 估算公式註腳＋除息快取無檔原因（非空白顯示，不報錯當機）。 */}
+        {listTab === 'positions' && history.length > 0 && (
+          <>
+            <p className="text-[10px] text-[var(--text-secondary)] mb-2">{ui.divYtdFormula}</p>
+            {divReasonText && (
+              <p className="text-[11px] text-amber-400/90 mb-3">{divReasonText}</p>
+            )}
+          </>
+        )}
         {listTab === 'risk' ? (
           <PortfolioRiskPanel
             ui={ui}
@@ -1956,22 +2018,34 @@ export default function PortfolioPage() {
                   )}
                   {visibleColumns.dividend && (
                     <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
-                      <RecordsSortHeader label={ui.detailDividend} active={sortKey === 'dividend'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('dividend')} />
+                      <span className="inline-flex items-center gap-1">
+                        <RecordsSortHeader label={ui.detailDividend} active={sortKey === 'dividend'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('dividend')} />
+                        <FieldHelp text={ui.helpDividend} />
+                      </span>
                     </th>
                   )}
                   {visibleColumns.yield && (
                     <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
-                      <RecordsSortHeader label={ui.detailYield} active={sortKey === 'yield'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('yield')} />
+                      <span className="inline-flex items-center gap-1">
+                        <RecordsSortHeader label={ui.detailYield} active={sortKey === 'yield'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('yield')} />
+                        <FieldHelp text={ui.helpYield} />
+                      </span>
                     </th>
                   )}
                   {visibleColumns.refYield && (
                     <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
-                      <RecordsSortHeader label={ui.colRefYield} active={sortKey === 'refYield'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('refYield')} />
+                      <span className="inline-flex items-center gap-1">
+                        <RecordsSortHeader label={ui.colRefYield} active={sortKey === 'refYield'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('refYield')} />
+                        <FieldHelp text={ui.helpRefYield} />
+                      </span>
                     </th>
                   )}
                   {visibleColumns.net && (
                     <th className="px-3 py-2 whitespace-nowrap font-medium text-right">
-                      <RecordsSortHeader label={ui.netTitle} active={sortKey === 'net'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('net')} />
+                      <span className="inline-flex items-center gap-1">
+                        <RecordsSortHeader label={ui.netTitle} active={sortKey === 'net'} dir={sortDir} ascLabel={ui.sortAsc} descLabel={ui.sortDesc} onToggle={() => toggleSort('net')} />
+                        <FieldHelp text={ui.helpNet} />
+                      </span>
                     </th>
                   )}
                   {visibleColumns.created && (
@@ -2015,7 +2089,14 @@ export default function PortfolioPage() {
                             {formatMoney(item.total_return, item.market)} {formatPct(item.total_return_pct)}
                           </td>
                         )}
-                        {visibleColumns.dividend && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{formatMoney(item.dividend, item.market)}</td>}
+                        {visibleColumns.dividend && (
+                          <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">
+                            {formatMoney(item.dividend, item.market)}
+                            {ytdEstText(item.id, item.market) && (
+                              <div className="text-[10px] font-normal text-[var(--accent)]">{ytdEstText(item.id, item.market)}</div>
+                            )}
+                          </td>
+                        )}
                         {visibleColumns.yield && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums">{item.yield_on_cost.toFixed(2)}%</td>}
                         {visibleColumns.refYield && <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{refYieldText(item.id)}</td>}
                         {visibleColumns.net && (
@@ -2062,6 +2143,7 @@ export default function PortfolioPage() {
                                 currentPrice={item.current_price}
                                 discount={feeDiscount}
                                 ui={ui}
+                                helpText={ui.helpNet}
                               />
                               {item.summary && (
                                 <div className="col-span-2 md:col-span-4">
@@ -2109,7 +2191,13 @@ export default function PortfolioPage() {
                         <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailShares}</p><p>{item.shares}</p></div>
                         <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailCost}</p><p>{formatMoney(item.cost, item.market)}</p></div>
                         <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailPrice}</p><p>{formatMoney(item.current_price, item.market)}</p></div>
-                        <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailDividend}</p><p>{formatMoney(item.dividend, item.market)}</p></div>
+                        <div>
+                          <p className="text-xs text-[var(--text-secondary)]"><span className="inline-flex items-center gap-1">{ui.detailDividend} <FieldHelp text={ui.helpDividend} /></span></p>
+                          <p>{formatMoney(item.dividend, item.market)}</p>
+                          {ytdEstText(item.id, item.market) && (
+                            <p className="text-[10px] text-[var(--accent)]">{ytdEstText(item.id, item.market)}</p>
+                          )}
+                        </div>
                         <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailTotalCost}</p><p>{formatMoney(item.cost_basis, item.market)}</p></div>
                         <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailMarketValue}</p><p>{formatMoney(item.market_value, item.market)}</p></div>
                         <div className="text-[var(--accent-red)]"><p className="text-xs text-[var(--text-secondary)]">{ui.detailUnrealizedPnl}</p><p>{formatMoney(item.unrealized_pnl, item.market)} ({formatPct(item.unrealized_pnl_pct)})</p></div>
@@ -2122,9 +2210,10 @@ export default function PortfolioPage() {
                           currentPrice={item.current_price}
                           discount={feeDiscount}
                           ui={ui}
+                          helpText={ui.helpNet}
                         />
-                        <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailYield}</p><p>{item.yield_on_cost.toFixed(2)}%</p></div>
-                        <div><p className="text-xs text-[var(--text-secondary)]">{ui.detailRefYield}</p><p>{refYieldText(item.id)}</p></div>
+                        <div><p className="text-xs text-[var(--text-secondary)]"><span className="inline-flex items-center gap-1">{ui.detailYield} <FieldHelp text={ui.helpYield} /></span></p><p>{item.yield_on_cost.toFixed(2)}%</p></div>
+                        <div><p className="text-xs text-[var(--text-secondary)]"><span className="inline-flex items-center gap-1">{ui.detailRefYield} <FieldHelp text={ui.helpRefYield} /></span></p><p>{refYieldText(item.id)}</p></div>
                         <div className="col-span-2 md:col-span-4">
                           <p className="text-xs text-[var(--text-secondary)]">{ui.detailCreatedAt}</p>
                           <p className="text-xs">{(item.created_at || '').replace('T', ' ')}</p>
@@ -2287,6 +2376,66 @@ export default function PortfolioPage() {
   )
 }
 
+// #35：「?」欄位說明浮層（沿用 admin `_components.tsx` Help 風格：portal 掛 body
+// 避免被 overflow-x-auto 裁切；hover/focus 顯示＋click 切換，手機可點開）。
+function FieldHelp({ text }: { text: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  const show = () => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const tipW = 264
+    const left = r.right + 10 + tipW > window.innerWidth ? Math.max(8, r.left - tipW - 10) : r.right + 10
+    setPos({ top: r.top - 2, left })
+    setOpen(true)
+  }
+  const hide = () => setOpen(false)
+
+  return (
+    <>
+      <span
+        ref={ref}
+        role="button"
+        tabIndex={0}
+        aria-label="說明"
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (open) hide()
+          else show()
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            if (open) hide()
+            else show()
+          }
+        }}
+        className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/10 text-[var(--text-secondary)] text-[10px] cursor-help select-none align-middle"
+      >
+        ?
+      </span>
+      {open && pos
+        ? createPortal(
+            <span
+              style={{ position: 'fixed', top: pos.top, left: pos.left, width: 264, maxHeight: 220, overflowY: 'auto' }}
+              className="z-[100] rounded-lg border border-white/10 bg-[var(--bg-primary)] px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)] shadow-xl whitespace-normal"
+            >
+              {text}
+            </span>,
+            document.body,
+          )
+        : null}
+    </>
+  )
+}
+
 // #28：表格可排序欄頭按鈕（升降冪圖示＋三語 aria-label；排序本身由上層 useMemo 純前端處理）。
 function RecordsSortHeader({ label, active, dir, ascLabel, descLabel, onToggle }: {
   label: string
@@ -2311,7 +2460,7 @@ function RecordsSortHeader({ label, active, dir, ascLabel, descLabel, onToggle }
 
 // #27：淨損益並列區（裸損益保留，另列淨損益＋稅費明細三行＋公式註腳＋ETF 判定註明）。
 // 純前端重算：舊紀錄無稅費欄也能由 shares/cost/current_price 還原，不炸版。
-function NetPnlView({ market, symbol, shares, cost, currentPrice, discount, ui }: {
+function NetPnlView({ market, symbol, shares, cost, currentPrice, discount, ui, helpText }: {
   market: Market
   symbol: string
   shares: number
@@ -2319,12 +2468,13 @@ function NetPnlView({ market, symbol, shares, cost, currentPrice, discount, ui }
   currentPrice: number
   discount: number
   ui: { netTitle: string; netBuyFee: string; netSellFee: string; netTax: string; netFormula: string; netEtfNote: string }
+  helpText?: string
 }) {
   const net = computeNetPnL({ market, symbol, shares, cost, currentPrice, discount })
   return (
     <div className="col-span-full rounded-lg bg-[var(--bg-secondary)] border border-white/5 p-3 space-y-1">
       <div className="flex items-baseline justify-between gap-2">
-        <p className="text-xs text-[var(--text-secondary)]">{ui.netTitle}</p>
+        <p className="text-xs text-[var(--text-secondary)]"><span className="inline-flex items-center gap-1">{ui.netTitle}{helpText ? <FieldHelp text={helpText} /> : null}</span></p>
         <p className={`text-sm font-bold ${net.netPnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
           {formatMoney(net.netPnl, market)} <span className="text-xs">{formatPct(net.netPnlPct)}</span>
         </p>

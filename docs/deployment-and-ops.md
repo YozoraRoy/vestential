@@ -70,7 +70,7 @@
 
 ## 3. 定時自動化排程
 
-系統以 GitHub Actions **9 個 workflow**（皆以台灣時間表示）維持行情、健康狀態與社群發布：
+系統以 GitHub Actions **10 個 workflow**（皆以台灣時間表示）維持行情、健康狀態與社群發布：
 
 1. **零股行情同步 (`sync-oddlot.yml`)**：
    - 時間：台灣時間每個工作日 **15:10**（TWSE 盤後零股公布後）。
@@ -97,8 +97,11 @@
    - 觸發：任何 push 至 `main` 分支。
    - 行為：GitHub Runner 建置→zipdeploy 至 Azure App Service，並同步 App Settings（含所有社群 token）。
 9. **節慶社群發布 (`social-festival.yml`)**：
-   - 時間：每日 UTC 00:00（＝台灣 08:00）。
-   - 行為：節日當天觸發 `/api/cron/festival` 全自動發賀圖＋貼文（去重 `festival:{id}:{date}`）；非節日回 skipped。另見 `docs/features-guide.md` §8.2。
+    - 時間：每日 UTC 00:00（＝台灣 08:00）。
+    - 行為：節日當天觸發 `/api/cron/festival` 全自動發賀圖＋貼文（去重 `festival:{id}:{date}`）；非節日回 skipped。另見 `docs/features-guide.md` §8.2。
+10. **持倉現價＋除息快取同步 (`sync-portfolio-prices.yml`)**：
+    - 時間：每個交易日台灣時間 **16:00**（`0 8 * * 1-5` UTC；假日由 API 內 `isTwseTradingDay` 再擋一次）。
+    - 行為：呼叫 `POST /api/portfolio/sync`（`SYNC_TOKEN` 驗證）全掃持倉現價；**順帶更新當年除息快取**（TWSE `TWT48U` 每日 CSV → `twse_dividends` 表，缺檔才抓、同日不重抓；失敗不擋主流程＋告警沿用既有機制）。資料源與 YTD 估算規則見 `docs/features-guide.md` §1.8。
 
 ---
 

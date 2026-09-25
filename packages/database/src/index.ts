@@ -44,6 +44,7 @@ export {
   getLlmUsageReport,
   saveAnalysisJob, updateAnalysisJob, getAnalysisJobById, listAnalysisJobsByUser,
   saveArenaTickJob, updateArenaTickJob, getArenaTickJobById, findRunningArenaTickJob, cleanupArenaTickJobs,
+  upsertTwseDividends, getTwseDividendsByYear, hasTwseDividendsForDate,
 } from './db.js'
 export type { AnalysisRecord, AnalysisJobRow, AnalysisJobInput, AnalysisJobUpdate, AnalysisJobAgentState, AnalysisJobStatus, PortfolioRecord, PortfolioRecordInput, PortfolioRecordUpdate, PortfolioSyncedPricePatch, PortfolioSyncTarget, TradeJournalEntry, TradeJournalInput, TradeJournalDirection, TradeJournalUpdate, HistoricalGift, UserRow, UserIdentityRow, AuthProvider, IdentityInput, QuotaResult, MarketFocusItem, MarketFocusMeta, MarketFocusLogRow, MarketFocusLogInput,
   ArenaSeasonRow, ArenaAgentRow, ArenaHoldingRow, ArenaTradeRow, ArenaSnapshotRow, ArenaAgentInput, ArenaLeaderboardRow,
@@ -52,7 +53,8 @@ export type { AnalysisRecord, AnalysisJobRow, AnalysisJobInput, AnalysisJobUpdat
   AgentSettingRow, UserUsageReportRow,
   MarketFocusSubscriberRow, MarketFocusSubscriberStatus,
   CycleEntrySignalRow, CycleEntryMetaRow,
-  LlmUsageLogInput, LlmUsageAgentReport, LlmUsageReportResult, ArenaTickJobRow, ArenaTickJobInput, ArenaTickJobUpdate } from './db.js'
+  LlmUsageLogInput, LlmUsageAgentReport, LlmUsageReportResult, ArenaTickJobRow, ArenaTickJobInput, ArenaTickJobUpdate,
+  TwseDividendRow, TwseDividendInput } from './db.js'
 export { exportSyncData, mergeExports, applySyncMerge, applySyncImport, SYNC_TABLES } from './sync.js'
 export type { SyncExport, SyncRow, MergedExport, SyncTableName, TaggedRow, RowSource } from './sync.js'
 export type { Database } from 'better-sqlite3'

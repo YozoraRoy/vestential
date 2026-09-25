@@ -82,6 +82,17 @@ export function computePnL(input: PnLInput): PnLResult {
   }
 }
 
+// ─── #35：當年累計股息 YTD 估算 ───────────────────────────────────
+// 實作在 client-safe 的 `./portfolio-dividends`（零 Node/DB 依賴；此處 re-export
+// 供 server 端沿用同一實作；不直接寫在此檔是避免 client 值 import 時把
+// better-sqlite3/mssql 拉進 browser bundle，見該檔選邊註明）。
+export {
+  dividendHoldingStartDate,
+  estimateDividendYtd,
+  type DividendYtdEntry,
+  type DividendYtdEstimate,
+} from './portfolio-dividends'
+
 // ─── #27：含稅費淨損益（不動 computePnL）─────────────────────
 // 單一真相來源在 `./portfolio-net`（client-safe 零 Node/DB 依賴，供試算頁前端純算）。
 // 此處 re-export 使 `lib/portfolio.ts` 亦提供 computeNetPnL（server 端沿用同一實作）。

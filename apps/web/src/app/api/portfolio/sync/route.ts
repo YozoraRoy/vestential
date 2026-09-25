@@ -20,6 +20,7 @@ import {
   type DividendYieldReason,
   type SyncableHolding,
 } from '../../../../lib/portfolio'
+import { ensureTodayDividends } from '../../../../lib/twse-dividends'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -60,10 +61,11 @@ function byId(records: PortfolioRecord[]): Map<number, PortfolioRecord> {
  * 理由：排程與手動共用同一份 best-effort＋寫回邏輯，避免雙份實作漂移；
  * 權限以 authorizeSync（沿用 cycle-entry refresh 慣例）區隔。
  *
-  * 回傳：{ success, scope, scanned, updated, failed[{symbol,reason}], yields{recordId:yield|null}, yieldReasons{recordId:reason}, syncedAt, rateLimited }
- * - 排程重跑冪等：直接蓋 current_price＋price_synced_at，以最後一次同步時間為準，不產生重複列；
- * - dividend（手填股息）全程不碰；殖利率僅回傳參考值（yields），不寫庫；
- * - Yahoo 限流：記 console log＋reportServerError（#24 通道 30 分鐘同 key 去重＝告警節流），其餘持倉照常完成。
+   * 回傳：{ success, scope, scanned, updated, failed[{symbol,reason}], yields{recordId:yield|null}, yieldReasons{recordId:reason}, syncedAt, rateLimited }
+  * - 排程重跑冪等：直接蓋 current_price＋price_synced_at，以最後一次同步時間為準，不產生重複列；
+  * - dividend（手填股息）全程不碰；殖利率僅回傳參考值（yields），不寫庫；
+  * - #35：排程／手動皆順帶更新當年除息快取（ensureTodayDividends，缺檔才抓；回傳 dividends{status,...}）；
+  * - Yahoo 限流：記 console log＋reportServerError（#24 通道 30 分鐘同 key 去重＝告警節流），其餘持倉照常完成。
  */
 export async function POST(req: Request) {
   try {
@@ -124,6 +126,8 @@ export async function POST(req: Request) {
         console.error(`[PortfolioSync/schedule] Yahoo rate limited: scanned=${targets.length} written=${written} failed=${failed.length}`)
         void reportServerError({ route: 'POST /api/portfolio/sync (schedule)', status: 429, error: `Yahoo rate limited during scheduled sync (scanned ${targets.length})` })
       }
+      // #35：排程順帶更新當年除息快取（缺檔才抓；best-effort，不擋現價同步主流程）。
+      const dividends = await ensureTodayDividends(today)
       return NextResponse.json({
         success: true,
         scope: 'schedule',
@@ -134,6 +138,7 @@ export async function POST(req: Request) {
         yieldReasons: {},
         syncedAt: result.syncedAt,
         rateLimited: result.rateLimited,
+        dividends,
       })
     }
 
@@ -186,6 +191,8 @@ export async function POST(req: Request) {
       console.error(`[PortfolioSync/${scope}] Yahoo rate limited: scanned=${holdings.length} written=${written} failed=${failed.length}`)
       void reportServerError({ route: 'POST /api/portfolio/sync', status: 429, error: `Yahoo rate limited during manual sync (scanned ${holdings.length})` })
     }
+    // #35：同步鈕順帶更新當年除息快取（缺檔才抓；best-effort，不擋主流程）。
+    const dividends = await ensureTodayDividends(taipeiTodayStr())
     const res = NextResponse.json({
       success: true,
       scope,
@@ -196,6 +203,7 @@ export async function POST(req: Request) {
       yieldReasons,
       syncedAt: result.syncedAt,
       rateLimited: result.rateLimited,
+      dividends,
     })
     if (createdGuest && guestUid) await applyGuestCookie(res, guestUid)
     return res
