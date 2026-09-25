@@ -88,6 +88,20 @@ status/spec       含 typecheck/lint/build   PASS/FAIL matrix        Closes #N �
 - **dev-loop 收尾（主 agent）**：QA 全 PASS → commit（message 含 `Closes #<N>`）→ `git push origin main`（觸發 deploy.yml）→ 觀測部署 → 生產驗證通過後 `gh issue close <N>`。
 - 途中遇到「待確認」擋路：停下來問使用者，不擅自改範圍。
 
+### QA 分級（PM 判定，主 agent／使用者只能升級不能降級）
+
+簡單功能不必每次都完整 QA。PM 在 P0 規格 body 加一行 `QA-Level: full / quick / skip`＋一句理由；dev-loop 照等級走：
+
+| 等級 | 適用 | P2 | P4 |
+| :--- | :--- | :--- | :--- |
+| `full`（預設） | 一般功能／修 bug | 完整 runtime 驗收（dev server＋matrix） | 照常 |
+| `quick` | 純文案／i18n／單檔小修且有測試覆蓋／設定預設值 | 靜態＋smoke：typecheck＋lint＋diff 核對＋相關單測重跑，不需 dev server | 照常（生產 curl 便宜） |
+| `skip` | docs／註解／不影響 runtime 的檔案 | 跳過（P1 self-check 即放行） | 照常 |
+
+- **紅線**：涉 DB migration／授權／quota／金流／排程邏輯，一律 `full`，PM 不得標 quick／skip。
+- **只能升級**：主 agent 或使用者可把等級往上調（quick→full），不可往下調；有疑慮就升級。
+- `skip` 也要走 P3／P4（deploy 本身驗 build，生產 curl 驗存活）。
+
 ## 重要教訓
 
 - node dev server 用完必須清乾淨。之前曾殘留兩台（3000/3001 各一），新起的 server 因 3000 被佔自動改跑 3001，讓測試誤以為「卡住」。
