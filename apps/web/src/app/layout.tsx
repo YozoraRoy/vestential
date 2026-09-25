@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import Script from 'next/script'
+import { cookies } from 'next/headers'
 import './globals.css'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
@@ -25,6 +26,16 @@ export const viewport: Viewport = {
 // 節慶橫幅跨日快取：必須每請求以 Asia/Taipei 取日判斷，禁止靜態化殘留到隔日。
 export const dynamic = 'force-dynamic'
 
+/** 當日是否有橫幅關閉 cookie（無 cookie／讀取失敗一律回 false，照常顯示不炸）。 */
+async function isFestivalBannerDismissed(dateStr: string): Promise<boolean> {
+  try {
+    const store = await cookies()
+    return store.get(`festival-banner-dismissed:${dateStr}`)?.value === '1'
+  } catch {
+    return false
+  }
+}
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUserFromCookies()
   const isAdmin = user ? await isAdminUser(user) : false
@@ -40,6 +51,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const locale = await getLocale()
   const festival = getCurrentFestival()
   const festivalText = dictionaries[locale].festival.midAutumn
+  // 橫幅關閉閘門：當日 cookie（festival-banner-dismissed:YYYY-MM-DD=1）命中即
+  // server 直出不渲染，關閉後重整零閃爍。註：本 layout 已 force-dynamic，
+  // 直接 await cookies() 即可，無需額外改動（無靜態快取殘留疑慮）。
 
   return (
     <html lang={locale} suppressHydrationWarning>
@@ -62,7 +76,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         )}
         <LanguageProvider>
           <Header initialUser={initialUser} />
-          {festival?.id === 'mid-autumn' && (
+          {festival?.id === 'mid-autumn' && !(await isFestivalBannerDismissed(festival.dateStr)) && (
             <FestivalBanner
               message={pickFestivalMessage(festivalText.messages, festival.dateStr)}
               dismissLabel={festivalText.dismiss}

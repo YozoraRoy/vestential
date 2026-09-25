@@ -3,15 +3,20 @@
 import { useCallback, useEffect, useState } from 'react'
 
 // ─── 節慶全域橫幅（client）─────────────────────────────────────────
-// role=status、可鍵盤關閉（button＋Esc）、sessionStorage 當日關閉、
+// role=status、可鍵盤關閉（button＋Esc）、cookie 當日關閉
+// （festival-banner-dismissed:YYYY-MM-DD=1，Path=/，Max-Age 約 10 天，
+// key 帶日期天然過期，隔日 key 不同即恢復顯示）、
 // prefers-reduced-motion 停動畫、360px 不溢出、深色 tokens＋金綠漸層＋glassmorphism。
+// 棄用說明：舊版曾用 sessionStorage 當日關閉，但 SSR 看不到 sessionStorage，
+// 重整時 server 照印橫幅、client 掛載才藏造成閃爍；故改 cookie 版並由
+// app/layout.tsx 以 cookies() 在 server 直出時閘門。舊 sessionStorage 讀寫已移除，不雙軌。
 // 橫圖：全幅 /festival-mid-autumn.jpg（手機 object-center 裁中，圖高 220→260px），
 // 深色漸層壓字保可讀性；圖檔缺失時 onError 隱藏 img，以底層金綠漸層兜底不斷裂。
 
 interface FestivalBannerProps {
   message: string
   dismissLabel: string
-  /** Asia/Taipei 的 YYYY-MM-DD（sessionStorage 當日關閉 key 用）。 */
+  /** Asia/Taipei 的 YYYY-MM-DD（cookie 當日關閉 key 用）。 */
   dateStr: string
 }
 
@@ -19,20 +24,30 @@ function dismissKey(dateStr: string): string {
   return `festival-banner-dismissed:${dateStr}`
 }
 
+/** cookie 是否已有當日關閉紀錄（缺 cookie／隱私模式一律回 false，照常顯示不炸）。 */
+function hasDismissCookie(key: string): boolean {
+  try {
+    if (typeof document === 'undefined') return false
+    const raw = document.cookie
+    if (!raw) return false
+    return raw.split('; ').some((part) => part === `${key}=1`)
+  } catch {
+    /* cookie 不可用時忽略，橫幅照常顯示 */
+    return false
+  }
+}
+
 export function FestivalBanner({ message, dismissLabel, dateStr }: FestivalBannerProps) {
   const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
-    try {
-      if (sessionStorage.getItem(dismissKey(dateStr)) === '1') setDismissed(true)
-    } catch {
-      /* sessionStorage 不可用時忽略，橫幅照常顯示 */
-    }
+    if (hasDismissCookie(dismissKey(dateStr))) setDismissed(true)
   }, [dateStr])
 
   const dismiss = useCallback(() => {
     try {
-      sessionStorage.setItem(dismissKey(dateStr), '1')
+      // 關閉寫 cookie（Path=/ 全站可見；Max-Age 約 10 天，key 帶日期天然過期）。
+      document.cookie = `${dismissKey(dateStr)}=1; Path=/; Max-Age=864000; SameSite=Lax`
     } catch {
       /* 寫入失敗仍關閉本次顯示 */
     }
