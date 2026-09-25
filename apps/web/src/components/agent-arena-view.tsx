@@ -29,6 +29,12 @@ import type { Dict } from '@/i18n/dictionaries'
 import { MarkdownText } from '@/components/markdown-text'
 import { roundFreshness, taipeiTodayStr } from '@/lib/twse-calendar'
 import { resolveFallbackKind, type ArenaTemplateKind } from '@/lib/arena-fallback'
+import {
+  arenaReturnPct,
+  arenaCashEstimatePct,
+  latestArenaSnapshot,
+  unifiedArenaReturn,
+} from '@/lib/arena-return'
 
 type Division = 'season' | 'open'
 type Tone = 'aggressive' | 'neutral' | 'conservative'
@@ -42,12 +48,28 @@ interface LeaderboardRow {
   tone: string
   status: string
   is_system: number
+  initial_capital: number | null
   equity: number | null
   cash: number | null
   return_pct: number | null
   round_date: string | null
   rounds: number
   joined_at: string | null
+}
+
+/**
+ * 排行榜單列的統一報酬率（Issue #38：與歷程共用同一函式）。
+ * 有最新快照 → (equity - initial) / initial 重算（同 rounding）；
+ * 無快照但有本金＋現金 → 現金公式估算；否則沿用 DB 存值。
+ */
+function leaderboardReturn(r: LeaderboardRow): { pct: number | null; estimated: boolean } {
+  if (r.equity != null && r.initial_capital != null) {
+    return { pct: arenaReturnPct(r.equity, r.initial_capital), estimated: false }
+  }
+  if (r.cash != null && r.initial_capital != null) {
+    return { pct: arenaCashEstimatePct(r.cash, r.initial_capital), estimated: true }
+  }
+  return { pct: r.return_pct, estimated: false }
 }
 
 interface Season {
@@ -278,8 +300,8 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
           tone: seedRow.tone as Tone,
           personality: null,
           strategy_params: null,
-          initial_capital: seedRow.equity ?? 100000,
-          cash: seedRow.cash ?? 100000,
+          initial_capital: seedRow.initial_capital ?? 500000,
+          cash: seedRow.cash ?? seedRow.equity ?? 500000,
           status: seedRow.status,
           last_round_date: seedRow.round_date,
           is_system: seedRow.is_system,
@@ -553,27 +575,50 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
               )}
             </div>
 
-            <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              <div>
-                <dt className="text-xs text-[var(--text-secondary)]">{d.capital}</dt>
-                <dd className="text-[var(--text-primary)] font-medium">{d.currency}{fmt(my.agent.initial_capital)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-[var(--text-secondary)]">{d.strategyLabel}</dt>
-                <dd className="text-[var(--text-primary)]">{strategyName(my.agent.strategy_id)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-[var(--text-secondary)]">{d.toneLabel}</dt>
-                <dd className="text-[var(--text-primary)]">{toneName(my.agent.tone)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-[var(--text-secondary)]">{d.colEquity}</dt>
-                <dd className="text-[var(--text-primary)] font-medium">
-                  {d.currency}
-                  {fmt(my.snapshots[my.snapshots.length - 1]?.equity ?? my.agent.cash)}
-                </dd>
-              </div>
-            </dl>
+            {(() => {
+              const myUnified = unifiedArenaReturn(my.snapshots, my.agent.initial_capital, my.agent.cash)
+              const myLatest = latestArenaSnapshot(my.snapshots ?? [])
+              return (
+                <>
+                  <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm">
+                    <div>
+                      <dt className="text-xs text-[var(--text-secondary)]">{d.capital}</dt>
+                      <dd className="text-[var(--text-primary)] font-medium">{d.currency}{fmt(my.agent.initial_capital)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-secondary)]">{d.strategyLabel}</dt>
+                      <dd className="text-[var(--text-primary)]">{strategyName(my.agent.strategy_id)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-secondary)]">{d.toneLabel}</dt>
+                      <dd className="text-[var(--text-primary)]">{toneName(my.agent.tone)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-secondary)]">{d.colEquity}</dt>
+                      <dd className="text-[var(--text-primary)] font-medium">
+                        {d.currency}
+                        {fmt(myLatest?.equity ?? my.agent.cash)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--text-secondary)]">{d.colReturn}</dt>
+                      <dd
+                        className={`font-medium ${
+                          myUnified.pct >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'
+                        }`}
+                      >
+                        {fmt(myUnified.pct, 2)}%
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                    {myUnified.asOf
+                      ? d.snapshotAsOf.replace('{date}', myUnified.asOf)
+                      : d.cashEstimateNote}
+                  </p>
+                </>
+              )
+            })()}
 
             <div className="flex flex-wrap gap-2 mt-4">
               <button
@@ -1170,7 +1215,15 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
         {(() => {
           const rows = data.leaderboards[tab] ?? []
           if (rows.length === 0) return <p className="text-sm text-[var(--text-secondary)]">{d.emptyLeaderboard}</p>
+          const lbAsOf = rows.reduce<string | null>(
+            (m, r) => (r.round_date && (!m || r.round_date > m) ? r.round_date : m),
+            null,
+          )
           return (
+            <>
+            <p className="mb-2 text-xs text-[var(--text-secondary)]">
+              {lbAsOf ? d.snapshotAsOf.replace('{date}', lbAsOf) : d.cashEstimateNote}
+            </p>
             <div className="overflow-x-auto rounded-xl border border-white/5">
               <table className="w-full text-sm">
                 <thead>
@@ -1180,6 +1233,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                     <th className="px-3 py-2.5 font-medium hidden sm:table-cell">{d.colStrategy}</th>
                     <th className="px-3 py-2.5 font-medium hidden md:table-cell">{d.colTone}</th>
                     <th className="px-3 py-2.5 font-medium">{d.colEquity}</th>
+                    <th className="px-3 py-2.5 font-medium hidden md:table-cell">{d.colCapital}</th>
                     <th className="px-3 py-2.5 font-medium">{d.colReturn}</th>
                     <th className="px-3 py-2.5 font-medium hidden md:table-cell">{d.colRounds}</th>
                     <th className="px-3 py-2.5 font-medium text-right">戰況</th>
@@ -1211,13 +1265,27 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                         {d.currency}
                         {fmt(r.equity)}
                       </td>
-                      <td
-                        className={`px-3 py-2.5 font-medium ${
-                          (r.return_pct ?? 0) >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'
-                        }`}
-                      >
-                        {fmt(r.return_pct, 2)}%
+                      <td className="px-3 py-2.5 text-[var(--text-secondary)] hidden md:table-cell">
+                        {d.currency}
+                        {fmt(r.initial_capital)}
                       </td>
+                      {(() => {
+                        const lr = leaderboardReturn(r)
+                        return (
+                          <td
+                            className={`px-3 py-2.5 font-medium ${
+                              (lr.pct ?? 0) >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'
+                            }`}
+                          >
+                            {lr.pct == null ? '—' : `${fmt(lr.pct, 2)}%`}
+                            {lr.estimated && (
+                              <span className="ml-1 text-[10px] font-normal text-[var(--text-secondary)]">
+                                {d.cashEstimateNote}
+                              </span>
+                            )}
+                          </td>
+                        )
+                      })()}
                       <td className="px-3 py-2.5 text-[var(--text-secondary)] hidden md:table-cell">{r.rounds}</td>
                       <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                         <button
@@ -1234,6 +1302,7 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                 </tbody>
               </table>
             </div>
+            </>
           )
         })()}
       </section>
@@ -1341,49 +1410,66 @@ export function AgentArenaView({ homePath, loginPath }: { homePath: string; logi
                       正在更新最新即時持倉與決策紀錄…
                     </div>
                   )}
-                  {/* 總覽指標卡 */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
-                      <span className="text-xs text-[var(--text-secondary)] block mb-1">目前總權益</span>
-                      <span className="text-sm sm:text-base font-bold font-mono text-[var(--text-primary)]">
-                        {d.currency}
-                        {fmt(
-                          detailData.snapshots?.[0]?.equity ??
-                            detailData.agent.cash + (detailData.holdings?.reduce((s, h) => s + h.shares * h.avg_cost, 0) || 0),
-                        )}
-                      </span>
-                    </div>
-                    <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
-                      <span className="text-xs text-[var(--text-secondary)] block mb-1">累計報酬率</span>
-                      {(() => {
-                        const ret =
-                          detailData.snapshots?.[0]?.return_pct ??
-                          (((detailData.agent.cash - detailData.agent.initial_capital) / detailData.agent.initial_capital) * 100)
-                        return (
-                          <span
-                            className={`text-sm sm:text-base font-bold font-mono ${
-                              ret >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'
-                            }`}
-                          >
-                            {fmt(ret, 2)}%
-                          </span>
-                        )
-                      })()}
-                    </div>
-                    <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
-                      <span className="text-xs text-[var(--text-secondary)] block mb-1">可用現金</span>
-                      <span className="text-sm sm:text-base font-bold font-mono text-[var(--text-primary)]">
-                        {d.currency}
-                        {fmt(detailData.agent.cash)}
-                      </span>
-                    </div>
-                    <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
-                      <span className="text-xs text-[var(--text-secondary)] block mb-1">已運行輪數</span>
-                      <span className="text-sm sm:text-base font-bold font-mono text-[var(--text-primary)]">
-                        {detailData.snapshots?.length || 1} 輪
-                      </span>
-                    </div>
-                  </div>
+                  {/* 總覽指標卡（Issue #38：與排行榜共用 unifiedArenaReturn，最新快照） */}
+                  {(() => {
+                    const detailUnified = unifiedArenaReturn(
+                      detailData.snapshots,
+                      detailData.agent.initial_capital,
+                      detailData.agent.cash,
+                    )
+                    const detailLatest = latestArenaSnapshot(detailData.snapshots ?? [])
+                    return (
+                      <>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                          <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
+                            <span className="text-xs text-[var(--text-secondary)] block mb-1">目前總權益</span>
+                            <span className="text-sm sm:text-base font-bold font-mono text-[var(--text-primary)]">
+                              {d.currency}
+                              {fmt(
+                                detailLatest?.equity ??
+                                  detailData.agent.cash + (detailData.holdings?.reduce((s, h) => s + h.shares * h.avg_cost, 0) || 0),
+                              )}
+                            </span>
+                          </div>
+                          <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
+                            <span className="text-xs text-[var(--text-secondary)] block mb-1">{d.colCapital}</span>
+                            <span className="text-sm sm:text-base font-bold font-mono text-[var(--text-primary)]">
+                              {d.currency}
+                              {fmt(detailData.agent.initial_capital)}
+                            </span>
+                          </div>
+                          <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
+                            <span className="text-xs text-[var(--text-secondary)] block mb-1">累計報酬率</span>
+                            <span
+                              className={`text-sm sm:text-base font-bold font-mono ${
+                                detailUnified.pct >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'
+                              }`}
+                            >
+                              {fmt(detailUnified.pct, 2)}%
+                            </span>
+                          </div>
+                          <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
+                            <span className="text-xs text-[var(--text-secondary)] block mb-1">可用現金</span>
+                            <span className="text-sm sm:text-base font-bold font-mono text-[var(--text-primary)]">
+                              {d.currency}
+                              {fmt(detailData.agent.cash)}
+                            </span>
+                          </div>
+                          <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-white/5">
+                            <span className="text-xs text-[var(--text-secondary)] block mb-1">已運行輪數</span>
+                            <span className="text-sm sm:text-base font-bold font-mono text-[var(--text-primary)]">
+                              {detailData.snapshots?.length || 1} 輪
+                            </span>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                          {detailUnified.asOf
+                            ? d.snapshotAsOf.replace('{date}', detailUnified.asOf)
+                            : d.cashEstimateNote}
+                        </p>
+                      </>
+                    )
+                  })()}
 
                   {/* 導航 Tabs */}
                   <div className="flex border-b border-white/10 gap-4 text-sm font-medium">

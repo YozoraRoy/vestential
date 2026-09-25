@@ -32,7 +32,23 @@ export async function POST(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const dateParam = searchParams.get('date')
+  const hasExplicitDate = !!dateParam?.trim()
+  const force = searchParams.get('force') === '1' || searchParams.get('force') === 'true'
   const todayTw = new Date(`${twDateStr(new Date())}T00:00:00`)
+
+  // Issue #38：非交易日直接回 skipped 且不建 job（避免休市轉前一日照跑產出垃圾 round）。
+  // 破例：force=1 或顯式 date（手動回填／重跑）；scheduler 本就有交易日守衛故不動；
+  // GH workflow 週一～五照打，假日會命中此閘門（workflow 已改為無 date 呼叫＋吃 skipped）。
+  if (!hasExplicitDate && !force && !isTaiwanMarketTradingDay(todayTw)) {
+    const todayStr = twDateStr(new Date())
+    const lastTradingDay = twDateStr(getLastMarketTradingDay(todayTw))
+    console.log(`[Arena/Tick] skipped: ${todayStr} 非交易日，不建 job（force=1 或顯式 date 可破；上個交易日 ${lastTradingDay}）`)
+    return NextResponse.json(
+      { success: true, skipped: true, roundDate: todayStr, reason: 'non-trading-day', lastTradingDay },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
+  }
+
   const roundDate = dateParam?.trim() || (isTaiwanMarketTradingDay(todayTw)
     ? twDateStr(todayTw)
     : twDateStr(getLastMarketTradingDay(todayTw)))
@@ -41,7 +57,6 @@ export async function POST(req: NextRequest) {
   const phase: 'premarket' | 'slot' | 'close' | undefined = phaseRaw === 'premarket' || phaseRaw === 'slot' || phaseRaw === 'close' ? phaseRaw : undefined
   const slotParam = searchParams.get('slot')
   const slot = phase === 'slot' && slotParam ? Number(slotParam) : undefined
-  const force = searchParams.get('force') === '1' || searchParams.get('force') === 'true'
 
   try {
     const started = await startArenaTickJob(roundDate, { phase, slot, force })

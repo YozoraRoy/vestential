@@ -31,21 +31,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compute Taiwan trading date (Asia/Taipei)
-        id: date
-        run: |
-          TODAY=$(TZ='Asia/Taipei' date +%Y-%m-%d)
-          DOW=$(TZ='Asia/Taipei' date +%u)
-          if [ "$DOW" = "6" ]; then
-            TARGET=$(TZ='Asia/Taipei' date -d '-1 day' +%Y-%m-%d)
-          elif [ "$DOW" = "7" ]; then
-            TARGET=$(TZ='Asia/Taipei' date -d '-2 day' +%Y-%m-%d)
-          else
-            TARGET=$TODAY
-          fi
-          echo "target=$TARGET"
-          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
-
       - name: Determine phase params
         id: phase
         run: |
@@ -61,8 +46,10 @@ jobs:
       - name: Trigger arena tick on Azure (async, returns jobId)
         id: trigger
         run: |
-          TARGET=${{ steps.date.outputs.target }}
-          QUERY="date=${TARGET}"
+          # Issue #38：不帶 date（由 tick route 以台灣當日解析）。
+          # 非交易日 route 回 skipped（不建 job），此處視為成功退出；
+          # 需手動回填時用 workflow_dispatch phase + force=true（force=1 可破閘門）。
+          QUERY=""
           PHASE="${{ steps.phase.outputs.phase }}"
           FORCE="${{ steps.phase.outputs.force }}"
           # 盤中 cron：依觸發的 cron slot 決定 (無 dispatch phase 時)
@@ -79,17 +66,19 @@ jobs:
           fi
           if [ -n "$PHASE" ]; then
             case "$PHASE" in
-              slot0) QUERY="${QUERY}&phase=slot&slot=0" ;;
-              slot1) QUERY="${QUERY}&phase=slot&slot=1" ;;
-              slot2) QUERY="${QUERY}&phase=slot&slot=2" ;;
-              slot3) QUERY="${QUERY}&phase=slot&slot=3" ;;
-              slot4) QUERY="${QUERY}&phase=slot&slot=4" ;;
-              slot5) QUERY="${QUERY}&phase=slot&slot=5" ;;
-              premarket|close) QUERY="${QUERY}&phase=${PHASE}" ;;
-              full|"") : ;;
+              slot0) QUERY="phase=slot&slot=0" ;;
+              slot1) QUERY="phase=slot&slot=1" ;;
+              slot2) QUERY="phase=slot&slot=2" ;;
+              slot3) QUERY="phase=slot&slot=3" ;;
+              slot4) QUERY="phase=slot&slot=4" ;;
+              slot5) QUERY="phase=slot&slot=5" ;;
+              premarket|close) QUERY="phase=${PHASE}" ;;
+              full|"") QUERY="" ;;
             esac
           fi
-          if [ -n "$FORCE" ]; then QUERY="${QUERY}&force=${FORCE}"; fi
+          if [ -n "$FORCE" ]; then
+            if [ -n "$QUERY" ]; then QUERY="${QUERY}&force=${FORCE}"; else QUERY="force=${FORCE}"; fi
+          fi
           echo "Ticking: $QUERY"
           CODE=$(curl -s -o /tmp/arena_tick.json -w "%{http_code}" \
             --max-time 90 \
@@ -104,6 +93,11 @@ jobs:
             echo "::error::arena tick POST failed (HTTP $CODE)"
             exit 1
           fi
+          SKIPPED=$(jq -r '.skipped // false' /tmp/arena_tick.json)
+          if [ "$SKIPPED" = "true" ]; then
+            echo "::notice::arena tick skipped (non-trading day): $(jq -c '{roundDate, reason, lastTradingDay}' /tmp/arena_tick.json)"
+            exit 0
+          fi
           JOB_ID=$(jq -r '.jobId // empty' /tmp/arena_tick.json)
           if [ -z "$JOB_ID" ]; then
             echo "::error::arena tick POST did not return jobId: $(cat /tmp/arena_tick.json)"
@@ -113,6 +107,7 @@ jobs:
           echo "jobId=$JOB_ID" >> "$GITHUB_OUTPUT"
 
       - name: Poll arena tick status (10s interval, up to 150)
+        if: steps.trigger.outputs.jobId != ''
         run: |
           JOB_ID="${{ steps.trigger.outputs.jobId }}"
           LAST=""

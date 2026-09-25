@@ -1,0 +1,12 @@
+-- 027_arena_topup_500k.sql
+-- Issue #38 追加工序：舊制 agent 補錢（現金＋本金各加 300000，200000 → 500000 基準）。
+-- 使用者拍板：現金＋本金各加 30 萬；只動 arena_agents，不碰持倉／快照／交易表。
+-- 冪等守衛：WHERE initial_capital = 200000 —— 補過後 initial_capital = 500000，
+--   重跑命中 0 筆；新制 500000 agent 不受影響（WHERE 直接排除）。
+-- 語法 SQLite＋T-SQL 雙相容（單一 UPDATE，無 DDL、無 SQLite 專用函式；
+--   Azure 端由 migrateAzure 批次執行＋migrations 表追蹤，SQLite 端由 migrateSqlite
+--   以分號拆句執行，兩端重跑皆冪等）。
+-- status 拼寫經 schema 確認（db.ts arena_agents status DEFAULT 'active'，
+--   取值 'active' | 'paused' | 'reset'）＋本地庫實查（5 位舊制全為 active，
+--   無非 active 舊制），故 WHERE 限 status = 'active'，非 active 不擅自擴範圍。
+UPDATE arena_agents SET cash = cash + 300000, initial_capital = initial_capital + 300000 WHERE initial_capital = 200000 AND status = 'active';

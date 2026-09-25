@@ -4967,6 +4967,9 @@ export async function upsertArenaSnapshot(snapshot: {
   }
 }
 
+// Issue #38 選邊：維持 ORDER BY round_date ASC（時間序）。
+// 取「最新快照」一律用最後一筆（見 @stock/ai-engine arena/returns.ts latestArenaSnapshot）：
+// admin `/api/admin/arena/round` 的 equitySeries 依賴 ASC 時間序，改排序會連動影響，故不動 DB。
 export function getArenaSnapshots(agentId: number): Promise<ArenaSnapshotRow[]> {
   return dbQueryAll<ArenaSnapshotRow>('SELECT * FROM arena_equity_snapshots WHERE agent_id = @agentId ORDER BY round_date', { agentId })
 }
@@ -4980,6 +4983,7 @@ export interface ArenaLeaderboardRow {
   tone: string
   status: string
   is_system: number
+  initial_capital: number | null
   equity: number | null
   cash: number | null
   return_pct: number | null
@@ -5001,6 +5005,7 @@ export function getArenaLeaderboard(seasonId: number, division: 'season' | 'open
         a.tone,
         a.status,
         a.is_system,
+        a.initial_capital AS initial_capital,
         s.equity,
         s.cash,
         s.return_pct,

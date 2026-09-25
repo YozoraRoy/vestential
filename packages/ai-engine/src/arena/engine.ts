@@ -14,6 +14,7 @@ import {
 import { buildSlotPrices } from './intraday.js'
 import type { ArenaDayOhlc, ArenaPrice, ArenaUniverseItem } from './types.js'
 import { arenaSlotTimes } from './types.js'
+import { arenaReturnPct } from './returns.js'
 import { ARENA_TONE_DESCRIPTIONS, type ArenaDecisionContext } from './strategist.js'
 
 export interface RunArenaRoundParams {
@@ -431,7 +432,7 @@ export async function runArenaRound(params: RunArenaRoundParams): Promise<RunAre
         roundDate,
         cash: st.cash,
         equity,
-        returnPct: Math.round(((equity - st.initialCapital) / st.initialCapital) * 10000) / 100,
+        returnPct: arenaReturnPct(equity, st.initialCapital),
       })
     }
   }
@@ -443,7 +444,7 @@ export async function runArenaRound(params: RunArenaRoundParams): Promise<RunAre
     for (const agent of agents) {
       const st = states.get(agent.id)!
       const equity = computeArenaEquity(st.cash, st.holdings, closes)
-      const returnPct = Math.round(((equity - st.initialCapital) / st.initialCapital) * 10000) / 100
+      const returnPct = arenaReturnPct(equity, st.initialCapital)
       const res = await buildPostCloseReflection({
         agentName: agent.name,
         roundDate,
