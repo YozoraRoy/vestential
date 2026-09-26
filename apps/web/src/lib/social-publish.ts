@@ -288,7 +288,7 @@ async function publishFacebook(
 
 /** 用 FB system user token 換出粉專專用的 page access token（自動配對 FB_PAGE_ID）。 */
 async function resolveFbPageToken(systemUserToken: string, pageId: string): Promise<string> {
-  const res = await fetch(
+  const res = await graphFetch(
     `${FB_API}/me/accounts?fields=id,access_token&access_token=${encodeURIComponent(systemUserToken)}`,
   )
   const json = await res.json()
@@ -304,9 +304,14 @@ async function resolveFbPageToken(systemUserToken: string, pageId: string): Prom
 
 // ─── 輔助 ─────────────────────────────────────────────────────────
 
+/** Meta Graph API 專用 fetch：30 秒超時（2026-09-26 job 卡 running 教訓：無超時的 Meta 呼叫會拖死整條 job） */
+async function graphFetch(url: string, init?: RequestInit): Promise<Response> {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(30_000) })
+}
+
 /** 解析 IG token 對應的 user id（/me），作為 user_id 未設定時的 fallback。 */
 export async function resolveIgUserId(accessToken: string): Promise<string> {
-  const res = await fetch(`${IG_API}/me?fields=id&access_token=${encodeURIComponent(accessToken)}`, {
+  const res = await graphFetch(`${IG_API}/me?fields=id&access_token=${encodeURIComponent(accessToken)}`, {
     headers: { 'Content-Type': 'application/json' },
   })
   const json = await res.json()
@@ -330,7 +335,7 @@ export async function waitForContainer(
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     await sleep(3000)
-    const res = await fetch(
+    const res = await graphFetch(
       `${base}/${containerId}?fields=${fields}&access_token=${encodeURIComponent(accessToken)}`,
     )
     const json = await res.json()
@@ -348,7 +353,7 @@ export async function waitForContainer(
 
 /** 簡易 Graph POST（回傳 JSON body）。 */
 export async function graphPost(url: string, body: Record<string, string>): Promise<any> {
-  const res = await fetch(url, {
+  const res = await graphFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

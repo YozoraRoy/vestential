@@ -38,6 +38,8 @@ export interface MarketFocusJob {
   items?: { title: string; source: string | null; reason: string | null }[] | null
   /** 僅 refresh/publish：社群小編發布結果。 */
   socialResults?: MarketFocusSocialResult[] | null
+  /** 目前階段（fetch→filter→summarize→save→backfill→email→social），供 status 輪詢與超時定位 */
+  stage?: string | null
 }
 
 const JOBS = new Map<string, MarketFocusJob>()
@@ -75,7 +77,19 @@ function trimJobs(): void {
 export function startMarketFocusJob(options: { kind: MarketFocusJobKind; alsoSocial?: boolean; skipSocial?: boolean }): MarketFocusJob {
   if (activeJobId) {
     const running = JOBS.get(activeJobId)
-    if (running?.status === 'running') return running
+    if (running?.status === 'running') {
+      // 2026-09-26 教訓：卡死的 job 會擋住後續所有觸發。若已超過總逾時，強制標失敗並開新 job，不再無限等待。
+      const ageMs = Date.now() - Date.parse(running.startedAt)
+      if (Number.isFinite(ageMs) && ageMs > JOB_TIMEOUT_MS) {
+        running.status = 'failed'
+        running.error = `被新觸發接管：前一個 job 卡在 stage=${running.stage ?? '?'} 超過 ${Math.round(JOB_TIMEOUT_MS / 60000)} 分鐘。`
+        running.finishedAt = new Date().toISOString()
+        console.error(`[MarketFocusJob] takeover stale job ${running.id} (stage=${running.stage ?? '?'})`)
+        activeJobId = null
+      } else {
+        return running
+      }
+    }
   }
 
   const kind = options.kind
@@ -99,13 +113,23 @@ export function startMarketFocusJob(options: { kind: MarketFocusJobKind; alsoSoc
   activeJobId = job.id
 
   // 總逾時看門狗：超過 JOB_TIMEOUT_MS 尚未完成即自動失敗（避免 LLM 退避累積卡死）
+  // 2026-09-26 教訓：開槍時一併記錄當下 stage，下次直接知道卡在哪一段。
   const watchdog = setTimeout(() => {
     const current = JOBS.get(job.id)
     if (current?.status === 'running') {
       current.status = 'failed'
-      current.error = `Job 執行逾時（超過 ${Math.round(JOB_TIMEOUT_MS / 60000)} 分鐘），已中止。`
+      current.error = `Job 執行逾時（超過 ${Math.round(JOB_TIMEOUT_MS / 60000)} 分鐘），已中止。（卡在 stage=${current.stage ?? 'unknown'}）`
       current.finishedAt = new Date().toISOString()
       if (activeJobId === job.id) activeJobId = null
+      console.error(`[MarketFocusJob] watchdog killed ${job.id} at stage=${current.stage ?? 'unknown'}`)
+      void logMarketFocusEvent({
+        source: 'job',
+        level: 'error',
+        code: 'JOB_TIMEOUT',
+        jobId: job.id,
+        editionKey: current.editionKey ?? null,
+        message: `market-focus job 超時（卡在 stage=${current.stage ?? 'unknown'}）`,
+      }).catch(() => {})
     }
   }, JOB_TIMEOUT_MS)
 
@@ -118,6 +142,12 @@ export function getMarketFocusJob(id: string): MarketFocusJob | null {
   return JOBS.get(id) ?? null
 }
 
+/** 更新 job 階段並寫 log（Azure log 沒這行＝還沒走到這裡，超時定位就靠它） */
+function setStage(job: MarketFocusJob, stage: NonNullable<MarketFocusJob['stage']>): void {
+  job.stage = stage
+  console.info(`[MarketFocusJob] ${job.id} stage -> ${stage}`)
+}
+
 async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<void> {
   try {
     if (job.kind === 'dry') {
@@ -126,6 +156,7 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
       job.summary = summary
       job.count = items.length
     } else {
+      setStage(job, 'pipeline')
       const { enriched: items, summary, hasNewEdition, newCount } = await refreshMarketFocusDetailed()
       revalidateTag('market-focus')
       job.count = items.length
@@ -138,6 +169,7 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
       // 回填先前 LLM 失敗留下的空摘要／空遴選原因（與是否產新版次無關，每次收尾都治療）
       // Issue #32：兩段回填之間錯峰（與主鏈共用同一 OTPM 池）
       if (job.kind === 'refresh' || job.kind === 'publish') {
+        setStage(job, 'backfill')
         const filledSummaries = await backfillMissingSummaries()
         if (filledSummaries > 0) await sleep(getChainPaceMs())
         const filled = filledSummaries + (await backfillMissingReasons())
@@ -151,6 +183,7 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
         console.log(`[MarketFocusJob] 無新重大新聞通過門檻（新增: ${newCount} 則），保留上一版總覽，略過 Email 與社群發布。`)
       } else {
         // Email：回退偵測同原流程
+        setStage(job, 'email')
         try {
           if (meta?.summary && isSummaryFallback(meta.summary)) {
             // 把 DB 日誌中最新一筆總覽失敗的細節帶進告警信，取代過去固定的無資訊訊息。
@@ -183,6 +216,7 @@ async function runJob(job: MarketFocusJob, watchdog: NodeJS.Timeout): Promise<vo
 
         // 社群：refresh 必發；publish 依勾選；skipSocial=true 時跳過
         if (!job.skipSocial && (job.kind === 'refresh' || job.alsoSocial)) {
+          setStage(job, 'social')
           try {
             const social = await triggerSocialPublish()
             job.socialResults = social?.results ?? []

@@ -47,14 +47,23 @@ export async function sendMailCore(subject: string, text: string, html?: string,
       port: cfg.port,
       secure: cfg.secure,
       auth: cfg.auth,
+      // 2026-09-26 job 卡 running 教訓：Gmail SMTP 卡住時預設等超久，單封信就能拖垮整條 job
+      connectionTimeout: 30_000,
+      greetingTimeout: 30_000,
+      socketTimeout: 60_000,
     })
-    await transporter.sendMail({
+    const sendPromise = transporter.sendMail({
       from: `Vestential <${cfg.from}>`,
       to: toOverride ?? cfg.to,
       subject,
       text,
       html,
     })
+    // 雙保險：整封信 90 秒還沒完就放棄（best-effort 通知不該卡死主流程）
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('email send timeout (90s)')), 90_000),
+    )
+    await Promise.race([sendPromise, timeoutPromise])
     console.log(`[Notify] email sent: ${subject} -> ${toOverride ?? cfg.to}`)
     return true
   } catch (e) {
@@ -343,18 +352,24 @@ export async function sendMarketFocusSummary(forcedEditionKey?: string, force = 
   )
 
   const subscribers = await listActiveMarketFocusSubscribers().catch(() => [])
-  let sentTo = 0
-  for (const sub of subscribers) {
-    const to = sub.email
-    if (!to || !to.includes('@')) continue
-    const ok = await sendMailCore(
-      subject,
-      buildSummaryText(meta.summary, items, meta.generated_at, { email: sub.email, token: sub.token }),
-      buildSummaryHtml(meta.summary, items, meta.generated_at, { email: sub.email, token: sub.token }),
-      to,
-    )
-    if (ok) sentTo += 1
-  }
+  // 併發寄送（一人卡住不拖全家；單封已有 90 秒上限）
+  // 注意：map 回呼內 property narrowing 會失效，先把值 hoist 成 const 再用
+  const summaryText = meta.summary
+  const generatedAt = meta.generated_at
+  const mailTasks = subscribers
+    .map((sub) => {
+      const to = sub.email
+      if (!to || !to.includes('@')) return null
+      return sendMailCore(
+        subject,
+        buildSummaryText(summaryText, items, generatedAt, { email: to, token: sub.token }),
+        buildSummaryHtml(summaryText, items, generatedAt, { email: to, token: sub.token }),
+        to,
+      )
+    })
+    .filter((t): t is Promise<boolean> => t !== null)
+  const results = await Promise.allSettled(mailTasks)
+  const sentTo = results.filter((r) => r.status === 'fulfilled' && r.value).length
   if (subscribers.length > 0) {
     console.log(`[Notify] 電子報已寄出 ${sentTo}/${subscribers.length} 位訂閱者`)
   }

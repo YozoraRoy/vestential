@@ -107,6 +107,8 @@ async function fetchCnyesNews(): Promise<NewsCandidate[]> {
       const res = await fetch(`https://news.cnyes.com/news/cat/${cat}`, {
         headers: { 'user-agent': USER_AGENT },
         cache: 'no-store',
+        // 與 UDN/Yahoo 對齊：無超時會在對方 TCP hang 時卡死整條 pipeline（2026-09-26 job 卡 running 滿 25 分鐘）
+        signal: AbortSignal.timeout(10_000),
       })
       if (!res.ok) {
         console.warn(`[MarketFocus] cnyes cat=${cat} failed (${res.status})`)

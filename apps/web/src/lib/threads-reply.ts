@@ -59,7 +59,7 @@ export async function resolveThreadsPost(permalinkOrShortcode: string): Promise<
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const res = await fetch(parsed.permalink, { headers: { 'User-Agent': UA } })
+      const res = await fetch(parsed.permalink, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(15_000) })
       if (res.ok) {
         const html = await res.text()
         const mediaId = html.match(/"post_id":"(\d+)"/)?.[1] ?? null
@@ -102,6 +102,7 @@ async function findOwnThreadByShortcode(shortcode: string): Promise<ThreadsPostI
   try {
     const res = await fetch(
       `${THREADS_API}/${userId}/threads?fields=id,text,permalink,username&limit=50&access_token=${encodeURIComponent(token)}`,
+      { signal: AbortSignal.timeout(30_000) },
     )
     const json = await res.json()
     const page = (json?.data ?? []) as any[]
@@ -123,7 +124,7 @@ async function findOwnThreadByShortcode(shortcode: string): Promise<ThreadsPostI
 export async function deleteThreadsMedia(mediaId: string): Promise<void> {
   const token = process.env.THREADS_ACCESS_TOKEN
   if (!token) throw new Error('THREADS_ACCESS_TOKEN 未設定')
-  const res = await fetch(`${THREADS_API}/${mediaId}?access_token=${encodeURIComponent(token)}`, { method: 'DELETE' })
+  const res = await fetch(`${THREADS_API}/${mediaId}?access_token=${encodeURIComponent(token)}`, { method: 'DELETE', signal: AbortSignal.timeout(30_000) })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`Threads 刪除失敗（HTTP ${res.status}）：${body.slice(0, 200)}`)
